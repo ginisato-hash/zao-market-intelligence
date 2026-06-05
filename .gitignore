@@ -41,6 +41,21 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Zao Market Intelligence local data policy
+.data/*
+!.data/history/
+!.data/history/zao_signals_*.csv
+.data/history/.backup/
+.data/debug/
+.data/screenshots/
+.data/reports/
+.data/ai-context/
+.data/run-state/
+.logs/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 

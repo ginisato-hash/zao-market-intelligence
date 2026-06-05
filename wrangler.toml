@@ -1,0 +1,11 @@
+name = "zao-market-intelligence"
+compatibility_date = "2026-05-28"
+
+[[d1_databases]]
+binding = "ZAO_MARKET_DB"
+database_name = "zao_market_intelligence"
+database_id = "TODO_REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "ZAO_MARKET_SCREENSHOTS"
+bucket_name = "zao-market-screenshots"
