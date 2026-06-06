@@ -157,6 +157,7 @@
     "inspect:market-update:latest": "node --import tsx src/scripts/inspectLatestMarketUpdate.ts",
     "report:dp-safe-signals": "node --import tsx src/scripts/buildDpSafeMarketSignalReport.ts",
     "report:booking-price-pressure-usability": "node --import tsx src/scripts/buildBookingPricePressureUsabilityReport.ts",
+    "proposal:booking-preview-append": "node --import tsx src/scripts/buildBookingPreviewAppendProposal.ts",
     "report:jalan-price-pressure-usability": "node --import tsx src/scripts/buildJalanPricePressureUsabilityReport.ts",
     "proposal:auto-runner-architecture": "node --import tsx src/scripts/buildAutoRunnerArchitectureProposal.ts",
     "proposal:auto-runner-migration": "node --import tsx src/scripts/buildAutoRunnerMigrationProposal.ts",
