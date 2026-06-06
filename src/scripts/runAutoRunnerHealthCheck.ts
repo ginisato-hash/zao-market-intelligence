@@ -113,12 +113,12 @@ function run(): AutoRunnerHealthCheckOutput {
   const mutationCheck = buildMutationCheck(currentStateBefore, currentStateAfter);
   const safetyConfirmation = buildSafetyConfirmation();
   const stateCountsMatchExpected =
-    currentStateBefore.current_state_summary.history_rows === 210 &&
-    currentStateBefore.current_state_summary.db_rows === 210 &&
-    currentStateBefore.current_state_summary.ai_context_rows === 210 &&
-    currentStateAfter.current_state_summary.history_rows === 210 &&
-    currentStateAfter.current_state_summary.db_rows === 210 &&
-    currentStateAfter.current_state_summary.ai_context_rows === 210;
+    currentStateBefore.current_state_summary.history_rows === 219 &&
+    currentStateBefore.current_state_summary.db_rows === 219 &&
+    currentStateBefore.current_state_summary.ai_context_rows === 219 &&
+    currentStateAfter.current_state_summary.history_rows === 219 &&
+    currentStateAfter.current_state_summary.db_rows === 219 &&
+    currentStateAfter.current_state_summary.ai_context_rows === 219;
   const decision = decideAutoRunnerHealthCheck({
     stateCountsMatchExpected,
     gates: gateEvaluation,

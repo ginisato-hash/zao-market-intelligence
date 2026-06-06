@@ -49,8 +49,8 @@ describe("AUTO-RUNNER07E - state and gates", () => {
       aiContextRows: summarizeAiContextRows(resolve(__dirname, "../.data/ai-context/latest_market_snapshot.json"))
     });
     expect(current.history_rows).toBe(219);
-    expect(current.db_rows).toBe(210);
-    expect(current.ai_context_rows).toBe(210);
+    expect(current.db_rows).toBe(219);
+    expect(current.ai_context_rows).toBe(219);
     expect(current.booking.rows).toBe(55);
     expect(current.booking.directional).toBe(51);
     expect(current.booking.excluded).toBe(4);
