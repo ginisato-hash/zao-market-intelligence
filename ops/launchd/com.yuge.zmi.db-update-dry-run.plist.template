@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTO-RUNNER07J - inert launchd template for the dry-run db-update planner.
+
+  This file is a TEMPLATE ONLY. It is intentionally NOT installed.
+  It lives inside the repo at ops/launchd/ and must NOT be copied into
+  ~/Library/LaunchAgents/ or loaded with launchctl during this phase.
+
+  When installed in a later, explicitly-approved phase (AUTO-RUNNER07K) it
+  runs only `npm run auto-runner:db-update`, the planner-only stub. With all
+  gates disabled by default it does not collect, does not sync the DB, does not
+  refresh AI context, and produces no pricing/PMS output. It runs at 08:45 JST,
+  after the 08:30 health-check schedule (com.yuge.zmi.health-check).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.db-update-dry-run</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; npm run auto-runner:db-update</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/launchd-db-update-dry-run.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/launchd-db-update-dry-run.err.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>8</integer>
+		<key>Minute</key>
+		<integer>45</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>
