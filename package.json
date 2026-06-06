@@ -142,6 +142,7 @@
     "proposal:auto-runner-db-update-integration": "node --import tsx src/scripts/buildAutoRunnerDbUpdateIntegrationProposal.ts",
     "proposal:auto-runner-fresh-db-sync": "node --import tsx src/scripts/buildAutoRunnerFreshDbSyncProposal.ts",
     "proposal:auto-runner-launchd-schedule": "node --import tsx src/scripts/buildAutoRunnerLaunchdScheduleProposal.ts",
+    "proposal:auto-runner-launchd-health-check": "node --import tsx src/scripts/buildAutoRunnerLaunchdHealthCheckProposal.ts",
     "proposal:auto-runner-manual-workflow": "node --import tsx src/scripts/buildAutoRunnerManualWorkflowProposal.ts",
     "proposal:auto-runner-always-on-mac-handoff": "node --import tsx src/scripts/buildAutoRunnerAlwaysOnMacHandoffPlan.ts",
     "proposal:auto-runner-git-transfer-policy": "node --import tsx src/scripts/buildAutoRunnerGitTransferPolicy.ts",

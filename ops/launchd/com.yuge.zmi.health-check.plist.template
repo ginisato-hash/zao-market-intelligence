@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTO-RUNNER07G - inert launchd template for the dry-run health check.
+
+  This file is a TEMPLATE ONLY. It is intentionally NOT installed.
+  It lives inside the repo at ops/launchd/ and must NOT be copied into
+  ~/Library/LaunchAgents/ or loaded with launchctl during this phase.
+
+  When installed in a later, explicitly-approved phase (AUTO-RUNNER07H) it
+  runs only `npm run auto-runner:health-check`, which is dry-run / fail-closed:
+  no collectors, no DB sync, no AI context refresh, no pricing/PMS output.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.health-check</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; npm run auto-runner:health-check</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/launchd-health-check.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/launchd-health-check.err.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>8</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>
