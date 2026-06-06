@@ -162,6 +162,7 @@
     "proposal:auto-runner-migration": "node --import tsx src/scripts/buildAutoRunnerMigrationProposal.ts",
     "auto-runner:db-update": "node --import tsx src/scripts/runAutoRunnerDbUpdateStub.ts",
     "auto-runner:health-check": "node --import tsx src/scripts/runAutoRunnerHealthCheck.ts",
+    "auto-runner:booking-preview": "node --import tsx src/scripts/runAutoRunnerBookingPreview.ts",
     "db:migrate": "node --import tsx src/db/migrate.ts",
     "db:list:properties": "node --import tsx src/scripts/listProperties.ts",
     "db:schema:print": "node --import tsx src/db/schema.ts",
