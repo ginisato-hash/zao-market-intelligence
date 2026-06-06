@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildCurrentStateSnapshot,
   buildMutationCheck,
@@ -21,7 +22,7 @@ const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/runAutoRun
 const PACKAGE_JSON = readFileSync(resolve(__dirname, "../package.json"), "utf8");
 
 const sourceStub = JSON.parse(
-  readFileSync(resolve(__dirname, "../.data/reports/automation/auto_runner_db_update_stub_20260605_234414.json"), "utf8")
+  readFileSync(resolveReportFixture(".data/reports/automation/auto_runner_db_update_stub_20260605_234414.json"), "utf8")
 ) as AutoRunnerDbUpdateStubOutput;
 
 function currentSnapshot(): CurrentStateSnapshot {

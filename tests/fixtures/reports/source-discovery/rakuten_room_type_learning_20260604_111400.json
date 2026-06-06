@@ -1,0 +1,1084 @@
+{
+  "run_id": "rakuten_room_type_learning_20260604_111400",
+  "generated_at_jst": "2026-06-04T11:14:01+09:00",
+  "decision": "rakuten_room_type_learning_basis_caution",
+  "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+  "hotel_context": {
+    "canonical_property_name": "名湯リゾート ルーセント",
+    "rakuten_hotel_no": "39565",
+    "hotel_name": "蔵王温泉　名湯リゾート　ルーセントタカミヤ",
+    "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+    "source_page_type": "plan_list",
+    "plan_list_context_detected": true,
+    "plan_list_signals": [
+      "URL path is /hotelinfo/plan/{hotelNo}",
+      "visible text contains 宿泊プラン一覧",
+      "visible text contains 合計料金",
+      "visible text contains 1部屋あたりの税込金額",
+      "plan-list search context has f_camp_id empty"
+    ],
+    "room_list_link": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+    "room_list_link_text": "部屋一覧"
+  },
+  "parsed_links": [
+    {
+      "text": "ご利用ガイド",
+      "href": "https://travel.rakuten.co.jp/howto/?l-id=trv_header_trvlink_howto",
+      "absolute_url": "https://travel.rakuten.co.jp/howto/?l-id=trv_header_trvlink_howto",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "サイトマップ",
+      "href": "https://travel.rakuten.co.jp/sitemap/?l-id=trv_header_trvlink_sitemap",
+      "absolute_url": "https://travel.rakuten.co.jp/sitemap/?l-id=trv_header_trvlink_sitemap",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "English",
+      "href": "https://travel.rakuten.com/?scid=wi_trv_header_lang_eng",
+      "absolute_url": "https://travel.rakuten.com/?scid=wi_trv_header_lang_eng",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "대한민국(한국어)",
+      "href": "https://travel.rakuten.com/kor/ko-kr/?scid=wi_trv_header_lang_ko-kr",
+      "absolute_url": "https://travel.rakuten.com/kor/ko-kr/?scid=wi_trv_header_lang_ko-kr",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "台灣(繁體中文)",
+      "href": "https://travel.rakuten.com/twn/zh-tw/?scid=wi_trv_header_lang_zh-tw",
+      "absolute_url": "https://travel.rakuten.com/twn/zh-tw/?scid=wi_trv_header_lang_zh-tw",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "香港(繁體中文)",
+      "href": "https://travel.rakuten.com/hkg/zh-hk/?scid=wi_trv_header_lang_zh-hk",
+      "absolute_url": "https://travel.rakuten.com/hkg/zh-hk/?scid=wi_trv_header_lang_zh-hk",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "中国(简体中文)",
+      "href": "https://travel.rakuten.com/usa/zh-cn/?scid=wi_trv_header_lang_zh-cn",
+      "absolute_url": "https://travel.rakuten.com/usa/zh-cn/?scid=wi_trv_header_lang_zh-cn",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "ประเทศไทย (ภาษาไทย)",
+      "href": "https://travel.rakuten.com/tha/th-th/?scid=wi_trv_header_lang_th-th",
+      "absolute_url": "https://travel.rakuten.com/tha/th-th/?scid=wi_trv_header_lang_th-th",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "Bahasa Indonesia",
+      "href": "https://travel.rakuten.com/usa/id-id/?scid=wi_trv_header_lang_id-id",
+      "absolute_url": "https://travel.rakuten.com/usa/id-id/?scid=wi_trv_header_lang_id-id",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "Tiếng Việt",
+      "href": "https://travel.rakuten.com/usa/vi-vn/?scid=wi_trv_header_lang_vi-vn",
+      "absolute_url": "https://travel.rakuten.com/usa/vi-vn/?scid=wi_trv_header_lang_vi-vn",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "楽天市場",
+      "href": "https://www.rakuten.co.jp/?scid=wi_trv_header_grplink_ichba",
+      "absolute_url": "https://www.rakuten.co.jp/?scid=wi_trv_header_grplink_ichba",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "楽天カード",
+      "href": "https://ad2.trafficgate.net/t/r/9091/1441/99636_99636/",
+      "absolute_url": "https://ad2.trafficgate.net/t/r/9091/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "楽天GORA",
+      "href": "https://gora.golf.rakuten.co.jp/?scid=wi_grp_gmx_trv_hetopbu_gra",
+      "absolute_url": "https://gora.golf.rakuten.co.jp/?scid=wi_grp_gmx_trv_hetopbu_gra",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "楽天モバイル",
+      "href": "https://network.mobile.rakuten.co.jp/?scid=wi_trv_header_grplink_mobile",
+      "absolute_url": "https://network.mobile.rakuten.co.jp/?scid=wi_trv_header_grplink_mobile",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "",
+      "href": "https://travel.rakuten.co.jp/?l-id=trv_header_logo",
+      "absolute_url": "https://travel.rakuten.co.jp/?l-id=trv_header_logo",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "お気に入り",
+      "href": "https://favoritelist.travel.rakuten.co.jp/hotel/domestic?l-id=trv_header_func_favorite",
+      "absolute_url": "https://favoritelist.travel.rakuten.co.jp/hotel/domestic?l-id=trv_header_func_favorite",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "予約確認",
+      "href": "https://auth.travel.rakuten.co.jp/fwd/memberDispatcher/staticPageLogin?service_id=t01&return_url=cgi-bin/rakuten_id_reference&_guestLoginServiceKey=guestReservation&f_next_url=https://mypage.travel.rakuten.co.jp/?l-id=trv_header_func_mypage",
+      "absolute_url": "https://auth.travel.rakuten.co.jp/fwd/memberDispatcher/staticPageLogin?service_id=t01&return_url=cgi-bin/rakuten_id_reference&_guestLoginServiceKey=guestReservation&f_next_url=https://mypage.travel.rakuten.co.jp/?l-id=trv_header_func_mypage",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "ログアウト",
+      "href": "https://img.travel.rakuten.co.jp/image/tr/hs/pctop/U1Seg/?l-id=logout_header",
+      "absolute_url": "https://img.travel.rakuten.co.jp/image/tr/hs/pctop/U1Seg/?l-id=logout_header",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "ログイン",
+      "href": "https://img.travel.rakuten.co.jp/image/tr/hs/pctop/3jfBm/?l-id=login_header",
+      "absolute_url": "https://img.travel.rakuten.co.jp/image/tr/hs/pctop/3jfBm/?l-id=login_header",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "国内宿泊",
+      "href": "https://travel.rakuten.co.jp/?l-id=trv_header_service_dh",
+      "absolute_url": "https://travel.rakuten.co.jp/?l-id=trv_header_service_dh",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "交通＋宿",
+      "href": "https://travel.rakuten.co.jp/package/?l-id=trv_header_service_dp",
+      "absolute_url": "https://travel.rakuten.co.jp/package/?l-id=trv_header_service_dp",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "ANA楽パック",
+      "href": "https://travel.rakuten.co.jp/package/ana/?l-id=trv_header_service_ana",
+      "absolute_url": "https://travel.rakuten.co.jp/package/ana/?l-id=trv_header_service_ana",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "JAL楽パック",
+      "href": "https://travel.rakuten.co.jp/package/jal/?l-id=trv_header_service_jal",
+      "absolute_url": "https://travel.rakuten.co.jp/package/jal/?l-id=trv_header_service_jal",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "JR楽パック",
+      "href": "https://travel.rakuten.co.jp/package/jr/?l-id=trv_header_service_jr",
+      "absolute_url": "https://travel.rakuten.co.jp/package/jr/?l-id=trv_header_service_jr",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "レンタカー",
+      "href": "https://travel.rakuten.co.jp/cars/?l-id=trv_header_service_car",
+      "absolute_url": "https://travel.rakuten.co.jp/cars/?l-id=trv_header_service_car",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "レンタカー",
+      "href": "https://travel.rakuten.co.jp/cars/?l-id=trv_header_service_car_2",
+      "absolute_url": "https://travel.rakuten.co.jp/cars/?l-id=trv_header_service_car_2",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "カーシェア",
+      "href": "https://carshare.rakuten.co.jp/?scid=trv_header_service_carshare",
+      "absolute_url": "https://carshare.rakuten.co.jp/?scid=trv_header_service_carshare",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "高速バス・ツアー",
+      "href": "https://travel.rakuten.co.jp/bus/?l-id=trv_header_service_bus",
+      "absolute_url": "https://travel.rakuten.co.jp/bus/?l-id=trv_header_service_bus",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "海外旅行",
+      "href": "https://travel.rakuten.co.jp/kaigai/?l-id=trv_header_service_kaigai",
+      "absolute_url": "https://travel.rakuten.co.jp/kaigai/?l-id=trv_header_service_kaigai",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "遊び・体験",
+      "href": "https://experiences.travel.rakuten.co.jp/?scid=wi_trv_header_service_experiences",
+      "absolute_url": "https://experiences.travel.rakuten.co.jp/?scid=wi_trv_header_service_experiences",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "キャンプ場",
+      "href": "https://camp.travel.rakuten.co.jp/?scid=wi_trv_header_service_camp",
+      "absolute_url": "https://camp.travel.rakuten.co.jp/?scid=wi_trv_header_service_camp",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "割引クーポン",
+      "href": "https://travel.rakuten.co.jp/coupon/?l-id=trv_header_service_coupon",
+      "absolute_url": "https://travel.rakuten.co.jp/coupon/?l-id=trv_header_service_coupon",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "ふるさと納税",
+      "href": "https://travel.rakuten.co.jp/special/furusato/?l-id=trv_header_service_furusato",
+      "absolute_url": "https://travel.rakuten.co.jp/special/furusato/?l-id=trv_header_service_furusato",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "旅行ガイド",
+      "href": "https://travel.rakuten.co.jp/mytrip/?l-id=trv_header_service_mytrip",
+      "absolute_url": "https://travel.rakuten.co.jp/mytrip/?l-id=trv_header_service_mytrip",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "特集・キャンペーン",
+      "href": "https://travel.rakuten.co.jp/leisure/?l-id=trv_header_service_list",
+      "absolute_url": "https://travel.rakuten.co.jp/leisure/?l-id=trv_header_service_list",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "楽天スーパーDEAL",
+      "href": "https://travel.rakuten.co.jp/superdeal/?l-id=trv_header_service_deal",
+      "absolute_url": "https://travel.rakuten.co.jp/superdeal/?l-id=trv_header_service_deal",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "サステナビリティ",
+      "href": "https://travel.rakuten.co.jp/special/sustainability/?l-id=trv_header_service_sus",
+      "absolute_url": "https://travel.rakuten.co.jp/special/sustainability/?l-id=trv_header_service_sus",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "楽天トラベルトップ",
+      "href": "//travel.rakuten.co.jp/",
+      "absolute_url": "https://travel.rakuten.co.jp/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "全国",
+      "href": "//search.travel.rakuten.co.jp/jparea/?f_image=1&f_hyoji=30&f_ptn=tiku&f_setubi=&f_point_min=&f_point_max=&f_gcode=&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=",
+      "absolute_url": "https://search.travel.rakuten.co.jp/jparea/?f_image=1&f_hyoji=30&f_ptn=tiku&f_setubi=&f_point_min=&f_point_max=&f_gcode=&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "山形県",
+      "href": "//search.travel.rakuten.co.jp/jparea/?f_no=02&f_dai=japan&f_chu=yamagata&f_shou=&f_sai=&f_kaiin_no=&f_image=1&f_hyoji=30&f_setubi=&f_sort=&f_point_min=&f_point_max=&f_gcode=&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=",
+      "absolute_url": "https://search.travel.rakuten.co.jp/jparea/?f_no=02&f_dai=japan&f_chu=yamagata&f_shou=&f_sai=&f_kaiin_no=&f_image=1&f_hyoji=30&f_setubi=&f_sort=&f_point_min=&f_point_max=&f_gcode=&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "山形・蔵王・天童・上山",
+      "href": "//search.travel.rakuten.co.jp/ds/vacant/searchVacant?f_cd=03&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_kaiin_no=&f_kaiin_tel=&f_image=1&f_hyoji=30&f_setubi=&f_sort=&f_point_min=&f_point_max=&f_gcode=&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=",
+      "absolute_url": "https://search.travel.rakuten.co.jp/ds/vacant/searchVacant?f_cd=03&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_kaiin_no=&f_kaiin_tel=&f_image=1&f_hyoji=30&f_setubi=&f_sort=&f_point_min=&f_point_max=&f_gcode=&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "蔵王温泉",
+      "href": "//travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "absolute_url": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "蔵王温泉 名湯リゾート ルーセントタカミヤ",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/39565.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/39565.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "4.14",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/review.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/review.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "( 1,342 件)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/review.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/review.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "〒990-2301山形県山形市蔵王温泉942",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/rtmap.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/rtmap.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "メルマガ登録",
+      "href": "https://aps1.travel.rakuten.co.jp/portal/my/present_top.hotel_mail?f_hotel_no=39565",
+      "absolute_url": "https://aps1.travel.rakuten.co.jp/portal/my/present_top.hotel_mail?f_hotel_no=39565",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "施設紹介",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/39565.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/39565.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "トップ",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/39565.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/39565.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "温泉",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170716234255.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170716234255.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "お食事",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170716211434.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170716211434.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "お部屋",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170717095854.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170717095854.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "施設案内",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170717112605.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170717112605.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "アクセス",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170717212426.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565170717212426.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "周辺観光",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565141017164230.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565141017164230.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "美肌旅〜名湯一門 高見屋〜",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565141124202430.html?",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/CUSTOM/GW39565141124202430.html?",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "温泉",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/39565_onsen.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/39565_onsen.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "詳細情報",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/39565_std.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/39565_std.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "部屋一覧",
+      "href": "//hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "absolute_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "宿泊",
+      "href": "//hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "absolute_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "写真・動画(120)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "部屋(32)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000001",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000001",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "温泉(21)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000002",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000002",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "食事(27)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000004",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000004",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "宿泊プラン(2)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000005",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html#category00000005",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "ﾎﾃﾙ施設(19)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html#category10000000",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html#category10000000",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "蔵王観光・景観(19)",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/gallery.html#category10000001",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/gallery.html#category10000001",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "地図・アクセス",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/rtmap.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/rtmap.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "お客さまの声( 1,342 )",
+      "href": "//travel.rakuten.co.jp/HOTEL/39565/review.html",
+      "absolute_url": "https://travel.rakuten.co.jp/HOTEL/39565/review.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "クーポン一覧",
+      "href": "//coupon.travel.rakuten.co.jp/coupon/hotel/39565",
+      "absolute_url": "https://coupon.travel.rakuten.co.jp/coupon/hotel/39565",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "新幹線・特急+宿泊",
+      "href": "https://travel.rakuten.co.jp/package/jr/hotel_info_plan/39565",
+      "absolute_url": "https://travel.rakuten.co.jp/package/jr/hotel_info_plan/39565",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "2",
+      "href": "//hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_heya_su=1&f_kin=&f_kin2=0&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=PLAN&f_static=1&f_sort=&f_page_no=2",
+      "absolute_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_heya_su=1&f_kin=&f_kin2=0&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=PLAN&f_static=1&f_sort=&f_page_no=2",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "3",
+      "href": "//hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_heya_su=1&f_kin=&f_kin2=0&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=PLAN&f_static=1&f_sort=&f_page_no=3",
+      "absolute_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_heya_su=1&f_kin=&f_kin2=0&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=PLAN&f_static=1&f_sort=&f_page_no=3",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "次の10件",
+      "href": "//hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_heya_su=1&f_kin=&f_kin2=0&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=PLAN&f_static=1&f_sort=&f_page_no=2",
+      "absolute_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_heya_su=1&f_kin=&f_kin2=0&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=PLAN&f_static=1&f_sort=&f_page_no=2",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 18,900円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 21,100円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 23,300円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 27,700円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 36,500円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 20,000円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 22,200円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 24,400円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 28,800円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 37,600円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 25,500円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 29,900円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 38,700円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 21,650円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 22,750円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 23,850円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 23,740円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 25,720円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 31,660円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 39,580円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 26,600円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 33,200円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 42,000円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 26,528円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 31,000円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 35,400円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "今すぐ2,000円引き！ 44,200円（消費税込） で泊まる方法",
+      "href": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "absolute_url": "http://ad2.trafficgate.net/t/r/5320/1441/99636_99636/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "会社情報",
+      "href": "https://travel.rakuten.co.jp/corporate/",
+      "absolute_url": "https://travel.rakuten.co.jp/corporate/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "個人情報保護方針",
+      "href": "https://privacy.rakuten.co.jp/",
+      "absolute_url": "https://privacy.rakuten.co.jp/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "社会的責任[CSR]",
+      "href": "https://corp.rakuten.co.jp/csr/",
+      "absolute_url": "https://corp.rakuten.co.jp/csr/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "採用情報",
+      "href": "https://travel.rakuten.co.jp/recruit/",
+      "absolute_url": "https://travel.rakuten.co.jp/recruit/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "規約集",
+      "href": "https://travel.rakuten.co.jp/info/",
+      "absolute_url": "https://travel.rakuten.co.jp/info/",
+      "f_syu": "",
+      "f_camp_id": ""
+    },
+    {
+      "text": "資料請求",
+      "href": "https://travel.rakuten.co.jp/info/hotel_msg.html",
+      "absolute_url": "https://travel.rakuten.co.jp/info/hotel_msg.html",
+      "f_syu": "",
+      "f_camp_id": ""
+    }
+  ],
+  "room_type_candidates": [
+    {
+      "detected_room_name": "シングル",
+      "normalized_room_name": "シングル",
+      "source": "visible_text",
+      "evidence": "シングル",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "セミダブル",
+      "normalized_room_name": "セミダブル",
+      "source": "visible_text",
+      "evidence": "セミダブル",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "ダブル",
+      "normalized_room_name": "ダブル",
+      "source": "visible_text",
+      "evidence": "ダブル",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "ツイン",
+      "normalized_room_name": "ツイン",
+      "source": "visible_text",
+      "evidence": "ツイン",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "和室",
+      "normalized_room_name": "和室",
+      "source": "visible_text",
+      "evidence": "和室",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "和洋室",
+      "normalized_room_name": "和洋室",
+      "source": "visible_text",
+      "evidence": "和洋室",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "ジャグジーのある客室",
+      "normalized_room_name": "ジャグジーのある客室",
+      "source": "visible_text",
+      "evidence": "ジャグジーのある客室",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "離れ客室",
+      "normalized_room_name": "離れ客室",
+      "source": "visible_text",
+      "evidence": "離れ客室",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "※禁煙※【ザ・ゲスト棟】和室ベッド／バス付 ＜倶楽部ルーム＞",
+      "normalized_room_name": "禁煙ザ・ゲスト棟和室ベッド/バス付 <倶楽部ルーム>",
+      "source": "visible_text",
+      "evidence": "※禁煙※【ザ・ゲスト棟】和室ベッド／バス付　＜倶楽部ルーム＞",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "detected_room_name": "和室にローベッド２台を配した寛ぎの空間。 ビジネスでも便利なデスクや和の広縁もあり、ゆったりお寛ぎいただけます。",
+      "normalized_room_name": "和室にローベッド2台を配した寛ぎの空間。 ビジネスでも便利なデスクや和の広縁もあり、ゆったりお寛ぎいただけます。",
+      "source": "visible_text",
+      "evidence": "和室にローベッド２台を配した寛ぎの空間。 ビジネスでも便利なデスクや和の広縁もあり、ゆったりお寛ぎいただけます。",
+      "confidence": "C",
+      "warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    }
+  ],
+  "plan_candidates": [],
+  "f_syu_candidates": [],
+  "f_camp_id_candidates": [],
+  "room_type_master_preview": [
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "シングル",
+      "normalized_room_name": "シングル",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "シングル",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "セミダブル",
+      "normalized_room_name": "セミダブル",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "セミダブル",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "ダブル",
+      "normalized_room_name": "ダブル",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "ダブル",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "ツイン",
+      "normalized_room_name": "ツイン",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "ツイン",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "和室",
+      "normalized_room_name": "和室",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "和室",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "和洋室",
+      "normalized_room_name": "和洋室",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "和洋室",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "ジャグジーのある客室",
+      "normalized_room_name": "ジャグジーのある客室",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "ジャグジーのある客室",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "離れ客室",
+      "normalized_room_name": "離れ客室",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "離れ客室",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "※禁煙※【ザ・ゲスト棟】和室ベッド／バス付 ＜倶楽部ルーム＞",
+      "normalized_room_name": "禁煙ザ・ゲスト棟和室ベッド/バス付 <倶楽部ルーム>",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "※禁煙※【ザ・ゲスト棟】和室ベッド／バス付　＜倶楽部ルーム＞",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    },
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "rakuten_hotel_no": "39565",
+      "source_page_type": "plan_list",
+      "source_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?f_flg=PLAN&f_teikei=&f_hizuke=&f_hak=&f_dai=japan&f_chu=yamagata&f_shou=yamagata&f_sai=&f_tel=&f_target_flg=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_camp_id=&f_static=1&f_squeezes=&f_rm_equip=&f_hi1=24&f_tuki1=6&f_nen1=2026&f_hi2=25&f_tuki2=6&f_nen2=2026&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin2=0&f_kin=",
+      "detected_room_name": "和室にローベッド２台を配した寛ぎの空間。 ビジネスでも便利なデスクや和の広縁もあり、ゆったりお寛ぎいただけます。",
+      "normalized_room_name": "和室にローベッド2台を配した寛ぎの空間。 ビジネスでも便利なデスクや和の広縁もあり、ゆったりお寛ぎいただけます。",
+      "f_syu": "",
+      "f_camp_id": "",
+      "plan_name": "",
+      "plan_url": "",
+      "room_url": "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/39565?&f_teikei=&f_nen1=2026&f_tuki1=6&f_hi1=24&f_nen2=2026&f_tuki2=6&f_hi2=25&f_heya_su=1&f_otona_su=2&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=&f_squeezes=&f_rm_equip=&f_tscm_flg=&f_tel=&f_flg=ROOM&f_static=1&f_page_no=1&f_sort=minNo",
+      "context_type": "room_type_level",
+      "confidence": "C",
+      "evidence": "和室にローベッド２台を配した寛ぎの空間。 ビジネスでも便利なデスクや和の広縁もあり、ゆったりお寛ぎいただけます。",
+      "first_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "last_seen_at_jst": "2026-06-04T11:14:01+09:00",
+      "extraction_warning": "Weak visible room-type text; f_syu/plan relationship is not directly visible."
+    }
+  ],
+  "sold_out_semantics_guard": {
+    "calendar_context_type": "room_type_level",
+    "classification_for_single_full_context": "rakuten_room_type_context_sold_out",
+    "property_level_sold_out": false,
+    "usable_for_property_sold_out_pressure": false,
+    "property_level_requirements": [
+      "plan-list page says no plans available for the search condition",
+      "all learned room types / f_syu contexts independently show sold_out",
+      "multiple plan contexts confirm no availability",
+      "explicit property-level no-vacancy indicator is extracted"
+    ]
+  },
+  "auto08x_bug_prevention_statement": [
+    "AUTO08X bug: f_syu-level full was treated as property-level sold_out.",
+    "Prevention: no /hplan/calendar call should run before room_type_master exists for the hotel.",
+    "Prevention: every future calendar row must carry f_syu, room_name, source_context_type, and plan/campaign context when available.",
+    "Prevention: context packs must aggregate only property-level confirmed sold_out into sold_out pressure."
+  ],
+  "extraction_warnings": [
+    "No plan candidates were extracted from static HTML.",
+    "No f_syu candidates were visible in static plan-list HTML; do not invent f_syu.",
+    "No f_camp_id candidates were visible in static plan-list HTML."
+  ],
+  "safety_confirmation": {
+    "db_writes": false,
+    "history_modified": false,
+    "ai_context_refreshed": false,
+    "broad_collector_run": false,
+    "playwright_used": false,
+    "calendar_called": false,
+    "paid_source_tooling_used": false,
+    "booking_used": false
+  }
+}

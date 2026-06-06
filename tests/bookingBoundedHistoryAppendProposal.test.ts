@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildFutureB11XPlan,
   buildPricePressurePolicy,
@@ -120,7 +121,7 @@ describe("BOOKING-B10X — source artifact validation", () => {
   it("loads B09X artifact", () => {
     const b09x = JSON.parse(
       readFileSync(
-        resolve(__dirname, "../.data/reports/source-discovery/booking_bounded_expanded_collection_20260604_161623.json"),
+        resolveReportFixture(".data/reports/source-discovery/booking_bounded_expanded_collection_20260604_161623.json"),
         "utf8"
       )
     ) as B09XArtifactLike;

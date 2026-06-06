@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildAcceptanceCriteria,
   buildAlwaysOnMacBootstrapChecklist,
@@ -19,7 +20,7 @@ const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/autoRunn
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/buildAutoRunnerAlwaysOnMacHandoffPlan.ts"), "utf8");
 const PACKAGE_JSON = readFileSync(resolve(__dirname, "../package.json"), "utf8");
 const GITIGNORE = readFileSync(resolve(__dirname, "../.gitignore"), "utf8");
-const SOURCE_07F = JSON.parse(readFileSync(resolve(__dirname, "../.data/reports/automation/auto_runner_health_check_20260605_235224.json"), "utf8"));
+const SOURCE_07F = JSON.parse(readFileSync(resolveReportFixture(".data/reports/automation/auto_runner_health_check_20260605_235224.json"), "utf8"));
 
 function matrixItem(pathPart: string) {
   return buildHandoffFileMatrix().find((item) => item.path_or_pattern.includes(pathPart))!;

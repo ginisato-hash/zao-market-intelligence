@@ -1,0 +1,585 @@
+{
+  "run_id": "booking_target_matrix_expansion_proposal_20260604_160105",
+  "generated_at_jst": "2026-06-04T16:01:05+09:00",
+  "decision": "booking_target_matrix_expansion_proposal_basis_caution",
+  "source_b07b_artifact_path": ".data/reports/automation/post_booking_history_append_refresh_20260604_155005.json",
+  "current_booking_context": {
+    "history_rows": 160,
+    "db_market_signal_history_rows": 160,
+    "ai_context_row_count": 160,
+    "booking_rows": 21,
+    "booking_directional_rows": 19,
+    "booking_excluded_rows": 2,
+    "booking_direct_rows": 0,
+    "b07b_decision": "post_booking_history_append_refresh_basis_caution",
+    "rakuten_priority_decision": "NO_GO_FREEZE_RAKUTEN"
+  },
+  "verified_booking_properties": [
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "booking_url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html",
+      "slug_status": "verified_b05x",
+      "source_artifact": "B05X fixed verified target",
+      "risk_level": "low",
+      "include_in_b09x_live_collection": true,
+      "evidence_note": "Fixed verified B05X Booking.com target; already flowed through B07X/B07B."
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "booking_url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html",
+      "slug_status": "verified_b05x",
+      "source_artifact": "B05X fixed verified target",
+      "risk_level": "low",
+      "include_in_b09x_live_collection": true,
+      "evidence_note": "Fixed verified B05X Booking.com target; already flowed through B07X/B07B."
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "booking_url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html",
+      "slug_status": "verified_b05x",
+      "source_artifact": "B05X fixed verified target",
+      "risk_level": "low",
+      "include_in_b09x_live_collection": true,
+      "evidence_note": "Fixed verified B05X Booking.com target; already flowed through B07X/B07B."
+    }
+  ],
+  "missing_booking_slug_candidates": [
+    {
+      "canonical_property_name": "名湯リゾート ルーセント",
+      "possible_existing_sources": [
+        "booking:lucent-takamiya:https://www.booking.com/hotel/jp/lucent-takamiya.ja.html",
+        "google_hotels",
+        "jalan:331969:https://www.jalan.net/yad331969/",
+        "rakuten:39565:https://travel.rakuten.co.jp/HOTEL/39565/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    },
+    {
+      "canonical_property_name": "JURIN",
+      "possible_existing_sources": [
+        "booking:jurin:https://www.booking.com/hotel/jp/jurin.ja.html",
+        "google_hotels",
+        "jalan:332556:https://www.jalan.net/yad332556/",
+        "rakuten:14585:https://travel.rakuten.co.jp/HOTEL/14585/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    },
+    {
+      "canonical_property_name": "ONSEN & STAY OAKHILL",
+      "possible_existing_sources": [
+        "booking:onsen-amp-stay-oakhill:https://www.booking.com/hotel/jp/onsen-amp-stay-oakhill.ja.html",
+        "google_hotels",
+        "jalan:388065:https://www.jalan.net/yad388065/",
+        "rakuten:196553:https://travel.rakuten.co.jp/HOTEL/196553/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    },
+    {
+      "canonical_property_name": "BED'n ONSEN HAMMOND",
+      "possible_existing_sources": [
+        "booking:hammond-takamiya:https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+        "google_hotels",
+        "jalan:348320:https://www.jalan.net/yad348320/",
+        "rakuten:40033:https://travel.rakuten.co.jp/HOTEL/40033/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    },
+    {
+      "canonical_property_name": "おおみや旅館",
+      "possible_existing_sources": [
+        "booking:omiya-ryokan-yamagata:https://www.booking.com/hotel/jp/omiya-ryokan-yamagata.ja.html",
+        "google_hotels",
+        "jalan:338565:https://www.jalan.net/yad338565/",
+        "rakuten:5722:https://travel.rakuten.co.jp/HOTEL/5722/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    },
+    {
+      "canonical_property_name": "源泉湯宿 蔵王プラザホテル",
+      "possible_existing_sources": [
+        "booking:zao-plaza:https://www.booking.com/hotel/jp/zao-plaza.ja.html",
+        "google_hotels",
+        "jalan:353340:https://www.jalan.net/yad353340/",
+        "rakuten:7747:https://travel.rakuten.co.jp/HOTEL/7747/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    },
+    {
+      "canonical_property_name": "ル・ベール蔵王",
+      "possible_existing_sources": [
+        "booking:le-vert-zao:https://www.booking.com/hotel/jp/le-vert-zao.ja.html",
+        "google_hotels",
+        "jalan:328232:https://www.jalan.net/yad328232/",
+        "rakuten:29465:https://travel.rakuten.co.jp/HOTEL/29465/"
+      ],
+      "booking_slug_status": "missing_booking_slug",
+      "recommended_action": "manual_slug_review",
+      "manual_review_needed": true,
+      "do_not_include_in_b09x_live_collection": true,
+      "evidence_note": "No verified Booking.com slug was found in local artifacts; do not invent a slug from the property name."
+    }
+  ],
+  "date_window_strategy": [
+    {
+      "bucket": "near_term_movement",
+      "purpose": "short-term price pressure and availability changes",
+      "dates": [
+        "2026-06-07",
+        "2026-06-14",
+        "2026-06-21",
+        "2026-06-28"
+      ]
+    },
+    {
+      "bucket": "summer_holiday_pressure",
+      "purpose": "summer holiday / Obon / peak domestic-inbound pressure",
+      "dates": [
+        "2026-07-18",
+        "2026-07-19",
+        "2026-07-20",
+        "2026-08-08",
+        "2026-08-12",
+        "2026-08-15"
+      ]
+    },
+    {
+      "bucket": "autumn_leaf_long_weekend",
+      "purpose": "autumn foliage / long-weekend pressure",
+      "dates": [
+        "2026-09-19",
+        "2026-09-20",
+        "2026-09-21",
+        "2026-10-10",
+        "2026-10-11",
+        "2026-10-12"
+      ]
+    },
+    {
+      "bucket": "winter_early_signal",
+      "purpose": "early ski-season / snow-demand signal",
+      "dates": [
+        "2026-12-05",
+        "2026-12-12",
+        "2026-12-19"
+      ]
+    }
+  ],
+  "proposed_b09x_target_matrix": [
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-06-07",
+      "checkout": "2026-06-08",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-06-07&checkout=2026-06-08&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-06-14",
+      "checkout": "2026-06-15",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-06-14&checkout=2026-06-15&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-06-21",
+      "checkout": "2026-06-22",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-06-21&checkout=2026-06-22&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-06-28",
+      "checkout": "2026-06-29",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-06-28&checkout=2026-06-29&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-07-18",
+      "checkout": "2026-07-19",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-07-18&checkout=2026-07-19&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-08-12",
+      "checkout": "2026-08-13",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-08-12&checkout=2026-08-13&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-08-15",
+      "checkout": "2026-08-16",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-08-15&checkout=2026-08-16&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-09-19",
+      "checkout": "2026-09-20",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-09-19&checkout=2026-09-20&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-10-10",
+      "checkout": "2026-10-11",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-10-10&checkout=2026-10-11&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王国際ホテル",
+      "booking_slug": "zao-kokusai",
+      "checkin": "2026-12-12",
+      "checkout": "2026-12-13",
+      "url": "https://www.booking.com/hotel/jp/zao-kokusai.ja.html?checkin=2026-12-12&checkout=2026-12-13&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-06-07",
+      "checkout": "2026-06-08",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-06-07&checkout=2026-06-08&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-06-14",
+      "checkout": "2026-06-15",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-06-14&checkout=2026-06-15&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-06-21",
+      "checkout": "2026-06-22",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-06-21&checkout=2026-06-22&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-06-28",
+      "checkout": "2026-06-29",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-06-28&checkout=2026-06-29&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-07-18",
+      "checkout": "2026-07-19",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-07-18&checkout=2026-07-19&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-08-12",
+      "checkout": "2026-08-13",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-08-12&checkout=2026-08-13&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-08-15",
+      "checkout": "2026-08-16",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-08-15&checkout=2026-08-16&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-09-19",
+      "checkout": "2026-09-20",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-09-19&checkout=2026-09-20&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-10-10",
+      "checkout": "2026-10-11",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-10-10&checkout=2026-10-11&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "蔵王四季のホテル",
+      "booking_slug": "zao-shiki-no",
+      "checkin": "2026-12-12",
+      "checkout": "2026-12-13",
+      "url": "https://www.booking.com/hotel/jp/zao-shiki-no.ja.html?checkin=2026-12-12&checkout=2026-12-13&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-06-07",
+      "checkout": "2026-06-08",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-06-07&checkout=2026-06-08&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-06-14",
+      "checkout": "2026-06-15",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-06-14&checkout=2026-06-15&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-06-21",
+      "checkout": "2026-06-22",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-06-21&checkout=2026-06-22&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-06-28",
+      "checkout": "2026-06-29",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-06-28&checkout=2026-06-29&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-07-18",
+      "checkout": "2026-07-19",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-07-18&checkout=2026-07-19&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-08-12",
+      "checkout": "2026-08-13",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-08-12&checkout=2026-08-13&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-08-15",
+      "checkout": "2026-08-16",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-08-15&checkout=2026-08-16&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-09-19",
+      "checkout": "2026-09-20",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-09-19&checkout=2026-09-20&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-10-10",
+      "checkout": "2026-10-11",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-10-10&checkout=2026-10-11&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    },
+    {
+      "canonical_property_name": "深山荘 高見屋",
+      "booking_slug": "shinzanso-takamiya",
+      "checkin": "2026-12-12",
+      "checkout": "2026-12-13",
+      "url": "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html?checkin=2026-12-12&checkout=2026-12-13&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja",
+      "query_scope": "2_adults_1_room_1_night_jpy_ja",
+      "slug_status": "verified_b05x",
+      "risk_level": "low"
+    }
+  ],
+  "page_cap_plan": {
+    "max_properties": 3,
+    "max_dates_per_property": 10,
+    "max_pages": 30,
+    "proposed_properties": 3,
+    "proposed_dates_per_property": 10,
+    "proposed_pages": 30,
+    "caps_respected": true,
+    "note": "Only the B05X verified baseline is available; use at most 3 properties × 10 dates."
+  },
+  "price_basis_policy": {
+    "policy_version": "booking_official_visible_adder_v1",
+    "computed_total_rule": "primary_price_numeric + official_tax_fee_adder_numeric",
+    "forbidden_rule": "primary_price_numeric * 1.1",
+    "valid_rows": {
+      "basis_confidence": "B",
+      "dp_usage": "directional",
+      "price_pressure_usable": true,
+      "dp_usable": false
+    },
+    "missing_official_adder_rows": {
+      "basis_confidence": "C",
+      "dp_usage": "excluded",
+      "price_pressure_usable": false,
+      "dp_usable": false,
+      "exclusion_reason": "missing_official_tax_fee_adder"
+    },
+    "booking_direct_rows_allowed": 0
+  },
+  "risk_assessment": {
+    "overall_risk": "medium",
+    "risks": [
+      "Booking.com rendered DOM can produce consent/security/near-empty pages; B09X must record blocked status and stop.",
+      "7 high-value anchor properties lack verified Booking slugs and must not be collected live.",
+      "Booking rows remain B-confidence directional evidence, not direct automatic-pricing rows.",
+      "Rakuten remains frozen and must not be restarted as part of Booking expansion."
+    ],
+    "fallback_plan": [
+      "If a fixed slug page is blocked, record blocked/security status and do not bypass.",
+      "If official tax/fee adder is missing, emit C-confidence excluded audit row.",
+      "If page count would exceed cap, reduce dates before adding properties.",
+      "Do not use Booking search results, pagination, cookies, login, stealth, paid APIs, or CAPTCHA bypass."
+    ]
+  },
+  "future_b09x_plan": {
+    "phase": "BOOKING-B09X — Bounded expanded Booking.com normalized collection",
+    "collection_rules": [
+      "Use fixed Booking.com property slug URLs only.",
+      "Use checkin/checkout/group_adults=2/no_rooms=1/group_children=0/selected_currency=JPY/lang=ja query params.",
+      "Use Playwright rendered DOM only for the fixed approved B09X pages.",
+      "Do not scrape Booking search results.",
+      "Do not paginate.",
+      "Do not discover new slugs live.",
+      "Do not retry aggressively."
+    ],
+    "blocked_handling": [
+      "Record blocked/captcha/security/consent-wall status.",
+      "Do not bypass.",
+      "Do not use stealth.",
+      "Do not use cookies or login.",
+      "Use at most one conservative retry only if already implemented safely."
+    ],
+    "not_allowed": [
+      "No history append in B09X unless a later approved append phase exists.",
+      "No DB write or AI context refresh in B09X collection.",
+      "No PMS/Beds24/AirHost/OTA output.",
+      "No Booking base * 1.1."
+    ]
+  },
+  "safety_confirmation": {
+    "live_booking_fetch": false,
+    "playwright_used": false,
+    "db_writes": false,
+    "history_append": false,
+    "ai_context_refresh": false,
+    "booking_search_scraping": false,
+    "slug_invention": false,
+    "pms_beds24_airhost_ota_output": false,
+    "price_update": false,
+    "paid_source_tooling": false,
+    "booking_base_times_1_1": false,
+    "rakuten_restart": false,
+    "jalan_automation_start": false,
+    "started_next_phase": false
+  },
+  "report_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/source-discovery/booking_target_matrix_expansion_proposal_20260604_160105.md",
+  "json_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/source-discovery/booking_target_matrix_expansion_proposal_20260604_160105.json",
+  "csv_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/source-discovery/booking_target_matrix_expansion_proposal_20260604_160105.csv",
+  "debug_artifact_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/debug/booking-target-matrix-expansion-proposal/20260604_160105"
+}

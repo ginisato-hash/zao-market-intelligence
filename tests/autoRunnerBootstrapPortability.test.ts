@@ -85,7 +85,7 @@ describe("AUTO-RUNNER-HANDOFF05X - default pipeline model fallback", () => {
     // gates are all set; with everything enabled exactly five risky stages fire.
     const allGatesEnabled: Record<string, string> = {};
     for (const stage of stages) {
-      for (const gate of stage.required_gates) {
+      for (const gate of stage.required_gates ?? []) {
         for (const token of gate.split(" or ")) {
           const [name, value] = token.split("=");
           if (name && value === "1") {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   analyzeRenderedRoomDom,
   buildRakutenRenderedRoomDomResult,
@@ -72,18 +73,18 @@ const HTML_TEXT_ONLY = `<html><body><h1>名湯リゾート ルーセント 部�
 
 describe("ROOM04X source artifact loading", () => {
   it("1. loads ROOM01X artifact", () => {
-    const artifact = JSON.parse(readFileSync(resolve(ROOM01X_ARTIFACT_PATH), "utf8"));
+    const artifact = JSON.parse(readFileSync(resolveReportFixture(ROOM01X_ARTIFACT_PATH), "utf8"));
     expect(artifact.decision).toBeDefined();
     expect(artifact.hotel_context).toBeDefined();
   });
 
   it("2. loads ROOM02X artifact", () => {
-    const artifact = JSON.parse(readFileSync(resolve(ROOM02X_ARTIFACT_PATH), "utf8"));
+    const artifact = JSON.parse(readFileSync(resolveReportFixture(ROOM02X_ARTIFACT_PATH), "utf8"));
     expect(artifact.room_list_url).toContain("39565");
   });
 
   it("3. loads ROOM03X artifact", () => {
-    const artifact = JSON.parse(readFileSync(resolve(ROOM03X_ARTIFACT_PATH), "utf8"));
+    const artifact = JSON.parse(readFileSync(resolveReportFixture(ROOM03X_ARTIFACT_PATH), "utf8"));
     expect(artifact.decision).toBeDefined();
   });
 

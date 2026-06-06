@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildConflictComparisons,
   buildFuturePhasePlan,
@@ -90,14 +91,14 @@ function compare(oldRow = existing(), newRow = newer()) {
 describe("BOOKING-B10Y — source artifact loading", () => {
   it("loads B10X artifact", () => {
     const artifact = JSON.parse(
-      readFileSync(resolve(__dirname, "../.data/reports/automation/booking_bounded_history_append_proposal_20260604_163035.json"), "utf8")
+      readFileSync(resolveReportFixture(".data/reports/automation/booking_bounded_history_append_proposal_20260604_163035.json"), "utf8")
     ) as B10XArtifactLike;
     expect(artifact.preflight_summary.conflict_count).toBe(15);
   });
 
   it("requires B10X decision = booking_bounded_history_append_proposal_not_ready", () => {
     const artifact = JSON.parse(
-      readFileSync(resolve(__dirname, "../.data/reports/automation/booking_bounded_history_append_proposal_20260604_163035.json"), "utf8")
+      readFileSync(resolveReportFixture(".data/reports/automation/booking_bounded_history_append_proposal_20260604_163035.json"), "utf8")
     ) as B10XArtifactLike;
     expect(validateB10XArtifact(artifact).valid).toBe(true);
     expect(validateB10XArtifact({ ...artifact, decision: "booking_bounded_history_append_proposal_ready" }).reasons).toContain(
@@ -107,14 +108,14 @@ describe("BOOKING-B10Y — source artifact loading", () => {
 
   it("extracts 15 conflict row_ids", () => {
     const artifact = JSON.parse(
-      readFileSync(resolve(__dirname, "../.data/reports/automation/booking_bounded_history_append_proposal_20260604_163035.json"), "utf8")
+      readFileSync(resolveReportFixture(".data/reports/automation/booking_bounded_history_append_proposal_20260604_163035.json"), "utf8")
     ) as B10XArtifactLike;
     expect(validateB10XArtifact(artifact).conflictRowIds).toHaveLength(15);
   });
 
   it("loads B09X preview rows", () => {
     const artifact = JSON.parse(
-      readFileSync(resolve(__dirname, "../.data/reports/source-discovery/booking_bounded_expanded_collection_20260604_161623.json"), "utf8")
+      readFileSync(resolveReportFixture(".data/reports/source-discovery/booking_bounded_expanded_collection_20260604_161623.json"), "utf8")
     ) as B09XArtifactLike;
     expect(artifact.normalized_rows_preview).toHaveLength(30);
   });

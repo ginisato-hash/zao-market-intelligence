@@ -1,0 +1,217 @@
+{
+  "run_id": "auto_runner_health_check_20260605_235224",
+  "generated_at_jst": "2026-06-05T23:52:24+09:00",
+  "decision": "auto_runner_health_check_ready",
+  "source_auto_runner07e_artifact": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_db_update_stub_20260605_234414.json",
+  "current_state_before": {
+    "current_state_summary": {
+      "history_rows": 210,
+      "db_rows": 210,
+      "ai_context_rows": 210,
+      "booking": {
+        "rows": 46,
+        "directional": 42,
+        "excluded": 4,
+        "direct": 0,
+        "role": "primary directional backbone"
+      },
+      "jalan": {
+        "rows": 38,
+        "directional": 8,
+        "excluded": 24,
+        "direct": 6,
+        "role": "supplementary domestic OTA signal"
+      },
+      "rakuten": {
+        "rows": 126,
+        "role": "frozen / caution"
+      },
+      "history_files": [
+        ".data/history/zao_signals_2026_05.csv",
+        ".data/history/zao_signals_2026_06.csv",
+        ".data/history/zao_signals_2026_07.csv",
+        ".data/history/zao_signals_2026_08.csv",
+        ".data/history/zao_signals_2026_09.csv",
+        ".data/history/zao_signals_2026_10.csv",
+        ".data/history/zao_signals_2026_12.csv"
+      ]
+    },
+    "history_mtimes": {
+      ".data/history/zao_signals_2026_05.csv": 1780360133595.1184,
+      ".data/history/zao_signals_2026_06.csv": 1780623389585.9355,
+      ".data/history/zao_signals_2026_07.csv": 1780623389589.088,
+      ".data/history/zao_signals_2026_08.csv": 1780623389590.0195,
+      ".data/history/zao_signals_2026_09.csv": 1780572622352.324,
+      ".data/history/zao_signals_2026_10.csv": 1780623389590.6353,
+      ".data/history/zao_signals_2026_12.csv": 1780572622352.9229
+    },
+    "collector_baseline": {
+      "collector_runs_count": 42,
+      "rate_snapshots_count": 210,
+      "inventory_snapshots_count": 210
+    }
+  },
+  "current_state_after": {
+    "current_state_summary": {
+      "history_rows": 210,
+      "db_rows": 210,
+      "ai_context_rows": 210,
+      "booking": {
+        "rows": 46,
+        "directional": 42,
+        "excluded": 4,
+        "direct": 0,
+        "role": "primary directional backbone"
+      },
+      "jalan": {
+        "rows": 38,
+        "directional": 8,
+        "excluded": 24,
+        "direct": 6,
+        "role": "supplementary domestic OTA signal"
+      },
+      "rakuten": {
+        "rows": 126,
+        "role": "frozen / caution"
+      },
+      "history_files": [
+        ".data/history/zao_signals_2026_05.csv",
+        ".data/history/zao_signals_2026_06.csv",
+        ".data/history/zao_signals_2026_07.csv",
+        ".data/history/zao_signals_2026_08.csv",
+        ".data/history/zao_signals_2026_09.csv",
+        ".data/history/zao_signals_2026_10.csv",
+        ".data/history/zao_signals_2026_12.csv"
+      ]
+    },
+    "history_mtimes": {
+      ".data/history/zao_signals_2026_05.csv": 1780360133595.1184,
+      ".data/history/zao_signals_2026_06.csv": 1780623389585.9355,
+      ".data/history/zao_signals_2026_07.csv": 1780623389589.088,
+      ".data/history/zao_signals_2026_08.csv": 1780623389590.0195,
+      ".data/history/zao_signals_2026_09.csv": 1780572622352.324,
+      ".data/history/zao_signals_2026_10.csv": 1780623389590.6353,
+      ".data/history/zao_signals_2026_12.csv": 1780572622352.9229
+    },
+    "collector_baseline": {
+      "collector_runs_count": 42,
+      "rate_snapshots_count": 210,
+      "inventory_snapshots_count": 210
+    }
+  },
+  "gate_evaluation": [
+    {
+      "gate": "ZMI_AUTORUN_ENABLED",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "COLLECT_BOOKING",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "COLLECT_JALAN",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "ALLOW_HISTORY_APPEND",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "BOOKING_HISTORY_APPEND",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "JALAN_HISTORY_APPEND",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "HISTORY_TO_DB_SYNC",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "BUILD_AI_CONTEXT",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "RUN_USABILITY_CHECK",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "GENERATE_PRICE_REPORT",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "GENERATE_PRICE_CSV",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    }
+  ],
+  "runner_stub_summary": {
+    "run_id": "auto_runner_db_update_stub_20260605_234414",
+    "decision": "auto_runner_db_update_stub_ready_not_run",
+    "mutation_executed": false,
+    "risky_stages_enabled": 0,
+    "risky_actual_executed_count": 0,
+    "all_risky_actual_executed_false": true
+  },
+  "mutation_check": {
+    "history_count_unchanged": true,
+    "db_count_unchanged": true,
+    "ai_context_count_unchanged": true,
+    "history_mtimes_unchanged": true,
+    "collector_baseline_unchanged": true,
+    "mutation_detected": false,
+    "details": []
+  },
+  "run_state_artifact": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/run-state/auto_runner_health_check_20260605_235224.json",
+  "log_artifact": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.logs/auto-runner-health-check-20260605-235224.log",
+  "safety_confirmation": {
+    "live_booking_collection": false,
+    "live_jalan_collection": false,
+    "collector_command_executed": false,
+    "sync_command_executed": false,
+    "db_write": false,
+    "db_sync": false,
+    "ai_context_refresh": false,
+    "query_smoke": false,
+    "history_modification": false,
+    "history_append": false,
+    "playwright_launch": false,
+    "browser_automation": false,
+    "external_fetch": false,
+    "price_decision_report_generation": false,
+    "beds24_csv_generation": false,
+    "airhost_csv_generation": false,
+    "pms_ota_channel_manager_output": false,
+    "price_update": false,
+    "launchd_cron_github_actions_creation": false,
+    "git_add_commit_push": false,
+    "started_next_phase": false
+  },
+  "next_phase": "AUTO-RUNNER08X — Miuraya pricing CSV generation proposal, gated; or AUTO-RUNNER07G — always-on Mac launchd dry-run health-check installation proposal",
+  "report_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_health_check_20260605_235224.md",
+  "json_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_health_check_20260605_235224.json",
+  "csv_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_health_check_20260605_235224.csv",
+  "debug_artifact_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/debug/auto-runner-health-check/20260605_235224"
+}

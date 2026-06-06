@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildConflictPolicyMatrix,
   buildCurrentProblemSummary,
@@ -20,7 +21,7 @@ import {
 const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/bookingRowIdentityDesign.ts"), "utf8");
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/buildBookingRowIdentityDesign.ts"), "utf8");
 const PACKAGE_JSON = readFileSync(resolve(__dirname, "../package.json"), "utf8");
-const B10Y_PATH = resolve(__dirname, "../.data/reports/automation/booking_conflict_resolution_proposal_20260604_163851.json");
+const B10Y_PATH = resolveReportFixture(".data/reports/automation/booking_conflict_resolution_proposal_20260604_163851.json");
 
 function loadB10Y(): B10YArtifactLike {
   return JSON.parse(readFileSync(B10Y_PATH, "utf8")) as B10YArtifactLike;

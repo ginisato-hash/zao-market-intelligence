@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildMarketIdentityKey,
   buildMarketIdentityPlainKey,
@@ -19,7 +20,7 @@ import {
 
 const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/bookingObservationIdentity.ts"), "utf8");
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/buildBookingObservationIdentityReport.ts"), "utf8");
-const B10Y_ARTIFACT = resolve(__dirname, "../.data/reports/automation/booking_conflict_resolution_proposal_20260604_163851.json");
+const B10Y_ARTIFACT = resolveReportFixture(".data/reports/automation/booking_conflict_resolution_proposal_20260604_163851.json");
 
 function baseRow(overrides: Partial<BookingLikeHistoryRow> = {}): BookingLikeHistoryRow {
   return {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   B09X_MAX_PAGES,
   B09X_VERIFIED_SLUGS,
@@ -103,7 +104,7 @@ describe("BOOKING-B09X — target matrix controls", () => {
   it("loads the B08X target matrix artifact shape", () => {
     const artifact = JSON.parse(
       readFileSync(
-        resolve(__dirname, "../.data/reports/source-discovery/booking_target_matrix_expansion_proposal_20260604_160105.json"),
+        resolveReportFixture(".data/reports/source-discovery/booking_target_matrix_expansion_proposal_20260604_160105.json"),
         "utf8"
       )
     );

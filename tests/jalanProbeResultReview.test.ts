@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveReportFixture } from "./helpers/reportFixtureResolver";
 import {
   buildClassifierPolicyAudit,
   buildExtractorImprovementPlan,
@@ -23,7 +24,7 @@ const PACKAGE_JSON = readFileSync(resolve(__dirname, "../package.json"), "utf8")
 
 function loadAuto03x(): Auto03xArtifactLike {
   return JSON.parse(
-    readFileSync(resolve(__dirname, "../.data/reports/source-discovery/jalan_bounded_collection_probe_20260604_232102.json"), "utf8")
+    readFileSync(resolveReportFixture(".data/reports/source-discovery/jalan_bounded_collection_probe_20260604_232102.json"), "utf8")
   ) as Auto03xArtifactLike;
 }
 

@@ -1,0 +1,375 @@
+{
+  "run_id": "auto_runner_db_update_stub_20260605_234414",
+  "generated_at_jst": "2026-06-05T23:44:14+09:00",
+  "decision": "auto_runner_db_update_stub_ready_not_run",
+  "source_auto_runner07d_artifact": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_db_update_integration_proposal_20260605_232803.json",
+  "source_schedule_config_artifact": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_bounded_schedule_config_20260605_154449.json",
+  "current_state_summary": {
+    "history_rows": 210,
+    "db_rows": 210,
+    "ai_context_rows": 210,
+    "booking": {
+      "rows": 46,
+      "directional": 42,
+      "excluded": 4,
+      "direct": 0,
+      "role": "primary directional backbone"
+    },
+    "jalan": {
+      "rows": 38,
+      "directional": 8,
+      "excluded": 24,
+      "direct": 6,
+      "role": "supplementary domestic OTA signal"
+    },
+    "rakuten": {
+      "rows": 126,
+      "role": "frozen / caution"
+    },
+    "history_files": [
+      ".data/history/zao_signals_2026_05.csv",
+      ".data/history/zao_signals_2026_06.csv",
+      ".data/history/zao_signals_2026_07.csv",
+      ".data/history/zao_signals_2026_08.csv",
+      ".data/history/zao_signals_2026_09.csv",
+      ".data/history/zao_signals_2026_10.csv",
+      ".data/history/zao_signals_2026_12.csv"
+    ]
+  },
+  "gate_evaluation": [
+    {
+      "gate": "ZMI_AUTORUN_ENABLED",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "COLLECT_BOOKING",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "COLLECT_JALAN",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "ALLOW_HISTORY_APPEND",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "BOOKING_HISTORY_APPEND",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "JALAN_HISTORY_APPEND",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "HISTORY_TO_DB_SYNC",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "BUILD_AI_CONTEXT",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "RUN_USABILITY_CHECK",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "GENERATE_PRICE_REPORT",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    },
+    {
+      "gate": "GENERATE_PRICE_CSV",
+      "value": "0",
+      "enabled": false,
+      "source": "default"
+    }
+  ],
+  "stage_plan": [
+    {
+      "stage_id": 0,
+      "stage_name": "preflight / env / gates",
+      "enabled": true,
+      "disabled_reason": "",
+      "required_gates": [
+        "none"
+      ],
+      "candidate_command": "",
+      "mutation_level": "none",
+      "would_execute": true,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false."
+      ]
+    },
+    {
+      "stage_id": 1,
+      "stage_name": "current state snapshot",
+      "enabled": true,
+      "disabled_reason": "",
+      "required_gates": [
+        "none"
+      ],
+      "candidate_command": "",
+      "mutation_level": "summary_artifact",
+      "would_execute": true,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false."
+      ]
+    },
+    {
+      "stage_id": 2,
+      "stage_name": "choose due bounded batches",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: ZMI_AUTORUN_ENABLED=1",
+      "required_gates": [
+        "ZMI_AUTORUN_ENABLED=1"
+      ],
+      "candidate_command": "",
+      "mutation_level": "summary_artifact",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false."
+      ]
+    },
+    {
+      "stage_id": 3,
+      "stage_name": "optional Booking collection, gated",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: ZMI_AUTORUN_ENABLED=1, COLLECT_BOOKING=1",
+      "required_gates": [
+        "ZMI_AUTORUN_ENABLED=1",
+        "COLLECT_BOOKING=1"
+      ],
+      "candidate_command": "npm run probe:booking-bounded-expanded",
+      "mutation_level": "preview_artifacts",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Risky execution is deferred to a future explicitly approved phase.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 4,
+      "stage_name": "optional Jalan collection, gated",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: ZMI_AUTORUN_ENABLED=1, COLLECT_JALAN=1",
+      "required_gates": [
+        "ZMI_AUTORUN_ENABLED=1",
+        "COLLECT_JALAN=1"
+      ],
+      "candidate_command": "npm run probe:jalan-bounded-collection-improved",
+      "mutation_level": "preview_artifacts",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Risky execution is deferred to a future explicitly approved phase.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 5,
+      "stage_name": "normalize preview rows",
+      "enabled": true,
+      "disabled_reason": "",
+      "required_gates": [
+        "none"
+      ],
+      "candidate_command": "",
+      "mutation_level": "preview_artifacts",
+      "would_execute": true,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Risky execution is deferred to a future explicitly approved phase."
+      ]
+    },
+    {
+      "stage_id": 6,
+      "stage_name": "generate append proposals",
+      "enabled": true,
+      "disabled_reason": "",
+      "required_gates": [
+        "none"
+      ],
+      "candidate_command": "source append proposal commands",
+      "mutation_level": "summary_artifact",
+      "would_execute": true,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 7,
+      "stage_name": "append to .data/history, gated",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: ZMI_AUTORUN_ENABLED=1, ALLOW_HISTORY_APPEND=1, BOOKING_HISTORY_APPEND=1 or JALAN_HISTORY_APPEND=1",
+      "required_gates": [
+        "ZMI_AUTORUN_ENABLED=1",
+        "ALLOW_HISTORY_APPEND=1",
+        "BOOKING_HISTORY_APPEND=1 or JALAN_HISTORY_APPEND=1"
+      ],
+      "candidate_command": "approved source append commands",
+      "mutation_level": "history_write_gated",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Risky execution is deferred to a future explicitly approved phase.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 8,
+      "stage_name": "fresh DB sync via sync:history-to-db:fresh, gated",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: ZMI_AUTORUN_ENABLED=1, HISTORY_TO_DB_SYNC=1",
+      "required_gates": [
+        "ZMI_AUTORUN_ENABLED=1",
+        "HISTORY_TO_DB_SYNC=1"
+      ],
+      "candidate_command": "npm run sync:history-to-db:fresh",
+      "mutation_level": "db_write_gated",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Risky execution is deferred to a future explicitly approved phase.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 9,
+      "stage_name": "AI context refresh, gated",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: ZMI_AUTORUN_ENABLED=1, BUILD_AI_CONTEXT=1",
+      "required_gates": [
+        "ZMI_AUTORUN_ENABLED=1",
+        "BUILD_AI_CONTEXT=1"
+      ],
+      "candidate_command": "npm run build:ai-context-packs",
+      "mutation_level": "context_write_gated",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Risky execution is deferred to a future explicitly approved phase.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 10,
+      "stage_name": "usability/integrity verification",
+      "enabled": false,
+      "disabled_reason": "disabled because required gate(s) are not satisfied: RUN_USABILITY_CHECK=1",
+      "required_gates": [
+        "RUN_USABILITY_CHECK=1"
+      ],
+      "candidate_command": "source usability check commands",
+      "mutation_level": "summary_artifact",
+      "would_execute": false,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Candidate command is inert text in this phase."
+      ]
+    },
+    {
+      "stage_id": 11,
+      "stage_name": "write run summary",
+      "enabled": true,
+      "disabled_reason": "",
+      "required_gates": [
+        "none"
+      ],
+      "candidate_command": "",
+      "mutation_level": "summary_artifact",
+      "would_execute": true,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false."
+      ]
+    },
+    {
+      "stage_id": 12,
+      "stage_name": "stop before price report / CSV",
+      "enabled": true,
+      "disabled_reason": "",
+      "required_gates": [
+        "GENERATE_PRICE_REPORT=0",
+        "GENERATE_PRICE_CSV=0"
+      ],
+      "candidate_command": "",
+      "mutation_level": "none",
+      "would_execute": true,
+      "actual_executed": false,
+      "safety_notes": [
+        "AUTO-RUNNER07E is planner-only; actual_executed remains false.",
+        "Price report, CSV, and PMS output are out of scope even if gates are present."
+      ]
+    }
+  ],
+  "price_output_separation": {
+    "price_report_out_of_scope": true,
+    "csv_pms_output_out_of_scope": true,
+    "ignored_even_if_requested": [
+      "GENERATE_PRICE_REPORT",
+      "GENERATE_PRICE_CSV"
+    ],
+    "rule": "AUTO-RUNNER07E writes a machine-readable run plan only; pricing reports, CSV files, PMS output, and price updates are separate future/on-demand work."
+  },
+  "safety_confirmation": {
+    "mutation_executed": false,
+    "risky_stages_enabled": 0,
+    "collector_command_executed": false,
+    "sync_command_executed": false,
+    "db_write": false,
+    "db_sync": false,
+    "ai_context_refresh": false,
+    "query_smoke": false,
+    "history_modification": false,
+    "history_append": false,
+    "playwright_launch": false,
+    "browser_automation": false,
+    "external_fetch": false,
+    "price_decision_report_generation": false,
+    "beds24_csv_generation": false,
+    "airhost_csv_generation": false,
+    "pms_ota_channel_manager_output": false,
+    "price_update": false,
+    "launchd_cron_github_actions_creation": false,
+    "git_add_commit_push": false,
+    "started_next_phase": false
+  },
+  "next_phase": "AUTO-RUNNER08X — Miuraya pricing CSV generation proposal, gated; or AUTO-RUNNER07F — enable selected dry-run-only runner checks on always-on Mac",
+  "report_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_db_update_stub_20260605_234414.md",
+  "json_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_db_update_stub_20260605_234414.json",
+  "csv_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/reports/automation/auto_runner_db_update_stub_20260605_234414.csv",
+  "debug_artifact_path": "/Users/ginisato/Documents/Codex/2026-05-28/new-task/zao-market-intelligence/.data/debug/auto-runner-db-update-stub/20260605_234414"
+}
