@@ -185,8 +185,9 @@ describe("BOOKING-B10X — proposal row conversion", () => {
 describe("BOOKING-B10X — history preflight", () => {
   it("computes current history row count", () => {
     // 160 baseline + 25 approved Booking observations appended in Phase BOOKING-B11X = 185,
-    // + 25 approved Jalan AUTO03B rows appended in Phase JALAN-AUTO05X = 210.
-    expect(actualHistorySummary().total_rows).toBe(210);
+    // + 25 approved Jalan AUTO03B rows appended in Phase JALAN-AUTO05X = 210,
+    // + 9 approved Booking preview rows appended in Phase AUTO-RUNNER08Z = 219.
+    expect(actualHistorySummary().total_rows).toBe(219);
   });
 
   it("computes touched shards and expected after-append rows", () => {
