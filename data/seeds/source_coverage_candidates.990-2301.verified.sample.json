@@ -1,0 +1,32 @@
+[
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "rakuten",
+    "candidate_property_url": "https://travel.rakuten.co.jp/HOTEL/29465/",
+    "candidate_source_property_id": "29465",
+    "candidate_label": "Rakuten Travel HOTEL/29465 — verified for ル・ベール蔵王",
+    "evidence_note": "Rakuten Travel HOTEL/29465 URL was previously verified for ル・ベール蔵王 during Phase 19/20/21 Rakuten investigation. Overview page loads; plan listing subject to Phase 43X feasibility probe.",
+    "verification_status": "confirmed",
+    "reviewer_note": "Verified from prior Phase 19/20/21 Rakuten investigation. Hotel number 29465 is known-correct. Promote to needs_review pending feasibility probe."
+  },
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "booking",
+    "candidate_property_url": "https://www.booking.com/hotel/jp/le-vert-zao.ja.html",
+    "candidate_source_property_id": "le-vert-zao",
+    "candidate_label": "Booking.com slug le-vert-zao — verified but feasibility varies",
+    "evidence_note": "Booking.com slug le-vert-zao is confirmed for ル・ベール蔵王. Phase 41X probe showed visible content on one run and near-empty body on another, consistent with bot-detection inconsistency. No safe date-scoped total price was extracted.",
+    "verification_status": "needs_review",
+    "reviewer_note": "Phase 41X showed content_visible_no_safe_price on live probe; earlier investigation found empty_body_or_upstream_bot_detection. Coverage should remain needs_review until stable extraction is confirmed."
+  },
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "google_hotels",
+    "candidate_property_url": "https://www.google.com/travel/hotels/entity/CgoIn_eG0v78uPpiEAE",
+    "candidate_source_property_id": "CgoIn_eG0v78uPpiEAE",
+    "candidate_label": "Google Hotels entity CgoIn_eG0v78uPpiEAE — verified token, free access unsupported",
+    "evidence_note": "Google Hotels entity token CgoIn_eG0v78uPpiEAE is confirmed for ル・ベール蔵王. Phase 41X probe classified free direct access as unsupported/consent_or_js_wall. Paid SerpAPI route is forbidden. Entity ID is known-correct.",
+    "verification_status": "needs_review",
+    "reviewer_note": "Phase 41X classified free direct access as unsupported/consent_or_js_wall. Token is valid but no safe free collection path confirmed. Promote as needs_review to remain a future probe target."
+  }
+]

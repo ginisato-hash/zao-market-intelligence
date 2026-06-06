@@ -4,8 +4,8 @@
 // run-state, and logs. It does not execute collectors, sync, context refresh,
 // query smoke, pricing output, launchd, cron, or GitHub Actions.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   buildCurrentStateSnapshot,
   buildMutationCheck,
@@ -18,7 +18,7 @@ import {
   summarizeRunnerStub,
   type AutoRunnerHealthCheckOutput
 } from "../services/autoRunnerHealthCheck";
-import type { AutoRunnerDbUpdateStubOutput } from "../services/autoRunnerDbUpdateStub";
+import { buildRunnerStubSummaryInProcess, type AutoRunnerDbUpdateStubOutput } from "../services/autoRunnerDbUpdateStub";
 
 const SOURCE_AUTO_RUNNER07E_ARTIFACT_PATH = ".data/reports/automation/auto_runner_db_update_stub_20260605_234414.json";
 const SOURCE_AUTO_RUNNER07D_ARTIFACT_PATH = ".data/reports/automation/auto_runner_db_update_integration_proposal_20260605_232803.json";
@@ -64,6 +64,21 @@ function readJsonIfExists(path: string): unknown {
   return existsSync(path) ? readJson(path) : { missing: path };
 }
 
+// Locate the latest matching artifact so a fresh clone (which lacks the
+// original hardcoded timestamped file) can still resolve a source.
+// Read-only directory listing; never spawns a process.
+function findLatestArtifact(dir: string, prefix: string): string | undefined {
+  const absoluteDir = resolve(dir);
+  if (!existsSync(absoluteDir)) {
+    return undefined;
+  }
+  const matches = readdirSync(absoluteDir)
+    .filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
+    .sort();
+  const latest = matches[matches.length - 1];
+  return latest ? join(absoluteDir, latest) : undefined;
+}
+
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
@@ -82,10 +97,18 @@ function run(): AutoRunnerHealthCheckOutput {
   mkdirSync(resolve(RUN_STATE_DIR), { recursive: true });
   mkdirSync(resolve(LOG_DIR), { recursive: true });
 
-  const source07e = readJson<AutoRunnerDbUpdateStubOutput>(SOURCE_AUTO_RUNNER07E_ARTIFACT_PATH);
+  // Prefer the original hardcoded artifact, then any latest matching artifact,
+  // then derive the runner summary directly in-process so this command works on
+  // a fresh clone without previously generated .data/reports artifacts.
+  const source07ePath = existsSync(SOURCE_AUTO_RUNNER07E_ARTIFACT_PATH)
+    ? resolve(SOURCE_AUTO_RUNNER07E_ARTIFACT_PATH)
+    : findLatestArtifact(REPORT_DIR, "auto_runner_db_update_stub_");
   const currentStateBefore = buildCurrentStateSnapshot({ historyDir: HISTORY_DIR, dbPath: DB_PATH, aiContextPath: LATEST_MARKET_SNAPSHOT_PATH });
   const gateEvaluation = evaluateGates(process.env);
-  const runnerStubSummary = summarizeRunnerStub(source07e);
+  const runnerStubSummary = source07ePath
+    ? summarizeRunnerStub(readJson<AutoRunnerDbUpdateStubOutput>(source07ePath))
+    : buildRunnerStubSummaryInProcess({ historyDir: HISTORY_DIR, dbPath: DB_PATH, aiContextPath: LATEST_MARKET_SNAPSHOT_PATH, env: process.env });
+  const sourceArtifactDescriptor = source07ePath ? source07ePath : "in_process_runner_plan";
   const currentStateAfter = buildCurrentStateSnapshot({ historyDir: HISTORY_DIR, dbPath: DB_PATH, aiContextPath: LATEST_MARKET_SNAPSHOT_PATH });
   const mutationCheck = buildMutationCheck(currentStateBefore, currentStateAfter);
   const safetyConfirmation = buildSafetyConfirmation();
@@ -101,7 +124,7 @@ function run(): AutoRunnerHealthCheckOutput {
     gates: gateEvaluation,
     runnerStub: runnerStubSummary,
     mutation: mutationCheck,
-    sourceArtifactPresent: source07e.decision !== undefined
+    sourceArtifactPresent: runnerStubSummary.decision.length > 0
   });
   const nextPhase = "AUTO-RUNNER08X — Miuraya pricing CSV generation proposal, gated; or AUTO-RUNNER07G — always-on Mac launchd dry-run health-check installation proposal";
   const reportPath = resolve(REPORT_DIR, `${runId}.md`);
@@ -112,7 +135,7 @@ function run(): AutoRunnerHealthCheckOutput {
     run_id: runId,
     generated_at_jst: generatedAtJst,
     decision,
-    source_auto_runner07e_artifact: resolve(SOURCE_AUTO_RUNNER07E_ARTIFACT_PATH),
+    source_auto_runner07e_artifact: sourceArtifactDescriptor,
     current_state_before: currentStateBefore,
     current_state_after: currentStateAfter,
     gate_evaluation: gateEvaluation,
@@ -135,7 +158,7 @@ function run(): AutoRunnerHealthCheckOutput {
   writeJson(latestRunStatePath, output);
   writeFileSync(logPath, renderHealthCheckLog(output), "utf8");
 
-  writeJson(resolve(debugPath, "source_auto_runner07e_artifact.json"), source07e);
+  writeJson(resolve(debugPath, "source_auto_runner07e_artifact.json"), source07ePath ? readJsonIfExists(source07ePath) : { runner_stub_summary: runnerStubSummary });
   writeJson(resolve(debugPath, "source_auto_runner07d_artifact.json"), readJsonIfExists(SOURCE_AUTO_RUNNER07D_ARTIFACT_PATH));
   writeJson(resolve(debugPath, "source_fresh_sync_artifact.json"), readJsonIfExists(SOURCE_FRESH_SYNC_ARTIFACT_PATH));
   writeJson(resolve(debugPath, "latest_market_snapshot.json"), readJsonIfExists(LATEST_MARKET_SNAPSHOT_PATH));

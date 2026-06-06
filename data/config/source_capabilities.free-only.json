@@ -1,0 +1,92 @@
+[
+  {
+    "source": "jalan",
+    "status": "active",
+    "source_type": "direct_ota",
+    "cost_policy": "free_direct_only",
+    "confidence": "A",
+    "allowed": true,
+    "paid_service_required": false,
+    "notes": "Primary working source. Verified URL seed and batch runners exist. Multi-date, three-property, and five-property batches confirmed."
+  },
+  {
+    "source": "rakuten",
+    "status": "parked",
+    "source_type": "direct_ota",
+    "cost_policy": "free_direct_only",
+    "confidence": "unknown",
+    "allowed": true,
+    "paid_service_required": false,
+    "notes": "Parked after Phase 23. Overview page loads, no CAPTCHA, no block. Date-part form fields identified (f_nen1/f_tuki1/f_hi1 etc). f_hizuke remained empty after last attempt. Specific-date total price not yet accepted. Next experiment: direct date-part field write (Phase 27R), deferred."
+  },
+  {
+    "source": "booking",
+    "status": "parked",
+    "source_type": "direct_ota",
+    "cost_policy": "free_direct_only",
+    "confidence": "unknown",
+    "allowed": true,
+    "paid_service_required": false,
+    "notes": "Direct HTTP and Playwright path returns empty body (Akamai Bot Manager). Slug le-vert-zao confirmed. No accepted price. Resume condition: Booking.com Demand API partnership approved, or user permits paid infrastructure."
+  },
+  {
+    "source": "google_hotels",
+    "status": "feasibility_only",
+    "source_type": "metasearch_proxy",
+    "cost_policy": "free_direct_only",
+    "confidence": "unknown",
+    "allowed": true,
+    "paid_service_required": false,
+    "notes": "Entity ID CgoIn_eG0v78uPpiEAE confirmed for Le Vert Zao. Direct free Playwright feasibility may be investigated later at very low volume. Paid SERP APIs (SerpAPI, DataForSEO etc.) are forbidden. If blank/CAPTCHA/block, park immediately."
+  },
+  {
+    "source": "serpapi",
+    "status": "forbidden",
+    "source_type": "paid_serp_api",
+    "cost_policy": "paid_forbidden",
+    "confidence": "none",
+    "allowed": false,
+    "paid_service_required": true,
+    "notes": "Forbidden by user no-paid-services constraint. Do not implement."
+  },
+  {
+    "source": "dataforseo",
+    "status": "forbidden",
+    "source_type": "paid_serp_api",
+    "cost_policy": "paid_forbidden",
+    "confidence": "none",
+    "allowed": false,
+    "paid_service_required": true,
+    "notes": "Forbidden by user no-paid-services constraint. Do not implement."
+  },
+  {
+    "source": "apify",
+    "status": "forbidden",
+    "source_type": "paid_scraping_platform",
+    "cost_policy": "paid_forbidden",
+    "confidence": "none",
+    "allowed": false,
+    "paid_service_required": true,
+    "notes": "Forbidden by user no-paid-services constraint. Do not implement."
+  },
+  {
+    "source": "brightdata",
+    "status": "forbidden",
+    "source_type": "paid_scraping_platform",
+    "cost_policy": "paid_forbidden",
+    "confidence": "none",
+    "allowed": false,
+    "paid_service_required": true,
+    "notes": "Forbidden by user no-paid-services constraint. Do not implement."
+  },
+  {
+    "source": "oxylabs",
+    "status": "forbidden",
+    "source_type": "paid_scraping_platform",
+    "cost_policy": "paid_forbidden",
+    "confidence": "none",
+    "allowed": false,
+    "paid_service_required": true,
+    "notes": "Forbidden by user no-paid-services constraint. Do not implement."
+  }
+]

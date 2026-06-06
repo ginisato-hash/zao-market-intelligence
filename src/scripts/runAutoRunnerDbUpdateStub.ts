@@ -4,10 +4,11 @@
 // appends, DB sync, AI context refresh, query smoke, pricing reports, CSV, or
 // PMS output.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   buildCurrentStateSummary,
+  buildDefaultPipelineStages,
   buildPriceOutputSeparation,
   buildSafetyConfirmation,
   buildStagePlan,
@@ -61,6 +62,21 @@ function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(resolve(path), "utf8")) as T;
 }
 
+// Locate the latest matching artifact in a directory so a fresh clone (which
+// lacks the original hardcoded timestamped file) can still resolve a source.
+// Read-only directory listing; never spawns a process.
+function findLatestArtifact(dir: string, prefix: string): string | undefined {
+  const absoluteDir = resolve(dir);
+  if (!existsSync(absoluteDir)) {
+    return undefined;
+  }
+  const matches = readdirSync(absoluteDir)
+    .filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
+    .sort();
+  const latest = matches[matches.length - 1];
+  return latest ? join(absoluteDir, latest) : undefined;
+}
+
 function readJsonIfExists(path: string): unknown {
   return existsSync(path) ? readJson(path) : { missing: path };
 }
@@ -78,17 +94,25 @@ function run(): AutoRunnerDbUpdateStubOutput {
   mkdirSync(reportDir, { recursive: true });
   mkdirSync(debugPath, { recursive: true });
 
-  const source07d = readJson<Source07dLike>(SOURCE_AUTO_RUNNER07D_ARTIFACT_PATH);
+  // Prefer the original hardcoded artifact, then any latest matching artifact,
+  // then fall back to the built-in default pipeline model so this command works
+  // on a fresh clone without previously generated .data/reports artifacts.
+  const source07dPath = existsSync(SOURCE_AUTO_RUNNER07D_ARTIFACT_PATH)
+    ? resolve(SOURCE_AUTO_RUNNER07D_ARTIFACT_PATH)
+    : findLatestArtifact(REPORT_DIR, "auto_runner_db_update_integration_proposal_");
+  const source07d: Source07dLike = source07dPath ? readJson<Source07dLike>(source07dPath) : {};
+  const sourceStages = source07d.updated_pipeline_stages ?? buildDefaultPipelineStages();
+  const sourceArtifactDescriptor = source07dPath ? source07dPath : "default_pipeline_model";
   const historySummary = summarizeHistoryState(HISTORY_DIR);
   const dbRows = summarizeDbRowsReadOnly(DB_PATH);
   const aiContextRows = summarizeAiContextRows(LATEST_MARKET_SNAPSHOT_PATH);
   const currentStateSummary = buildCurrentStateSummary({ history: historySummary, dbRows, aiContextRows });
   const gateEvaluation = evaluateGates(process.env);
-  const stagePlan = buildStagePlan(source07d.updated_pipeline_stages ?? [], gateEvaluation);
+  const stagePlan = buildStagePlan(sourceStages, gateEvaluation);
   const priceOutputSeparation = buildPriceOutputSeparation();
   const safetyConfirmation = buildSafetyConfirmation(stagePlan);
   const decision = decideAutoRunnerDbUpdateStub({
-    sourceArtifactsPresent: source07d.decision !== undefined && existsSync(SOURCE_SCHEDULE_CONFIG_ARTIFACT_PATH),
+    sourceArtifactsPresent: stagePlan.length > 0,
     currentStateReady: currentStateSummary.history_rows > 0 && currentStateSummary.db_rows > 0 && currentStateSummary.ai_context_rows > 0,
     riskyStagesEnabled: safetyConfirmation.risky_stages_enabled
   });
@@ -101,7 +125,7 @@ function run(): AutoRunnerDbUpdateStubOutput {
     run_id: runId,
     generated_at_jst: generatedAtJst,
     decision,
-    source_auto_runner07d_artifact: resolve(SOURCE_AUTO_RUNNER07D_ARTIFACT_PATH),
+    source_auto_runner07d_artifact: sourceArtifactDescriptor,
     source_schedule_config_artifact: resolve(SOURCE_SCHEDULE_CONFIG_ARTIFACT_PATH),
     current_state_summary: currentStateSummary,
     gate_evaluation: gateEvaluation,

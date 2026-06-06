@@ -1,0 +1,70 @@
+[
+  {
+    "canonical_property_name": "名湯リゾート ルーセント",
+    "aliases": [
+      "ルーセント",
+      "名湯リゾート ルーセントタカミヤ",
+      "蔵王温泉 名湯リゾート ルーセントタカミヤ"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Jalan verification checklist."
+  },
+  {
+    "canonical_property_name": "深山荘 高見屋",
+    "aliases": [
+      "深山荘高見屋",
+      "Miyamaso Takamiya",
+      "深山荘 高見屋 −MIYAMASO TAKAMIYA−"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Jalan verification checklist."
+  },
+  {
+    "canonical_property_name": "ホテル喜らく",
+    "aliases": [
+      "ホテル　喜らく",
+      "ホテル 喜らく"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Phase 26 Jalan verified URL expansion."
+  },
+  {
+    "canonical_property_name": "BED'n ONSEN HAMMOND",
+    "aliases": [
+      "BED’n ONSEN HAMMOND",
+      "蔵王温泉　BED’n ONSEN HAMMOND - ハモンド -",
+      "BED'n ONSEN HAMMOND - ハモンド -"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Phase 26 Jalan verified URL expansion."
+  },
+  {
+    "canonical_property_name": "JURIN",
+    "aliases": [
+      "蔵王温泉　JURIN",
+      "蔵王温泉 JURIN"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Phase 26 Jalan verified URL expansion."
+  },
+  {
+    "canonical_property_name": "吉田屋",
+    "aliases": [
+      "蔵王温泉　吉田屋",
+      "蔵王温泉 吉田屋"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Phase 26 Jalan verified URL expansion."
+  },
+  {
+    "canonical_property_name": "名湯舎 創",
+    "aliases": [
+      "名湯舎　創",
+      "名湯舎 創 -MEITOYA SO-",
+      "蔵王温泉　名湯舎　創　‐MEITOYA　SO‐",
+      "蔵王温泉 名湯舎 創"
+    ],
+    "status": "confirmed",
+    "notes": "Alias surfaced by Phase 26 Jalan verified URL expansion."
+  }
+]
