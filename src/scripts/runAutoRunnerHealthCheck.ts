@@ -112,8 +112,9 @@ function run(): AutoRunnerHealthCheckOutput {
   const currentStateAfter = buildCurrentStateSnapshot({ historyDir: HISTORY_DIR, dbPath: DB_PATH, aiContextPath: LATEST_MARKET_SNAPSHOT_PATH });
   const mutationCheck = buildMutationCheck(currentStateBefore, currentStateAfter);
   const safetyConfirmation = buildSafetyConfirmation();
-  // Expected canonical baseline after AUTO-RUNNER10X-PATCH live append (219 -> 243).
-  const EXPECTED_BASELINE_ROW_COUNT = 243;
+  // Expected canonical baseline after AUTO-RUNNER11Y first live run (243 -> 246;
+  // 219 -> 243 in AUTO-RUNNER10X-PATCH, +3 intraday Booking rows in 11Y).
+  const EXPECTED_BASELINE_ROW_COUNT = 246;
   const before = currentStateBefore.current_state_summary;
   const after = currentStateAfter.current_state_summary;
   const stateCountsMatchExpected =

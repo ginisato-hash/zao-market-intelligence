@@ -187,8 +187,9 @@ describe("BOOKING-B10X — history preflight", () => {
     // 160 baseline + 25 approved Booking observations appended in Phase BOOKING-B11X = 185,
     // + 25 approved Jalan AUTO03B rows appended in Phase JALAN-AUTO05X = 210,
     // + 9 approved Booking preview rows appended in Phase AUTO-RUNNER08Z = 219,
-    // + 24 approved rows (9 Booking + 15 Jalan) appended in Phase AUTO-RUNNER10X-PATCH = 243.
-    expect(actualHistorySummary().total_rows).toBe(243);
+    // + 24 approved rows (9 Booking + 15 Jalan) appended in Phase AUTO-RUNNER10X-PATCH = 243,
+    // + 3 intraday Booking price-change rows appended in Phase AUTO-RUNNER11Y first live run = 246.
+    expect(actualHistorySummary().total_rows).toBe(246);
   });
 
   it("computes touched shards and expected after-append rows", () => {

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTO-RUNNER11Y - launchd template for the controlled daily LIVE market refresh.
+
+  Runs `npm run auto-runner:market-refresh` daily at 09:00 JST with the six live
+  gates enabled (ZMI_AUTORUN_ENABLED / COLLECT_BOOKING / COLLECT_JALAN /
+  ALLOW_HISTORY_APPEND / HISTORY_TO_DB_SYNC / BUILD_AI_CONTEXT). The runner stays
+  fail-closed and bounded: strict Booking/Jalan page caps, policy-approved append
+  only, intraday/new rows with unique ids, fresh DB sync only after append, AI
+  context refresh only after DB sync. It never collects Rakuten/Google, never uses
+  stealth/CAPTCHA-bypass/paid-proxy/login cookies, and never emits pricing/PMS
+  output.
+
+  This SUPERSEDES com.yuge.zmi.market-refresh-gated as the active 09:00 job; the
+  gated plist is booted out and removed so only one live market-refresh job runs.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.market-refresh-live</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_AUTORUN_ENABLED=1 COLLECT_BOOKING=1 COLLECT_JALAN=1 ALLOW_HISTORY_APPEND=1 HISTORY_TO_DB_SYNC=1 BUILD_AI_CONTEXT=1 npm run auto-runner:market-refresh</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-live.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-live.err.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>9</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>
