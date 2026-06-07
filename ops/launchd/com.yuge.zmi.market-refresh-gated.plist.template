@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTO-RUNNER11X - launchd template for the gated integrated market refresh.
+
+  Runs `npm run auto-runner:market-refresh` daily at 09:00 JST with NO live env
+  flags set. With all gates (ZMI_AUTORUN_ENABLED / COLLECT_BOOKING / COLLECT_JALAN
+  / ALLOW_HISTORY_APPEND / HISTORY_TO_DB_SYNC / BUILD_AI_CONTEXT) defaulting to
+  off, the runner is fail-closed: it builds the preflight/plan only, executes zero
+  live pages, appends nothing, syncs nothing, refreshes no AI context, and emits
+  no pricing/PMS output (decision = auto_runner_market_refresh_ready_not_run).
+
+  This is installed at ~/Library/LaunchAgents/com.yuge.zmi.market-refresh-gated.plist.
+  Enabling live daily collection (the gate flags above) is a future, explicitly
+  approved phase (AUTO-RUNNER11Y) and must NOT be added here without instruction.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.market-refresh-gated</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; npm run auto-runner:market-refresh</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-gated.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-gated.err.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>9</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>
