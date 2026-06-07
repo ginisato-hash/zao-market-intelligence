@@ -78,6 +78,7 @@
     "report:property-name-normalization": "node --import tsx src/scripts/runPropertyNameNormalization.ts",
     "report:property-discovery-review": "node --import tsx src/scripts/buildPropertyDiscoveryReviewReport.ts",
     "discover:properties": "node --import tsx src/scripts/runPropertyDiscovery.ts",
+    "discover:properties:review-pack": "node --import tsx src/scripts/runPropertyDiscoveryReview.ts",
     "proposal:property-master-update": "node --import tsx src/scripts/buildPropertyMasterUpdateProposal.ts",
     "real-run:property-master-approved-update": "node --import tsx src/scripts/runPropertyMasterApprovedUpdate.ts",
     "check:property-discovery-regression": "node --import tsx src/scripts/runPropertyDiscoveryRegressionCheck.ts",
