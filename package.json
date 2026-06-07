@@ -166,6 +166,8 @@
     "auto-runner:booking-preview": "node --import tsx src/scripts/runAutoRunnerBookingPreview.ts",
     "real-run:booking-preview-history-append": "node --import tsx src/scripts/runBookingPreviewHistoryAppendRealRun.ts",
     "auto-runner:market-refresh": "node --import tsx src/scripts/runAutoRunnerMarketRefresh.ts",
+    "auto-runner:ops-summary": "node --import tsx src/scripts/runAutoRunnerOpsSummary.ts",
+    "plan:collection-scope": "node --import tsx src/scripts/runCollectionScopePlanner.ts",
     "db:migrate": "node --import tsx src/db/migrate.ts",
     "db:list:properties": "node --import tsx src/scripts/listProperties.ts",
     "db:schema:print": "node --import tsx src/db/schema.ts",
