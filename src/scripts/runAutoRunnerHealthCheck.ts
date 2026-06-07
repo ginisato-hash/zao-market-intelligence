@@ -112,13 +112,17 @@ function run(): AutoRunnerHealthCheckOutput {
   const currentStateAfter = buildCurrentStateSnapshot({ historyDir: HISTORY_DIR, dbPath: DB_PATH, aiContextPath: LATEST_MARKET_SNAPSHOT_PATH });
   const mutationCheck = buildMutationCheck(currentStateBefore, currentStateAfter);
   const safetyConfirmation = buildSafetyConfirmation();
+  // Expected canonical baseline after AUTO-RUNNER10X-PATCH live append (219 -> 243).
+  const EXPECTED_BASELINE_ROW_COUNT = 243;
+  const before = currentStateBefore.current_state_summary;
+  const after = currentStateAfter.current_state_summary;
   const stateCountsMatchExpected =
-    currentStateBefore.current_state_summary.history_rows === 219 &&
-    currentStateBefore.current_state_summary.db_rows === 219 &&
-    currentStateBefore.current_state_summary.ai_context_rows === 219 &&
-    currentStateAfter.current_state_summary.history_rows === 219 &&
-    currentStateAfter.current_state_summary.db_rows === 219 &&
-    currentStateAfter.current_state_summary.ai_context_rows === 219;
+    before.history_rows === EXPECTED_BASELINE_ROW_COUNT &&
+    before.db_rows === EXPECTED_BASELINE_ROW_COUNT &&
+    before.ai_context_rows === EXPECTED_BASELINE_ROW_COUNT &&
+    after.history_rows === EXPECTED_BASELINE_ROW_COUNT &&
+    after.db_rows === EXPECTED_BASELINE_ROW_COUNT &&
+    after.ai_context_rows === EXPECTED_BASELINE_ROW_COUNT;
   const decision = decideAutoRunnerHealthCheck({
     stateCountsMatchExpected,
     gates: gateEvaluation,

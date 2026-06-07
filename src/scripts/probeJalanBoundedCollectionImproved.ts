@@ -89,7 +89,7 @@ function loadAuto03xPriorRows(artifact: Record<string, unknown>): Auto03xPriorRo
   }));
 }
 
-interface PageResult {
+export interface PageResult {
   target_id: string;
   canonical_property_name: string;
   jalan_yad_id: string;
@@ -115,7 +115,7 @@ interface PageResult {
   warning_flags: string[];
 }
 
-async function collectTarget(input: {
+export async function collectTarget(input: {
   browser: Browser;
   target: JalanProbeTarget;
   runId: string;
@@ -676,7 +676,9 @@ async function run(): Promise<void> {
   );
 }
 
-run().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1]?.endsWith("probeJalanBoundedCollectionImproved.ts")) {
+  run().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
