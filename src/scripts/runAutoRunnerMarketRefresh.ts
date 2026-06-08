@@ -17,6 +17,8 @@ import {
   buildBookingSourceLevelCheck,
   buildJalanSourceLevelCheck,
   buildJalanTargetMatrix,
+  buildPlannerDrivenBookingPlan,
+  buildPlannerDrivenJalanMatrix,
   buildSafetyConfirmation,
   decideMarketRefresh,
   evaluateMarketRefreshGates,
@@ -30,6 +32,8 @@ import {
   type MarketStateSummary,
   type SourceLevelCheck
 } from "../services/autoRunnerMarketRefresh";
+import { buildScopePlan, type DemandConfig, type PlannerProperty } from "../services/collectionScopePlanner";
+import { buildMappingIndex } from "../services/plannedMarketRefresh";
 import { type PreviewResult, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
   buildImprovedSummaries,
@@ -43,6 +47,25 @@ const DB_PATH = ".data/zao-market-intelligence.sqlite";
 const AI_CONTEXT_PATH = ".data/ai-context/latest_market_snapshot.json";
 const REPORT_DIR = ".data/reports/automation";
 const DEBUG_ROOT = ".data/debug/auto-runner-market-refresh";
+
+// Phase AUTO-RUNNER15X-B demand config (mirrors runCollectionScopePlanner.ts).
+const PLANNER_DEMAND_CONFIG: DemandConfig = {
+  public_holidays: {
+    "2026-07-20": "海の日", "2026-08-11": "山の日", "2026-09-21": "敬老の日",
+    "2026-09-22": "国民の休日", "2026-09-23": "秋分の日", "2026-10-12": "スポーツの日",
+    "2026-11-03": "文化の日", "2026-11-23": "勤労感謝の日", "2027-01-01": "元日"
+  },
+  long_weekend_dates: new Set([
+    "2026-07-18", "2026-07-19", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22",
+    "2026-10-10", "2026-10-11", "2026-11-21", "2026-11-22"
+  ]),
+  peak_periods: [
+    { code: "obon", from: "2026-08-08", to: "2026-08-16" },
+    { code: "autumn_foliage_saturday", from: "2026-10-10", to: "2026-11-08", saturday_only: true },
+    { code: "ski_season_saturday", from: "2026-12-19", to: "2027-03-15", saturday_only: true },
+    { code: "year_end_peak", from: "2026-12-28", to: "2027-01-03" }
+  ]
+};
 
 interface CommandResult {
   command: string;
@@ -296,8 +319,27 @@ async function run(): Promise<RunnerOutput> {
   const gate = evaluateMarketRefreshGates(process.env);
   const preflight = readState();
   const preflightOk = preflight.history_rows > 0 && preflight.duplicate_row_id_count === 0;
-  const bookingPlan = buildBookingPlan(todayUtcYmd());
-  const jalanTargets = buildJalanTargetMatrix(todayUtcYmd());
+  const plannerDriven = process.env["PLANNER_DRIVEN_MARKET_REFRESH"] === "1";
+  let bookingPlan: ReturnType<typeof buildBookingPlan>;
+  let jalanTargets: ReturnType<typeof buildJalanTargetMatrix>;
+  if (plannerDriven) {
+    // Phase AUTO-RUNNER15X-B: use planner-selected targets.
+    const props: PlannerProperty[] = [
+      ...Array.from(buildMappingIndex().booking.entries()).map(([slug, name]) => ({ source: "booking" as const, property_slug: slug, canonical_property_name: name })),
+      ...Array.from(buildMappingIndex().jalan.entries()).map(([yadId, name]) => ({ source: "jalan" as const, property_slug: yadId, canonical_property_name: name }))
+    ];
+    const scopePlan = buildScopePlan({ runDateIso: todayUtcYmd(), properties: props, config: PLANNER_DEMAND_CONFIG });
+    const bookingSlugs = scopePlan.selected.filter((t) => t.source === "booking" && t.can_collect).map((t) => t.property_slug);
+    const jalanYadIds = scopePlan.selected.filter((t) => t.source === "jalan" && t.can_collect).map((t) => t.property_slug);
+    const plannerBooking = buildPlannerDrivenBookingPlan(bookingSlugs, todayUtcYmd());
+    const plannerJalan = buildPlannerDrivenJalanMatrix(jalanYadIds, todayUtcYmd());
+    bookingPlan = plannerBooking;
+    jalanTargets = plannerJalan.targets;
+  } else {
+    // Fixed live target behavior (unchanged from AUTO-RUNNER10X/11Y).
+    bookingPlan = buildBookingPlan(todayUtcYmd());
+    jalanTargets = buildJalanTargetMatrix(todayUtcYmd());
+  }
 
   let bookingRows: BookingPreviewRow[] = [];
   let bookingResult: Record<string, unknown> = { skipped: true, reason: "live_mode_not_authorized" };
@@ -386,10 +428,11 @@ async function run(): Promise<RunnerOutput> {
     aiContextRefreshed: contextSucceeded
   });
 
-  const output: RunnerOutput = {
+  const output: RunnerOutput & { planner_driven: boolean } = {
     run_id: runId,
     generated_at_jst: generatedAtJst,
     decision,
+    planner_driven: plannerDriven,
     gate_result: gate,
     preflight_state: preflight,
     post_run_state: postState,
@@ -474,6 +517,7 @@ function countBy(values: readonly string[]): Record<string, number> {
 run()
   .then((result) => {
     console.log(`decision=${result.decision}`);
+    console.log(`planner_driven=${(result as unknown as Record<string,unknown>)["planner_driven"] === true}`);
     console.log(`live_collection_executed=${result.safety_confirmation.live_booking_collection || result.safety_confirmation.live_jalan_collection}`);
     console.log(`booking_pages=${(result.booking_result["page_count"] as number | undefined) ?? 0}`);
     console.log(`jalan_pages=${(result.jalan_result["page_count"] as number | undefined) ?? 0}`);

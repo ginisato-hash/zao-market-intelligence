@@ -11,8 +11,11 @@
   stealth/CAPTCHA-bypass/paid-proxy/login cookies, and never emits pricing/PMS
   output.
 
-  This SUPERSEDES com.yuge.zmi.market-refresh-gated as the active 09:00 job; the
-  gated plist is booted out and removed so only one live market-refresh job runs.
+  Updated in AUTO-RUNNER15X-B to include PLANNER_DRIVEN_MARKET_REFRESH=1 so the
+  09:00 daily run uses planner-selected date/property targets. All six safety
+  gates (ZMI_AUTORUN_ENABLED / COLLECT_BOOKING / COLLECT_JALAN / ALLOW_HISTORY_APPEND
+  / HISTORY_TO_DB_SYNC / BUILD_AI_CONTEXT) are still required. Rakuten/Google
+  live remain disabled (planner caps = 0). This SUPERSEDES market-refresh-gated.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -23,7 +26,7 @@
 	<array>
 		<string>/bin/zsh</string>
 		<string>-lc</string>
-		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_AUTORUN_ENABLED=1 COLLECT_BOOKING=1 COLLECT_JALAN=1 ALLOW_HISTORY_APPEND=1 HISTORY_TO_DB_SYNC=1 BUILD_AI_CONTEXT=1 npm run auto-runner:market-refresh</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_AUTORUN_ENABLED=1 COLLECT_BOOKING=1 COLLECT_JALAN=1 ALLOW_HISTORY_APPEND=1 HISTORY_TO_DB_SYNC=1 BUILD_AI_CONTEXT=1 PLANNER_DRIVEN_MARKET_REFRESH=1 npm run auto-runner:market-refresh</string>
 	</array>
 	<key>WorkingDirectory</key>
 	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>

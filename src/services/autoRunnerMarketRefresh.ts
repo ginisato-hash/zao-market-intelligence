@@ -137,6 +137,58 @@ export function totalPageCapRespected(input: { bookingPages: number; jalanPages:
   return input.bookingPages + input.jalanPages <= MAX_TOTAL_LIVE_PAGES;
 }
 
+// Phase AUTO-RUNNER15X-B — planner-driven target builder.
+//
+// Called only when PLANNER_DRIVEN_MARKET_REFRESH=1. Converts planner-selected
+// targets into the same BookingPlan / JalanTargetMatrix shapes used by the fixed
+// runner so the rest of the pipeline (collection, append, sync, context) is
+// completely unchanged. Existing fixed target paths are preserved exactly when
+// the gate is absent.
+export interface PlannerDrivenBookingPlan {
+  dates: string[];
+  target_matrix: ReturnType<typeof buildBookingTargetMatrix>;
+  selected_targets: ReturnType<typeof enforceBookingPageCap>["selected"];
+  max_pages: number;
+  page_cap_respected: boolean;
+  planner_driven: true;
+}
+
+export interface PlannerDrivenJalanMatrix {
+  targets: JalanProbeTarget[];
+  planner_driven: true;
+}
+
+export function buildPlannerDrivenBookingPlan(selectedBookingSlugs: readonly string[], todayIso: string): PlannerDrivenBookingPlan {
+  // Only use planner-selected slugs; guard against unknown slugs.
+  const knownSlugs = new Set(VERIFIED_BOOKING_TARGETS.map((t) => t.slug));
+  const safeTargets = VERIFIED_BOOKING_TARGETS.filter((t) => selectedBookingSlugs.includes(t.slug) && knownSlugs.has(t.slug));
+  const dates = selectBookingPreviewDates(todayIso, PEAK_DATE);
+  const matrix = buildBookingTargetMatrix(safeTargets, dates);
+  const cap = enforceBookingPageCap(matrix);
+  const selected = cap.selected.slice(0, MAX_BOOKING_PAGES);
+  return {
+    dates,
+    target_matrix: matrix,
+    selected_targets: selected,
+    max_pages: MAX_BOOKING_PAGES,
+    page_cap_respected: selected.length <= MAX_BOOKING_PAGES,
+    planner_driven: true
+  };
+}
+
+export function buildPlannerDrivenJalanMatrix(selectedYadIds: readonly string[], todayIso: string): PlannerDrivenJalanMatrix {
+  const knownIds = new Set(VERIFIED_JALAN_TARGETS.map((t) => t.jalanYadId));
+  const safeProperties = VERIFIED_JALAN_TARGETS.filter((t) => selectedYadIds.includes(t.jalanYadId) && knownIds.has(t.jalanYadId));
+  const dates = selectMarketRefreshDates(todayIso);
+  const targets: JalanProbeTarget[] = [];
+  for (const property of safeProperties.slice(0, MAX_JALAN_PROPERTIES)) {
+    for (const checkin of dates) {
+      targets.push(buildJalanProbeTarget({ ...property, checkin }));
+    }
+  }
+  return { targets: targets.slice(0, MAX_JALAN_PAGES), planner_driven: true };
+}
+
 export interface SourceLevelCheck {
   source: "booking" | "jalan";
   executed_pages: number;

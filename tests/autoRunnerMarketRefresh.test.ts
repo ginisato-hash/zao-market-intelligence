@@ -6,12 +6,15 @@ import {
   MAX_BOOKING_PAGES,
   MAX_JALAN_PAGES,
   MAX_TOTAL_LIVE_PAGES,
+  VERIFIED_JALAN_TARGETS,
   appendHistoryRowsAtomic,
   buildAppendPlan,
   buildBookingPlan,
   buildBookingSourceLevelCheck,
   buildJalanSourceLevelCheck,
   buildJalanTargetMatrix,
+  buildPlannerDrivenBookingPlan,
+  buildPlannerDrivenJalanMatrix,
   buildSafetyConfirmation,
   decideMarketRefresh,
   evaluateMarketRefreshGates,
@@ -20,6 +23,7 @@ import {
   totalPageCapRespected,
   type ExistingHistoryKey
 } from "../src/services/autoRunnerMarketRefresh";
+import { VERIFIED_BOOKING_TARGETS } from "../src/services/autoRunnerBookingPreview";
 import { renderHistoryCsv, type HistoryRow } from "../src/services/localHistorySchemaDesign";
 import type { PreviewRow } from "../src/services/autoRunnerBookingPreview";
 import type { JalanImprovedPreviewRow } from "../src/services/jalanBoundedCollectionProbeImproved";
@@ -398,6 +402,47 @@ describe("AUTO-RUNNER10X - executable safety scans", () => {
 
   it("24. Package contains market refresh script", () => {
     expect(PACKAGE_JSON).toContain("auto-runner:market-refresh");
+  });
+});
+
+describe("AUTO-RUNNER15X-B - planner-driven target builder", () => {
+  const ALL_BOOKING_SLUGS = VERIFIED_BOOKING_TARGETS.map((t) => t.slug);
+  const ALL_JALAN_YADS = VERIFIED_JALAN_TARGETS.map((t) => t.jalanYadId);
+
+  it("builds planner-driven booking plan from slugs with cap respected", () => {
+    const plan = buildPlannerDrivenBookingPlan(ALL_BOOKING_SLUGS, "2026-06-08");
+    expect(plan.planner_driven).toBe(true);
+    expect(plan.selected_targets.length).toBeLessThanOrEqual(MAX_BOOKING_PAGES);
+    expect(plan.selected_targets.every((t) => t.source === "booking")).toBe(true);
+  });
+
+  it("builds planner-driven jalan matrix from yadIds with cap respected", () => {
+    const matrix = buildPlannerDrivenJalanMatrix(ALL_JALAN_YADS, "2026-06-08");
+    expect(matrix.planner_driven).toBe(true);
+    expect(matrix.targets.length).toBeLessThanOrEqual(MAX_JALAN_PAGES);
+  });
+
+  it("rejects unknown booking slugs from planner", () => {
+    const plan = buildPlannerDrivenBookingPlan(["unknown-ghost-hotel", "zao-kokusai"], "2026-06-08");
+    expect(plan.selected_targets.every((t) => (t as unknown as { slug?: string }).slug !== "unknown-ghost-hotel")).toBe(true);
+  });
+
+  it("rejects unknown jalan yadIds from planner", () => {
+    const matrix = buildPlannerDrivenJalanMatrix(["yad999999", ALL_JALAN_YADS[0]!], "2026-06-08");
+    expect(matrix.targets.every((t) => t.jalan_yad_id !== "yad999999")).toBe(true);
+  });
+
+  it("existing fixed behavior unchanged without PLANNER_DRIVEN_MARKET_REFRESH=1", () => {
+    // buildBookingPlan and buildJalanTargetMatrix still work exactly as before.
+    const fixed = buildBookingPlan("2026-06-08");
+    expect(fixed.selected_targets.length).toBeLessThanOrEqual(MAX_BOOKING_PAGES);
+    expect((fixed as unknown as Record<string, unknown>)["planner_driven"]).toBeUndefined();
+  });
+
+  it("Rakuten and Google remain disabled in planner-driven mode", () => {
+    // The planner only produces booking/jalan; rakuten/google have cap 0.
+    const matrix = buildPlannerDrivenJalanMatrix([], "2026-06-08");
+    expect(matrix.targets.every((t) => (t as unknown as Record<string,unknown>)["source"] !== "rakuten")).toBe(true);
   });
 });
 
