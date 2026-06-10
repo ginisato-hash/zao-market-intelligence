@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTO-RUNNER16X - launchd template for the rotating 2-hourly market refresh.
+
+  TEMPLATE ONLY — installed in a later staged-cutover phase (16X-D/E), NOT during
+  16X-A. Per the approved staged plan, the existing com.yuge.zmi.market-refresh-live
+  (09:00) keeps running until manual-live + shadow validation pass; only then is
+  this installed and the old job booted out (one live history writer at a time).
+
+  Runs every 2 hours (00,02,...,22 JST). Six live gates + PLANNER_ROTATION_ENABLED
+  drive planner-selected slugs/stay_dates with strict per-run caps (total 12,
+  booking 6, jalan 6). 24h cooldown per (source,property,stay_date). Rakuten/Google
+  never collected. PUBLISH_CHATGPT_DB=1 publishes to the chatgpt-db-latest release
+  after a successful aligned append (publish failure is non-fatal). No pricing/PMS.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.market-refresh-rotating</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_AUTORUN_ENABLED=1 COLLECT_BOOKING=1 COLLECT_JALAN=1 ALLOW_HISTORY_APPEND=1 HISTORY_TO_DB_SYNC=1 BUILD_AI_CONTEXT=1 PLANNER_ROTATION_ENABLED=1 PUBLISH_CHATGPT_DB=1 npm run auto-runner:market-refresh-rotating</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-rotating.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-rotating.err.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>0</integer></dict>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

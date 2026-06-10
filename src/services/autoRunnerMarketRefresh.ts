@@ -22,8 +22,14 @@ import {
   buildTargetMatrix as buildBookingTargetMatrix,
   enforcePageCap as enforceBookingPageCap,
   selectPreviewDates as selectBookingPreviewDates,
-  type PreviewRow as BookingPreviewRow
+  type PreviewRow as BookingPreviewRow,
+  type TargetCell as BookingTargetCell
 } from "./autoRunnerBookingPreview";
+import {
+  buildBookingRenderedDomUrl,
+  checkoutForOneNight,
+  sanitizeBookingUrl
+} from "./bookingRenderedDomProbe";
 import { buildProposedHistoryRow as buildBookingHistoryRow } from "./bookingPreviewAppendProposal";
 import {
   buildJalanProbeTarget,
@@ -187,6 +193,64 @@ export function buildPlannerDrivenJalanMatrix(selectedYadIds: readonly string[],
     }
   }
   return { targets: targets.slice(0, MAX_JALAN_PAGES), planner_driven: true };
+}
+
+// Phase AUTO-RUNNER16X — planner stay_date handoff fix.
+//
+// Unlike the slug-only builders above (which regenerate dates and so lose the
+// planner's stay_date), these accept planner targets carrying explicit
+// stay_dates and pass each through to the collector's checkin. Unknown
+// slugs/yadIds are dropped (excluded_missing_collector_mapping at the caller).
+export interface PlannerStayDateTarget {
+  source: "booking" | "jalan";
+  property_slug: string;
+  canonical_property_name: string;
+  stay_date: string;
+}
+
+export function buildBookingPlanFromPlannerTargets(targets: readonly PlannerStayDateTarget[]): {
+  selected_targets: BookingTargetCell[];
+  max_pages: number;
+  page_cap_respected: boolean;
+  planner_driven: true;
+  excluded_missing_mapping: PlannerStayDateTarget[];
+} {
+  const knownSlugs = new Map(VERIFIED_BOOKING_TARGETS.map((t) => [t.slug, t.canonicalPropertyName]));
+  const cells: BookingTargetCell[] = [];
+  const missing: PlannerStayDateTarget[] = [];
+  for (const t of targets) {
+    if (t.source !== "booking") continue;
+    const name = knownSlugs.get(t.property_slug);
+    if (name === undefined || !/^\d{4}-\d{2}-\d{2}$/u.test(t.stay_date)) { missing.push(t); continue; }
+    const checkout = checkoutForOneNight(t.stay_date);
+    cells.push({
+      source: "booking",
+      property_slug: t.property_slug,
+      canonical_property_name: name,
+      checkin: t.stay_date,
+      checkout,
+      url_sanitized: sanitizeBookingUrl(buildBookingRenderedDomUrl({ canonicalPropertyName: name, slug: t.property_slug, checkin: t.stay_date }))
+    });
+  }
+  const selected = cells.slice(0, MAX_BOOKING_PAGES);
+  return { selected_targets: selected, max_pages: MAX_BOOKING_PAGES, page_cap_respected: selected.length <= MAX_BOOKING_PAGES, planner_driven: true, excluded_missing_mapping: missing };
+}
+
+export function buildJalanMatrixFromPlannerTargets(targets: readonly PlannerStayDateTarget[]): {
+  targets: JalanProbeTarget[];
+  planner_driven: true;
+  excluded_missing_mapping: PlannerStayDateTarget[];
+} {
+  const known = new Map<string, (typeof VERIFIED_JALAN_TARGETS)[number]>(VERIFIED_JALAN_TARGETS.map((t) => [t.jalanYadId, t]));
+  const out: JalanProbeTarget[] = [];
+  const missing: PlannerStayDateTarget[] = [];
+  for (const t of targets) {
+    if (t.source !== "jalan") continue;
+    const property = known.get(t.property_slug);
+    if (property === undefined || !/^\d{4}-\d{2}-\d{2}$/u.test(t.stay_date)) { missing.push(t); continue; }
+    out.push(buildJalanProbeTarget({ ...property, checkin: t.stay_date }));
+  }
+  return { targets: out.slice(0, MAX_JALAN_PAGES), planner_driven: true, excluded_missing_mapping: missing };
 }
 
 export interface SourceLevelCheck {
