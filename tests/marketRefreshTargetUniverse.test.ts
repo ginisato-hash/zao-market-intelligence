@@ -29,10 +29,18 @@ describe("AUTO-RUNNER16X - target universe", () => {
     expect(liveTargets().every((t) => t.property_slug.length > 0)).toBe(true);
   });
 
-  it("candidate-only targets are never live and carry no invented slug", () => {
+  it("candidate-only targets are never live", () => {
     expect(candidateTargets().every((t) => !t.enabled_for_live && !t.verified_mapping)).toBe(true);
-    expect(candidateTargets().every((t) => t.property_slug === "")).toBe(true);
     expect(CANDIDATE_ONLY_TARGETS.length).toBeGreaterThan(0);
+  });
+
+  it("no candidate-only target leaks into the live set", () => {
+    const liveKeys = new Set(liveTargets().map((t) => `${t.source}|${t.property_slug}`));
+    for (const c of candidateTargets()) {
+      // even le-vert-zao (real slug, needs_review) must not be live
+      expect(c.enabled_for_live).toBe(false);
+      if (c.property_slug !== "") expect(liveKeys.has(`${c.source}|${c.property_slug}`)).toBe(false);
+    }
   });
 
   it("known verified slugs resolve to a tier", () => {

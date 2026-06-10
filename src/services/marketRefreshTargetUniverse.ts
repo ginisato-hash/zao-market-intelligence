@@ -42,11 +42,26 @@ export const VERIFIED_LIVE_TARGETS: readonly MarketRefreshPropertyTarget[] = [
 // Candidate-only properties — NOT live-collected. No slug/id is invented; these
 // require a dedicated verification phase (probe collector mapping) before any
 // can be promoted to VERIFIED_LIVE_TARGETS. Listed for coverage/roadmap only.
+// Candidate-only properties — NOT live-collected. Sourced from existing repo
+// artifacts (property-discovery-review 20260607, verified source-coverage seed).
+// NONE are promotable to live: discovery candidates are collector_readiness
+// "needs_mapping" (name only, no verified slug/id); the one confirmed-name Booking
+// slug (le-vert-zao / ル・ベール蔵王) is verification_status "needs_review" (Phase 41X
+// found no safe price extraction + bot-detection inconsistency). Promotion requires
+// a dedicated verification-probe phase. No slug/id is invented.
 export const CANDIDATE_ONLY_TARGETS: readonly MarketRefreshPropertyTarget[] = [
-  { source: "booking", canonical_property_name: "おおみや旅館", property_slug: "", tier: "tier_anchor_high", enabled_for_live: false, verified_mapping: false, verification_note: "mapping_not_verified_requires_probe" },
-  { source: "jalan", canonical_property_name: "OAKHILL", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "mapping_not_verified_requires_probe" },
-  { source: "jalan", canonical_property_name: "蔵王プラザホテル", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "mapping_not_verified_requires_probe" },
-  { source: "booking", canonical_property_name: "ペンション・ロッジ系（蔵王温泉）", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "mapping_not_verified_requires_probe" }
+  // Confirmed-name Booking slug but not safely extractable yet → stays candidate_only.
+  { source: "booking", canonical_property_name: "ル・ベール蔵王", property_slug: "le-vert-zao", source_url: "https://www.booking.com/hotel/jp/le-vert-zao.ja.html", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "slug confirmed for name (verified seed) but verification_status=needs_review: Phase 41X content_visible_no_safe_price + bot-detection inconsistency; not live until stable extraction" },
+  // property-discovery-review 20260607 'approve_new' candidates — collector_readiness=needs_mapping (no verified slug/id).
+  { source: "jalan", canonical_property_name: "ONSEN & STAY OAKHILL", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping (no verified slug/id)" },
+  { source: "jalan", canonical_property_name: "蔵王プラザホテル", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "おおみや旅館", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "たかみや瑠璃倶楽", property_slug: "", tier: "tier_anchor_high", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "ぼくのうち", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "ロッジスガノ", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "松尾ハウス", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "ＫＫＲ蔵王 白銀荘", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
+  { source: "jalan", canonical_property_name: "こけしの宿 招仙閣", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" }
 ] as const;
 
 export function liveTargets(source?: TargetSource): MarketRefreshPropertyTarget[] {

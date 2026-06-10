@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_TARGETS_PER_PROPERTY_PER_RUN,
   ROTATING_CAPS,
   SLOT_HOURS,
   buildRotatingPlan,
@@ -108,5 +109,46 @@ describe("AUTO-RUNNER16X - balance and rotation", () => {
     expect(buckets.has("short")).toBe(true);
     expect(buckets.has("mid")).toBe(true);
     expect(buckets.has("long")).toBe(true);
+  });
+});
+
+describe("AUTO-RUNNER16X-A2 - property diversity", () => {
+  it("no single property exceeds the per-run cap of 2", () => {
+    const p = plan(8);
+    expect(MAX_TARGETS_PER_PROPERTY_PER_RUN).toBe(2);
+    for (const [, count] of Object.entries(p.selected_targets_by_property)) {
+      expect(count).toBeLessThanOrEqual(MAX_TARGETS_PER_PROPERTY_PER_RUN);
+    }
+  });
+
+  it("selects >= 3 distinct properties per source (with 3 booking / 5 jalan verified)", () => {
+    const p = plan(8);
+    expect(p.selected_distinct_properties_by_source["booking"]).toBeGreaterThanOrEqual(3);
+    expect(p.selected_distinct_properties_by_source["jalan"]).toBeGreaterThanOrEqual(3);
+  });
+
+  it("selects >= 8 distinct stay dates (date cap spreads dates)", () => {
+    expect(plan(8).selected_distinct_stay_dates).toBeGreaterThanOrEqual(8);
+  });
+
+  it("a single high-score property does not monopolize the run", () => {
+    const p = plan(8);
+    const max = Math.max(...Object.values(p.selected_targets_by_property));
+    expect(max).toBeLessThanOrEqual(MAX_TARGETS_PER_PROPERTY_PER_RUN);
+  });
+
+  it("reports excluded_by_property_diversity_cap when capping occurs", () => {
+    const p = plan(8);
+    expect(typeof p.excluded_by_property_diversity_cap).toBe("number");
+    expect(p.excluded_by_property_diversity_cap).toBeGreaterThan(0);
+  });
+
+  it("cooldown and diversity cap work together", () => {
+    const free = plan(8);
+    const first = free.selected[0]!;
+    const key = `${first.source}|${first.property_slug}|${first.stay_date}`;
+    const p = plan(8, new Map([[key, `${RUN_DATE}T02:00:00+09:00`]]));
+    expect(p.excluded_by_cooldown.length).toBeGreaterThan(0);
+    for (const [, count] of Object.entries(p.selected_targets_by_property)) expect(count).toBeLessThanOrEqual(MAX_TARGETS_PER_PROPERTY_PER_RUN);
   });
 });

@@ -52,6 +52,12 @@ export interface RotatingTarget {
   estimated_page_count: number;
 }
 
+export const MAX_TARGETS_PER_PROPERTY_PER_RUN = 2;
+// Per-run per-stay_date cap forces date spread (so the per-property cap does not
+// collapse all properties onto the same few top-scoring dates). 1 maximizes
+// distinct dates per run; relaxed in later passes if needed to fill the cap.
+export const MAX_TARGETS_PER_STAY_DATE_PER_RUN = 1;
+
 export interface RotatingPlan {
   slot_key: string;
   slot_index: number;
@@ -59,10 +65,15 @@ export interface RotatingPlan {
   selected: RotatingTarget[];
   excluded_by_cooldown: { source: string; property_slug: string; stay_date: string }[];
   excluded_by_cap: number;
+  excluded_by_property_diversity_cap: number;
   candidate_count: number;
   selected_by_source: Record<string, number>;
   selected_by_bucket: Record<string, number>;
   selected_by_tier: Record<string, number>;
+  selected_distinct_properties_by_source: Record<string, number>;
+  selected_distinct_stay_dates: number;
+  selected_targets_by_property: Record<string, number>;
+  property_diversity_warning: string[];
   estimated_total_pages: number;
 }
 
@@ -229,18 +240,39 @@ export function buildRotatingPlan(input: {
   const bySource: Record<string, number> = { booking: 0, jalan: 0 };
   const byBucket: Record<string, number> = { short: 0, mid: 0, long: 0 };
   const byTier: Record<string, number> = {};
+  const byProperty: Record<string, number> = {};
+  const byStayDate: Record<string, number> = {};
   const seenPair = new Set<string>();
   let excludedByCap = 0;
+  let excludedByDiversity = 0;
+  const diversityCounted = new Set<string>();
 
-  // Two passes: first respect bucket/tier soft caps, then a relaxed pass to fill remaining total.
-  for (const relaxed of [false, true]) {
+  // Passes (selection order §7.6), progressively relaxing soft constraints only
+  // as far as needed to fill the cap:
+  //  1. balance + property cap + date cap (preferred — max facility & date spread)
+  //  2. relax bucket/tier balance, keep property + date caps
+  //  3. relax date cap (allow same-date cross-source), keep property cap
+  //  4. relax property cap too (only if verified properties are too few)
+  const passes = [
+    { balance: true, propCap: true, dateCap: true },
+    { balance: false, propCap: true, dateCap: true },
+    { balance: false, propCap: true, dateCap: false },
+    { balance: false, propCap: false, dateCap: false }
+  ];
+  for (const pass of passes) {
     for (const c of rotated) {
       if (selected.length >= caps.total_pages_per_run) break;
       const pairKey = keyOf(c);
       if (seenPair.has(pairKey)) continue;
       const srcCap = c.source === "booking" ? caps.booking_pages_per_run : caps.jalan_pages_per_run;
-      if ((bySource[c.source] ?? 0) >= srcCap) { if (!relaxed) excludedByCap += 1; continue; }
-      if (!relaxed) {
+      if ((bySource[c.source] ?? 0) >= srcCap) { if (pass.balance) excludedByCap += 1; continue; }
+      const propKey = `${c.source}|${c.property_slug}`;
+      if (pass.propCap && (byProperty[propKey] ?? 0) >= MAX_TARGETS_PER_PROPERTY_PER_RUN) {
+        if (!diversityCounted.has(pairKey)) { excludedByDiversity += 1; diversityCounted.add(pairKey); }
+        continue;
+      }
+      if (pass.dateCap && (byStayDate[c.stay_date] ?? 0) >= MAX_TARGETS_PER_STAY_DATE_PER_RUN) continue;
+      if (pass.balance) {
         if ((byBucket[c.bucket] ?? 0) >= bucketSoftMax[c.bucket]) continue;
         if ((byTier[c.tier] ?? 0) >= tierSoftMax) continue;
       }
@@ -249,9 +281,23 @@ export function buildRotatingPlan(input: {
       bySource[c.source] = (bySource[c.source] ?? 0) + 1;
       byBucket[c.bucket] = (byBucket[c.bucket] ?? 0) + 1;
       byTier[c.tier] = (byTier[c.tier] ?? 0) + 1;
+      byProperty[propKey] = (byProperty[propKey] ?? 0) + 1;
+      byStayDate[c.stay_date] = (byStayDate[c.stay_date] ?? 0) + 1;
     }
     if (selected.length >= caps.total_pages_per_run) break;
   }
+
+  // Diversity metrics.
+  const distinctPropBySource: Record<string, number> = {};
+  for (const src of ["booking", "jalan"]) {
+    distinctPropBySource[src] = new Set(selected.filter((t) => t.source === src).map((t) => t.property_slug)).size;
+  }
+  const byPropertyOut: Record<string, number> = {};
+  for (const t of selected) byPropertyOut[`${t.source}|${t.property_slug}`] = (byPropertyOut[`${t.source}|${t.property_slug}`] ?? 0) + 1;
+  const warnings: string[] = [];
+  if ((distinctPropBySource["booking"] ?? 0) > 0 && (distinctPropBySource["booking"] ?? 0) < 3) warnings.push(`booking_distinct_properties_lt_3:${distinctPropBySource["booking"]}`);
+  if ((distinctPropBySource["jalan"] ?? 0) > 0 && (distinctPropBySource["jalan"] ?? 0) < 3) warnings.push(`jalan_distinct_properties_lt_3:${distinctPropBySource["jalan"]}`);
+  for (const [k, v] of Object.entries(byPropertyOut)) if (v > MAX_TARGETS_PER_PROPERTY_PER_RUN) warnings.push(`property_over_cap:${k}=${v}`);
 
   return {
     slot_key: slot.slot_key,
@@ -260,10 +306,15 @@ export function buildRotatingPlan(input: {
     selected,
     excluded_by_cooldown: excludedCooldown,
     excluded_by_cap: excludedByCap,
+    excluded_by_property_diversity_cap: excludedByDiversity,
     candidate_count: candidates.length,
     selected_by_source: bySource,
     selected_by_bucket: byBucket,
     selected_by_tier: byTier,
+    selected_distinct_properties_by_source: distinctPropBySource,
+    selected_distinct_stay_dates: new Set(selected.map((t) => t.stay_date)).size,
+    selected_targets_by_property: byPropertyOut,
+    property_diversity_warning: warnings,
     estimated_total_pages: selected.reduce((n, t) => n + t.estimated_page_count, 0)
   };
 }

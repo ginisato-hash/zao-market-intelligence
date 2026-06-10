@@ -268,7 +268,12 @@ async function run(): Promise<void> {
     db_synced: dbSynced, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
     history_rows: post.history_rows, db_rows: post.db_rows, ai_context_rows: post.ai_context_rows, duplicate_row_id_count: post.duplicate_row_id_count,
     selected_targets_by_source: plan.selected_by_source, selected_targets_by_bucket: plan.selected_by_bucket, selected_targets_by_tier: plan.selected_by_tier,
+    selected_distinct_properties_by_source: plan.selected_distinct_properties_by_source,
+    selected_distinct_stay_dates: plan.selected_distinct_stay_dates,
+    selected_targets_by_property: plan.selected_targets_by_property,
+    property_diversity_warning: plan.property_diversity_warning,
     excluded_by_cooldown: plan.excluded_by_cooldown.length, excluded_by_cap: plan.excluded_by_cap,
+    excluded_by_property_diversity_cap: plan.excluded_by_property_diversity_cap,
     excluded_missing_mapping: 0,
     source_block_or_captcha_detected: false,
     pricing_output_generated: false, pms_output_generated: false,
@@ -333,7 +338,11 @@ Slot: ${out["slot_key"]} (index ${out["slot_index"]})
 - by_source: ${JSON.stringify(out["selected_targets_by_source"])}
 - by_bucket: ${JSON.stringify(out["selected_targets_by_bucket"])}
 - by_tier: ${JSON.stringify(out["selected_targets_by_tier"])}
-- excluded_by_cooldown: ${out["excluded_by_cooldown"]} / excluded_by_cap: ${out["excluded_by_cap"]}
+- distinct_properties_by_source: ${JSON.stringify(out["selected_distinct_properties_by_source"])}
+- distinct_stay_dates: ${out["selected_distinct_stay_dates"]}
+- by_property: ${JSON.stringify(out["selected_targets_by_property"])}
+- property_diversity_warning: ${JSON.stringify(out["property_diversity_warning"])}
+- excluded_by_cooldown: ${out["excluded_by_cooldown"]} / excluded_by_cap: ${out["excluded_by_cap"]} / excluded_by_property_diversity_cap: ${out["excluded_by_property_diversity_cap"]}
 
 ## Append / Sync / Publish
 - rows_appended: ${out["rows_appended"]} / skipped_identical: ${out["skipped_identical_rows"]} / intraday: ${out["intraday_rows"]} / hard_conflicts: ${out["hard_conflicts"]}
