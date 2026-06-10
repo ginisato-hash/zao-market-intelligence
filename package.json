@@ -173,6 +173,7 @@
     "auto-runner:market-refresh-rotating": "node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
     "auto-runner:market-refresh-rotating:dry-run": "ZMI_ROTATING_DRY_RUN=1 node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
     "report:collection-coverage": "node --import tsx src/scripts/runCollectionCoverageReport.ts",
+    "verify:source-mappings": "node --import tsx src/scripts/runSourceMappingVerification.ts",
     "package:chatgpt-db": "node --import tsx src/scripts/packageChatGptDb.ts",
     "publish:chatgpt-db": "node --import tsx src/scripts/publishChatGptDb.ts",
     "auto-runner:chatgpt-db-publish": "node --import tsx src/scripts/publishChatGptDb.ts",

@@ -36,7 +36,14 @@ export const VERIFIED_LIVE_TARGETS: readonly MarketRefreshPropertyTarget[] = [
   { source: "jalan", canonical_property_name: "ル・ベール蔵王", property_slug: "yad328232", source_property_id: "yad328232", source_url: "https://www.jalan.net/yad328232/", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified_jalan_bounded_collection" },
   { source: "jalan", canonical_property_name: "HAMMOND", property_slug: "yad348320", source_property_id: "yad348320", source_url: "https://www.jalan.net/yad348320/", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified_jalan_bounded_collection" },
   { source: "jalan", canonical_property_name: "吉田屋", property_slug: "yad327282", source_property_id: "yad327282", source_url: "https://www.jalan.net/yad327282/", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified_jalan_bounded_collection" },
-  { source: "jalan", canonical_property_name: "JURIN", property_slug: "yad332556", source_property_id: "yad332556", source_url: "https://www.jalan.net/yad332556/", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified_jalan_bounded_collection" }
+  { source: "jalan", canonical_property_name: "JURIN", property_slug: "yad332556", source_property_id: "yad332556", source_url: "https://www.jalan.net/yad332556/", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified_jalan_bounded_collection" },
+  // Promoted in AUTO-RUNNER16X-A3: identity verified via verify:source-mappings
+  // (2026-06-10 probe) — name+region matched, clean load, no captcha/login.
+  // NOTE: Phase 41X observed Booking bot-detection inconsistency for this slug;
+  // the Booking collector classifies per-run (directional only on safe price,
+  // else excluded), so unstable runs degrade to excluded rows, never bad data.
+  // Monitor extraction stability during the 16X-B pilot.
+  { source: "booking", canonical_property_name: "ル・ベール蔵王", property_slug: "le-vert-zao", source_url: "https://www.booking.com/hotel/jp/le-vert-zao.ja.html", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity via 16X-A3 verify:source-mappings 2026-06-10 (A, name+region match, clean load); extraction stability monitored in pilot" }
 ] as const;
 
 // Candidate-only properties — NOT live-collected. No slug/id is invented; these
@@ -50,8 +57,7 @@ export const VERIFIED_LIVE_TARGETS: readonly MarketRefreshPropertyTarget[] = [
 // found no safe price extraction + bot-detection inconsistency). Promotion requires
 // a dedicated verification-probe phase. No slug/id is invented.
 export const CANDIDATE_ONLY_TARGETS: readonly MarketRefreshPropertyTarget[] = [
-  // Confirmed-name Booking slug but not safely extractable yet → stays candidate_only.
-  { source: "booking", canonical_property_name: "ル・ベール蔵王", property_slug: "le-vert-zao", source_url: "https://www.booking.com/hotel/jp/le-vert-zao.ja.html", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "slug confirmed for name (verified seed) but verification_status=needs_review: Phase 41X content_visible_no_safe_price + bot-detection inconsistency; not live until stable extraction" },
+  // (le-vert-zao promoted to VERIFIED_LIVE_TARGETS in AUTO-RUNNER16X-A3.)
   // property-discovery-review 20260607 'approve_new' candidates — collector_readiness=needs_mapping (no verified slug/id).
   { source: "jalan", canonical_property_name: "ONSEN & STAY OAKHILL", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping (no verified slug/id)" },
   { source: "jalan", canonical_property_name: "蔵王プラザホテル", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "discovery_review_20260607 new_candidate; needs_mapping" },
