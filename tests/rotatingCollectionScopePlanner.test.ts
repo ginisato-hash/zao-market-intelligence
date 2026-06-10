@@ -121,7 +121,7 @@ describe("AUTO-RUNNER16X-A2 - property diversity", () => {
     }
   });
 
-  it("selects >= 3 distinct properties per source (with 3 booking / 5 jalan verified)", () => {
+  it("selects >= 3 distinct properties per source (16X-A4: 17 booking / 17 jalan verified)", () => {
     const p = plan(8);
     expect(p.selected_distinct_properties_by_source["booking"]).toBeGreaterThanOrEqual(3);
     expect(p.selected_distinct_properties_by_source["jalan"]).toBeGreaterThanOrEqual(3);
