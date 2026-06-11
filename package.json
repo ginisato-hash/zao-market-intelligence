@@ -175,6 +175,7 @@
     "report:collection-coverage": "node --import tsx src/scripts/runCollectionCoverageReport.ts",
     "verify:source-mappings": "node --import tsx src/scripts/runSourceMappingVerification.ts",
     "discover:source-mappings": "node --import tsx src/scripts/runSourceMappingDiscovery.ts",
+    "auto-runner:16x-b:manual-live-pilot": "node --import tsx src/scripts/runAutoRunner16xBManualLivePilot.ts",
     "package:chatgpt-db": "node --import tsx src/scripts/packageChatGptDb.ts",
     "publish:chatgpt-db": "node --import tsx src/scripts/publishChatGptDb.ts",
     "auto-runner:chatgpt-db-publish": "node --import tsx src/scripts/publishChatGptDb.ts",
