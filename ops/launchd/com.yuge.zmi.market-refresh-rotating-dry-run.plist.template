@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTO-RUNNER16X-E1 - launchd template for the rotating market refresh
+  DRY-RUN SHADOW.
+
+  This is a SHADOW job for 24h validation BEFORE any rotating LIVE launchd is
+  installed. It runs the same rotating runner every 2 hours (00,02,...,22 JST)
+  but with ZMI_ROTATING_DRY_RUN=1, so the runner only builds the per-slot plan
+  and writes report/debug artifacts. It performs ZERO live collection, ZERO
+  history append, ZERO DB sync, ZERO AI context refresh, and ZERO publish — none
+  of the six live gates are set. PUBLISH_CHATGPT_DB=0 is explicit and redundant.
+
+  It runs ALONGSIDE the existing com.yuge.zmi.market-refresh-live (09:00) without
+  touching it; the shadow never writes history/db/ai so the two cannot interfere.
+  Distinct Label and log paths from the (not-yet-installed) rotating LIVE job.
+
+  Promotion path: after a clean 24h shadow (12 slots, no err, history/db/ai
+  unchanged, real source_block flag reported), 16X-E2 boots out the 09:00 live
+  job and installs the rotating LIVE template instead. Do NOT install the LIVE
+  rotating job in E1.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.market-refresh-rotating-dry-run</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_ROTATING_DRY_RUN=1 PLANNER_ROTATION_ENABLED=1 PUBLISH_CHATGPT_DB=0 npm run auto-runner:market-refresh-rotating</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-rotating-dry-run.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/market-refresh-rotating-dry-run.err.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>0</integer></dict>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>
