@@ -48,16 +48,16 @@ describe("AUTO-RUNNER07E - state and gates", () => {
       dbRows: summarizeDbRowsReadOnly(resolve(__dirname, "../.data/zao-market-intelligence.sqlite")),
       aiContextRows: summarizeAiContextRows(resolve(__dirname, "../.data/ai-context/latest_market_snapshot.json"))
     });
-    expect(current.history_rows).toBe(395);
+    expect(current.history_rows).toBe(417);
     expect(current.db_rows).toBeGreaterThanOrEqual(0);
     expect(current.ai_context_rows).toBeGreaterThanOrEqual(0);
-    expect(current.booking.rows).toBe(126);
-    expect(current.booking.directional).toBe(122);
+    expect(current.booking.rows).toBe(136);
+    expect(current.booking.directional).toBe(132);
     expect(current.booking.excluded).toBe(4);
     expect(current.booking.direct).toBe(0);
-    expect(current.jalan.rows).toBe(143);
-    expect(current.jalan.directional).toBe(50);
-    expect(current.jalan.excluded).toBe(87);
+    expect(current.jalan.rows).toBe(155);
+    expect(current.jalan.directional).toBe(53);
+    expect(current.jalan.excluded).toBe(96);
     expect(current.jalan.direct).toBe(6);
     expect(current.rakuten.rows).toBe(126);
   });
