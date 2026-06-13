@@ -14,6 +14,7 @@ import {
   buildBookingSourceLevelCheck,
   buildJalanMatrixFromPlannerTargets,
   buildJalanSourceLevelCheck,
+  buildSourceBlockReport,
   buildJalanTargetMatrix,
   buildPlannerDrivenBookingPlan,
   buildPlannerDrivenJalanMatrix,
@@ -190,6 +191,50 @@ describe("AUTO-RUNNER16X-C - Booking price sanity floor", () => {
     expect(plan.approved_rows).toHaveLength(1);
     expect(plan.approved_rows[0]!.canonicalPropertyName).toBe("蔵王国際ホテル");
     expect(plan.price_sanity_excluded_records).toHaveLength(1);
+  });
+});
+
+describe("AUTO-RUNNER16X-E0 - real source block/captcha reporting", () => {
+  const clean = { source_level_captcha_or_block: false };
+  const blocked = { source_level_captcha_or_block: true };
+
+  it("flags true when Booking source-level captcha/block is detected", () => {
+    const r = buildSourceBlockReport({ bookingSourceCheck: blocked, jalanSourceCheck: clean, rejectedRows: [] });
+    expect(r.source_block_or_captcha_detected).toBe(true);
+    expect(r.booking_source_level_captcha_or_block).toBe(true);
+    expect(r.jalan_source_level_captcha_or_block).toBe(false);
+  });
+
+  it("flags true when Jalan source-level captcha/block is detected", () => {
+    const r = buildSourceBlockReport({ bookingSourceCheck: clean, jalanSourceCheck: blocked, rejectedRows: [] });
+    expect(r.source_block_or_captcha_detected).toBe(true);
+    expect(r.jalan_source_level_captcha_or_block).toBe(true);
+  });
+
+  it("flags true when a rejected row reason names block/captcha/login/security", () => {
+    for (const reason of ["blocked_or_login_warning", "captcha_or_block_detected", "login_required", "blocked_or_captcha_warning"]) {
+      const r = buildSourceBlockReport({ bookingSourceCheck: clean, jalanSourceCheck: clean, rejectedRows: [{ reason }] });
+      expect(r.source_block_or_captcha_detected, reason).toBe(true);
+      expect(r.blocked_or_captcha_rejected_rows_count).toBe(1);
+    }
+  });
+
+  it("stays false for clean rows and non-block rejection reasons", () => {
+    const r = buildSourceBlockReport({
+      bookingSourceCheck: clean,
+      jalanSourceCheck: clean,
+      rejectedRows: [{ reason: "excluded_price_sanity_floor" }, { reason: "directional_missing_price" }, { reason: "metadata_only_diff_no_append" }]
+    });
+    expect(r.source_block_or_captcha_detected).toBe(false);
+    expect(r.blocked_or_captcha_rejected_rows_count).toBe(0);
+    expect(r.booking_source_level_captcha_or_block).toBe(false);
+    expect(r.jalan_source_level_captcha_or_block).toBe(false);
+  });
+
+  it("does not mistake price-sanity exclusions for blocks", () => {
+    // 'excluded_price_sanity_floor' must NOT match the block regex.
+    const r = buildSourceBlockReport({ bookingSourceCheck: clean, jalanSourceCheck: clean, rejectedRows: [{ reason: "excluded_price_sanity_floor" }] });
+    expect(r.source_block_or_captcha_detected).toBe(false);
   });
 });
 

@@ -26,8 +26,10 @@ import {
   buildBookingSourceLevelCheck,
   buildJalanSourceLevelCheck,
   buildJalanMatrixFromPlannerTargets,
+  buildSourceBlockReport,
   type AppendPlan,
-  type ExistingHistoryKey
+  type ExistingHistoryKey,
+  type SourceBlockReport
 } from "../services/autoRunnerMarketRefresh";
 import { type JalanImprovedPreviewRow } from "../services/jalanBoundedCollectionProbeImproved";
 import { collectTarget, ensureJalanDebugDirs } from "./probeJalanBoundedCollectionImproved";
@@ -209,6 +211,14 @@ async function run(): Promise<void> {
   let chatgptPublished = false;
   let releaseUrl = "";
   let liveExecuted = false;
+  // E0: real source-block/captcha reporting. In dry-run no collection happens,
+  // so there is no source to be blocked — the flag stays false legitimately.
+  let sourceBlockReport: SourceBlockReport = {
+    source_block_or_captcha_detected: false,
+    booking_source_level_captcha_or_block: false,
+    jalan_source_level_captcha_or_block: false,
+    blocked_or_captcha_rejected_rows_count: 0
+  };
 
   if (liveMode) {
     liveExecuted = true;
@@ -229,6 +239,7 @@ async function run(): Promise<void> {
     const bookingCheck = buildBookingSourceLevelCheck(bookingRows);
     const jalanCheck = buildJalanSourceLevelCheck(jalanRows);
     appendPlan = buildAppendPlan({ bookingRows, jalanRows, existingKeys: readExistingKeys(), bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, bookingReportPath: "", bookingCsvPath: "" });
+    sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
     if (appendPlan.append_allowed && appendPlan.new_row_count > 0) {
       const r = appendHistoryRowsAtomic({ rows: appendPlan.approved_rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows });
@@ -277,7 +288,10 @@ async function run(): Promise<void> {
     excluded_by_cooldown: plan.excluded_by_cooldown.length, excluded_by_cap: plan.excluded_by_cap,
     excluded_by_property_diversity_cap: plan.excluded_by_property_diversity_cap,
     excluded_missing_mapping: 0,
-    source_block_or_captcha_detected: false,
+    source_block_or_captcha_detected: sourceBlockReport.source_block_or_captcha_detected,
+    booking_source_level_captcha_or_block: sourceBlockReport.booking_source_level_captcha_or_block,
+    jalan_source_level_captcha_or_block: sourceBlockReport.jalan_source_level_captcha_or_block,
+    blocked_or_captcha_rejected_rows_count: sourceBlockReport.blocked_or_captcha_rejected_rows_count,
     pricing_output_generated: false, pms_output_generated: false,
     caps: plan.caps, selected_targets: plan.selected,
     report_path: resolve(REPORT_DIR, `${runId}.md`), json_path: resolve(REPORT_DIR, `${runId}.json`), csv_path: resolve(REPORT_DIR, `${runId}.csv`), debug_artifact_path: debugPath
@@ -356,6 +370,9 @@ Slot: ${out["slot_key"]} (index ${out["slot_index"]})
 - pricing_output_generated: ${out["pricing_output_generated"]}
 - pms_output_generated: ${out["pms_output_generated"]}
 - source_block_or_captcha_detected: ${out["source_block_or_captcha_detected"]}
+- booking_source_level_captcha_or_block: ${out["booking_source_level_captcha_or_block"]}
+- jalan_source_level_captcha_or_block: ${out["jalan_source_level_captcha_or_block"]}
+- blocked_or_captcha_rejected_rows_count: ${out["blocked_or_captcha_rejected_rows_count"]}
 `;
 }
 

@@ -105,3 +105,28 @@ describe("AUTO-RUNNER16X - rotating runner safety scans", () => {
     expect(PACKAGE_JSON).toContain("report:collection-coverage");
   });
 });
+
+describe("AUTO-RUNNER16X-E0 - real source-block reporting wiring", () => {
+  it("runner output object no longer hardcodes the flag to false", () => {
+    // The old output object had `source_block_or_captcha_detected: false,` immediately
+    // followed by pricing_output_generated. That hardcode must be gone (the default
+    // initializer of sourceBlockReport may still legitimately set false).
+    expect(RUNNER_SOURCE).not.toMatch(/source_block_or_captcha_detected:\s*false,\s*\n\s*pricing_output_generated/u);
+  });
+
+  it("runner derives the flag from buildSourceBlockReport", () => {
+    expect(RUNNER_SOURCE).toContain("buildSourceBlockReport");
+    expect(RUNNER_SOURCE).toContain("source_block_or_captcha_detected: sourceBlockReport.source_block_or_captcha_detected");
+  });
+
+  it("runner emits the breakdown fields in its output", () => {
+    expect(RUNNER_SOURCE).toContain("booking_source_level_captcha_or_block: sourceBlockReport.booking_source_level_captcha_or_block");
+    expect(RUNNER_SOURCE).toContain("jalan_source_level_captcha_or_block: sourceBlockReport.jalan_source_level_captcha_or_block");
+    expect(RUNNER_SOURCE).toContain("blocked_or_captcha_rejected_rows_count: sourceBlockReport.blocked_or_captcha_rejected_rows_count");
+  });
+
+  it("dry-run keeps the flag false (default before any collection)", () => {
+    // The default initializer must be false so a dry-run (no live collection) reports false.
+    expect(RUNNER_SOURCE).toMatch(/sourceBlockReport[\s\S]{0,200}source_block_or_captcha_detected:\s*false/u);
+  });
+});

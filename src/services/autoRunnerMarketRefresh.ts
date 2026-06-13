@@ -383,6 +383,39 @@ function sourceLevel(input: Omit<SourceLevelCheck, "page_cap_respected" | "scree
   };
 }
 
+// Phase AUTO-RUNNER16X-E0 — real source-block/captcha reporting.
+//
+// The rotating runner previously hardcoded source_block_or_captcha_detected to
+// false in its output. This derives the real flag from the source-level checks
+// (which already detect captcha/block/login from row warnings) plus any append
+// rejection reason that names a block/captcha/login/security condition. Pure,
+// so it is unit-testable independently of the browser/runner.
+const BLOCK_REASON_RE = /captcha|block|blocked|security|login|required/iu;
+
+export interface SourceBlockReport {
+  source_block_or_captcha_detected: boolean;
+  booking_source_level_captcha_or_block: boolean;
+  jalan_source_level_captcha_or_block: boolean;
+  blocked_or_captcha_rejected_rows_count: number;
+}
+
+export function buildSourceBlockReport(input: {
+  bookingSourceCheck: Pick<SourceLevelCheck, "source_level_captcha_or_block">;
+  jalanSourceCheck: Pick<SourceLevelCheck, "source_level_captcha_or_block">;
+  rejectedRows: readonly { reason: string }[];
+}): SourceBlockReport {
+  const blockedRejected = input.rejectedRows.filter((row) => BLOCK_REASON_RE.test(row.reason));
+  return {
+    source_block_or_captcha_detected:
+      input.bookingSourceCheck.source_level_captcha_or_block ||
+      input.jalanSourceCheck.source_level_captcha_or_block ||
+      blockedRejected.length > 0,
+    booking_source_level_captcha_or_block: input.bookingSourceCheck.source_level_captcha_or_block,
+    jalan_source_level_captcha_or_block: input.jalanSourceCheck.source_level_captcha_or_block,
+    blocked_or_captcha_rejected_rows_count: blockedRejected.length
+  };
+}
+
 export interface ExistingHistoryKey {
   row_id: string;
   row_hash: string;
