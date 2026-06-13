@@ -1,6 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ensureJalanDebugDirs } from "../src/scripts/probeJalanBoundedCollectionImproved";
 import {
   FORCED_BOOKING_OBSERVATION_SLUGS,
   MATSUO_HOUSE_BOOKING_SLUG,
@@ -154,5 +156,27 @@ describe("16X-B pilot — static safety", () => {
 
   it("package wires the manual pilot command", () => {
     expect(PACKAGE_JSON).toContain('"auto-runner:16x-b:manual-live-pilot"');
+  });
+});
+
+describe("AUTO-RUNNER16X-C - Jalan debug directory safety", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "jalan-debug-")); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const SUBS = ["screenshots", "html", "text", "errors", "evidence_flags", "classification_decisions"];
+
+  it("creates every collector subdirectory when none exist", () => {
+    const target = join(dir, "jalan");
+    expect(existsSync(target)).toBe(false);
+    ensureJalanDebugDirs(target);
+    for (const sub of SUBS) expect(existsSync(join(target, sub))).toBe(true);
+  });
+
+  it("is idempotent when directories already exist", () => {
+    const target = join(dir, "jalan");
+    ensureJalanDebugDirs(target);
+    expect(() => ensureJalanDebugDirs(target)).not.toThrow();
+    for (const sub of SUBS) expect(existsSync(join(target, sub))).toBe(true);
   });
 });

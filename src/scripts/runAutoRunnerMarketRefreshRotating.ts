@@ -30,7 +30,7 @@ import {
   type ExistingHistoryKey
 } from "../services/autoRunnerMarketRefresh";
 import { type JalanImprovedPreviewRow } from "../services/jalanBoundedCollectionProbeImproved";
-import { collectTarget } from "./probeJalanBoundedCollectionImproved";
+import { collectTarget, ensureJalanDebugDirs } from "./probeJalanBoundedCollectionImproved";
 import { liveTargets } from "../services/marketRefreshTargetUniverse";
 import {
   ROTATING_CAPS,
@@ -219,7 +219,7 @@ async function run(): Promise<void> {
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const browser = await chromium.launch({ headless: true });
     try {
-      mkdirSync(resolve(debugPath, "jalan", "screenshots"), { recursive: true });
+      ensureJalanDebugDirs(resolve(debugPath, "jalan"));
       for (const target of jalanMatrix.targets) {
         const res = await collectTarget({ browser, target, runId, checkedAt: jst.iso, debugPath: resolve(debugPath, "jalan"), reportPath: "", csvPath: "" });
         jalanRows.push(res.row);
@@ -265,6 +265,8 @@ async function run(): Promise<void> {
     intraday_rows: appendPlan?.intraday_rows?.length ?? 0,
     hard_conflicts: appendPlan?.hard_conflicts?.length ?? 0,
     rejected_rows_by_reason: countRejected(appendPlan),
+    price_sanity_excluded_count: appendPlan?.price_sanity_excluded_records.length ?? 0,
+    price_sanity_excluded_records: appendPlan?.price_sanity_excluded_records ?? [],
     db_synced: dbSynced, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
     history_rows: post.history_rows, db_rows: post.db_rows, ai_context_rows: post.ai_context_rows, duplicate_row_id_count: post.duplicate_row_id_count,
     selected_targets_by_source: plan.selected_by_source, selected_targets_by_bucket: plan.selected_by_bucket, selected_targets_by_tier: plan.selected_by_tier,
@@ -346,6 +348,7 @@ Slot: ${out["slot_key"]} (index ${out["slot_index"]})
 
 ## Append / Sync / Publish
 - rows_appended: ${out["rows_appended"]} / skipped_identical: ${out["skipped_identical_rows"]} / intraday: ${out["intraday_rows"]} / hard_conflicts: ${out["hard_conflicts"]}
+- price_sanity_excluded_count: ${out["price_sanity_excluded_count"]}
 - db_synced: ${out["db_synced"]} / ai_context_refreshed: ${out["ai_context_refreshed"]} / chatgpt_db_published: ${out["chatgpt_db_published"]}
 - history/db/ai: ${out["history_rows"]}/${out["db_rows"]}/${out["ai_context_rows"]} / duplicate_row_id: ${out["duplicate_row_id_count"]}
 

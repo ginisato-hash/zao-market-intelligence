@@ -36,6 +36,7 @@ import {
   type JalanImprovedPreviewRow,
   type JalanProbeTarget
 } from "./jalanBoundedCollectionProbeImproved";
+import { liveJalanTargets } from "./marketRefreshTargetUniverse";
 
 export type AutoRunnerMarketRefreshDecision =
   | "auto_runner_market_refresh_ready_not_run"
@@ -115,6 +116,32 @@ export function buildBookingPlan(todayIso: string): {
   };
 }
 
+// Phase AUTO-RUNNER16X-C — Booking price sanity floor.
+//
+// The Booking rendered-DOM extractor occasionally surfaces an implausible
+// first-price candidate (observed: ¥100 on hammond-takamiya in the 16X-B
+// pilot). A directional Booking row whose candidate price is below this floor
+// is excluded from history append (reason excluded_price_sanity_floor) and
+// reported in price_sanity_excluded_records. This is an append-candidacy
+// guard only: it never touches identity verification, and sold_out /
+// not_listed / blocked / failed classifications are unaffected (they carry no
+// directional price).
+export const BOOKING_PRICE_SANITY_FLOOR_JPY = 3000;
+
+export interface PriceSanityExclusion {
+  source: "booking";
+  property_slug: string;
+  stay_date: string;
+  raw_price: number;
+  floor: number;
+  reason: "excluded_price_sanity_floor";
+}
+
+// Legacy fixed Jalan list — used ONLY by the scheduled 09:00 runner paths
+// (buildJalanTargetMatrix / buildPlannerDrivenJalanMatrix), which 16X-C leaves
+// untouched. The rotating live path resolves targets from
+// marketRefreshTargetUniverse via jalanLiveUniverseTargets() instead (single
+// source of truth with the planner).
 export const VERIFIED_JALAN_TARGETS = [
   { canonicalPropertyName: "ホテル喜らく", facilityTier: "tier_2" as const, jalanYadId: "yad325153", sourceUrl: "https://www.jalan.net/yad325153/" },
   { canonicalPropertyName: "ル・ベール蔵王", facilityTier: "tier_2" as const, jalanYadId: "yad328232", sourceUrl: "https://www.jalan.net/yad328232/" },
@@ -236,12 +263,45 @@ export function buildBookingPlanFromPlannerTargets(targets: readonly PlannerStay
   return { selected_targets: selected, max_pages: MAX_BOOKING_PAGES, page_cap_respected: selected.length <= MAX_BOOKING_PAGES, planner_driven: true, excluded_missing_mapping: missing };
 }
 
+// Phase AUTO-RUNNER16X-C — rotating live Jalan targets resolve from the
+// verified live universe (marketRefreshTargetUniverse), not the legacy fixed
+// list, so the planner, dry-run, and live collection share one source of
+// truth and 16X-A4-promoted yadIds are live-collectable. Only enabled+verified
+// (A-confidence) targets with a concrete yadId and source_url qualify;
+// candidate_only entries (empty slug) can never resolve here. Duplicate
+// yadIds collapse to the first occurrence.
+export interface JalanUniverseTarget {
+  canonicalPropertyName: string;
+  facilityTier: "tier_1" | "tier_2";
+  jalanYadId: string;
+  sourceUrl: string;
+}
+
+export function jalanLiveUniverseTargets(): JalanUniverseTarget[] {
+  const seen = new Set<string>();
+  const out: JalanUniverseTarget[] = [];
+  for (const target of liveJalanTargets()) {
+    const yadId = target.property_slug;
+    if (!/^yad\d+$/u.test(yadId)) continue;
+    if (!target.source_url) continue;
+    if (seen.has(yadId)) continue;
+    seen.add(yadId);
+    out.push({
+      canonicalPropertyName: target.canonical_property_name,
+      facilityTier: target.tier === "tier_anchor_high" ? "tier_1" : "tier_2",
+      jalanYadId: yadId,
+      sourceUrl: target.source_url
+    });
+  }
+  return out;
+}
+
 export function buildJalanMatrixFromPlannerTargets(targets: readonly PlannerStayDateTarget[]): {
   targets: JalanProbeTarget[];
   planner_driven: true;
   excluded_missing_mapping: PlannerStayDateTarget[];
 } {
-  const known = new Map<string, (typeof VERIFIED_JALAN_TARGETS)[number]>(VERIFIED_JALAN_TARGETS.map((t) => [t.jalanYadId, t]));
+  const known = new Map<string, JalanUniverseTarget>(jalanLiveUniverseTargets().map((t) => [t.jalanYadId, t]));
   const out: JalanProbeTarget[] = [];
   const missing: PlannerStayDateTarget[] = [];
   for (const t of targets) {
@@ -375,6 +435,7 @@ export interface AppendPlan {
   metadata_only_diffs: RowConflictDetail[];
   basis_or_classification_diffs: RowConflictDetail[];
   hard_conflicts: RowConflictDetail[];
+  price_sanity_excluded_records: PriceSanityExclusion[];
 }
 
 // Build a unique, traceable row_id for an intraday price-change observation.
@@ -482,12 +543,20 @@ export function buildAppendPlan(input: {
   const existing = new Map(input.existingKeys.map((key) => [`${key.shard_month}::${key.row_id}`, key]));
   const candidates: { source: "booking" | "jalan"; row: HistoryRow }[] = [];
   const rejected_rows: AppendPlan["rejected_rows"] = [];
+  const price_sanity_excluded_records: PriceSanityExclusion[] = [];
 
   if (input.bookingSourceCheck.append_allowed) {
     for (const row of input.bookingRows) {
       const reason = bookingRowPolicyRejection(row);
-      if (reason === "") candidates.push({ source: "booking", row: buildBookingHistoryRow({ row, sourceReportPath: input.bookingReportPath, sourceCsvPath: input.bookingCsvPath }) });
-      else rejected_rows.push({ source: "booking", identity: `${row.property_slug}:${row.checkin}`, reason });
+      if (reason !== "") { rejected_rows.push({ source: "booking", identity: `${row.property_slug}:${row.checkin}`, reason }); continue; }
+      // 16X-C price sanity floor: an implausibly low directional candidate
+      // price is excluded from append candidacy (identity untouched).
+      if (row.classification === "directional" && row.primary_price_numeric !== null && row.primary_price_numeric < BOOKING_PRICE_SANITY_FLOOR_JPY) {
+        price_sanity_excluded_records.push({ source: "booking", property_slug: row.property_slug, stay_date: row.checkin, raw_price: row.primary_price_numeric, floor: BOOKING_PRICE_SANITY_FLOOR_JPY, reason: "excluded_price_sanity_floor" });
+        rejected_rows.push({ source: "booking", identity: `${row.property_slug}:${row.checkin}`, reason: "excluded_price_sanity_floor" });
+        continue;
+      }
+      candidates.push({ source: "booking", row: buildBookingHistoryRow({ row, sourceReportPath: input.bookingReportPath, sourceCsvPath: input.bookingCsvPath }) });
     }
   } else {
     for (const row of input.bookingRows) rejected_rows.push({ source: "booking", identity: `${row.property_slug}:${row.checkin}`, reason: input.bookingSourceCheck.failure_reasons.join(";") });
@@ -581,7 +650,8 @@ export function buildAppendPlan(input: {
     intraday_rows,
     metadata_only_diffs,
     basis_or_classification_diffs,
-    hard_conflicts
+    hard_conflicts,
+    price_sanity_excluded_records
   };
 }
 
@@ -879,6 +949,10 @@ export function renderMarketRefreshReport(input: {
     `- metadata_only_diffs=${input.appendPlan.metadata_only_diffs.length}`,
     `- basis_or_classification_diffs=${input.appendPlan.basis_or_classification_diffs.length}`,
     `- hard_conflicts=${input.appendPlan.hard_conflicts.length}`,
+    `- price_sanity_excluded_count=${input.appendPlan.price_sanity_excluded_records.length}`,
+    ...input.appendPlan.price_sanity_excluded_records.map(
+      (d) => `- price_sanity_excluded: ${d.property_slug} ${d.stay_date} raw_price=${d.raw_price} floor=${d.floor} reason=${d.reason}`
+    ),
     `- touched_shards=${JSON.stringify(input.appendPlan.touched_shards)}`,
     ...input.appendPlan.intraday_rows.map(
       (d) => `- intraday: ${d.base_row_id} ${d.existing_price}→${d.new_price} (Δ${d.price_delta}, ${d.price_delta_pct}%) → ${d.intraday_row_id}`

@@ -24,7 +24,7 @@ import {
 import { toPreviewRow, type PreviewAvailabilityStatus, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import { buildBookingSourceLevelCheck, buildJalanSourceLevelCheck } from "../services/autoRunnerMarketRefresh";
 import { buildJalanProbeTarget, type JalanImprovedPreviewRow, type ProbeAvailabilityStatus } from "../services/jalanBoundedCollectionProbeImproved";
-import { collectTarget } from "./probeJalanBoundedCollectionImproved";
+import { collectTarget, ensureJalanDebugDirs } from "./probeJalanBoundedCollectionImproved";
 import { isLiveVerified, liveTargets, type TargetTier } from "../services/marketRefreshTargetUniverse";
 import {
   ROTATING_CAPS,
@@ -285,10 +285,7 @@ async function collectJalanPilot(targets: readonly RotatingTarget[], debugPath: 
   let stopped = false;
   const browser = await chromium.launch({ headless: true });
   try {
-    // collectTarget assumes the full debug layout its standalone main() creates.
-    for (const sub of ["screenshots", "html", "text", "errors", "evidence_flags", "classification_decisions"]) {
-      mkdirSync(resolve(debugPath, "jalan", sub), { recursive: true });
-    }
+    ensureJalanDebugDirs(resolve(debugPath, "jalan"));
     for (const t of targets) {
       if (consecutiveBlocked >= MAX_CONSECUTIVE_BLOCKED_PER_SOURCE) { stopped = true; break; }
       const mapped = universe.get(t.property_slug);

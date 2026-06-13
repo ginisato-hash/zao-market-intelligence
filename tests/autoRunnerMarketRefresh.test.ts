@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BOOKING_PRICE_SANITY_FLOOR_JPY,
   MAX_BOOKING_PAGES,
   MAX_JALAN_PAGES,
   MAX_TOTAL_LIVE_PAGES,
@@ -11,6 +12,7 @@ import {
   buildAppendPlan,
   buildBookingPlan,
   buildBookingSourceLevelCheck,
+  buildJalanMatrixFromPlannerTargets,
   buildJalanSourceLevelCheck,
   buildJalanTargetMatrix,
   buildPlannerDrivenBookingPlan,
@@ -18,11 +20,13 @@ import {
   buildSafetyConfirmation,
   decideMarketRefresh,
   evaluateMarketRefreshGates,
+  jalanLiveUniverseTargets,
   renderMarketRefreshCsv,
   selectMarketRefreshDates,
   totalPageCapRespected,
   type ExistingHistoryKey
 } from "../src/services/autoRunnerMarketRefresh";
+import { liveJalanTargets } from "../src/services/marketRefreshTargetUniverse";
 import { VERIFIED_BOOKING_TARGETS } from "../src/services/autoRunnerBookingPreview";
 import { renderHistoryCsv, type HistoryRow } from "../src/services/localHistorySchemaDesign";
 import type { PreviewRow } from "../src/services/autoRunnerBookingPreview";
@@ -134,6 +138,104 @@ describe("AUTO-RUNNER10X - row policy", () => {
     const badJalan = buildJalanSourceLevelCheck([jalanRow({ screenshot_path: "" })]);
     const plan = buildAppendPlan(basePlan({ bookingRows: [bookingRow()], jalanRows: [jalanRow()], jalanCheck: badJalan }));
     expect(plan.approved_rows.map((row) => row.source)).toEqual(["booking"]);
+  });
+});
+
+describe("AUTO-RUNNER16X-C - Booking price sanity floor", () => {
+  it("floor is a positive JPY constant", () => {
+    expect(BOOKING_PRICE_SANITY_FLOOR_JPY).toBeGreaterThan(0);
+    expect(BOOKING_PRICE_SANITY_FLOOR_JPY).toBe(3000);
+  });
+
+  it("excludes a ¥100-class hammond-takamiya directional row from append", () => {
+    const row = bookingRow({ property_slug: "hammond-takamiya", canonical_property_name: "HAMMOND", primary_price_numeric: 100 });
+    const plan = buildAppendPlan(basePlan({ bookingRows: [row], jalanRows: [] }));
+    expect(plan.approved_rows).toHaveLength(0);
+    expect(plan.price_sanity_excluded_records).toHaveLength(1);
+    const rec = plan.price_sanity_excluded_records[0]!;
+    expect(rec).toMatchObject({ source: "booking", property_slug: "hammond-takamiya", raw_price: 100, floor: BOOKING_PRICE_SANITY_FLOOR_JPY, reason: "excluded_price_sanity_floor" });
+    expect(plan.rejected_rows.some((r) => r.reason === "excluded_price_sanity_floor")).toBe(true);
+  });
+
+  it("admits a normal price at/above the floor", () => {
+    const plan = buildAppendPlan(basePlan({ bookingRows: [bookingRow({ primary_price_numeric: 33000 })], jalanRows: [] }));
+    expect(plan.approved_rows).toHaveLength(1);
+    expect(plan.price_sanity_excluded_records).toHaveLength(0);
+  });
+
+  it("excludes exactly below the floor and admits exactly at the floor", () => {
+    const below = buildAppendPlan(basePlan({ bookingRows: [bookingRow({ primary_price_numeric: BOOKING_PRICE_SANITY_FLOOR_JPY - 1 })], jalanRows: [] }));
+    expect(below.approved_rows).toHaveLength(0);
+    expect(below.price_sanity_excluded_records).toHaveLength(1);
+    const atFloor = buildAppendPlan(basePlan({ bookingRows: [bookingRow({ primary_price_numeric: BOOKING_PRICE_SANITY_FLOOR_JPY })], jalanRows: [] }));
+    expect(atFloor.approved_rows).toHaveLength(1);
+    expect(atFloor.price_sanity_excluded_records).toHaveLength(0);
+  });
+
+  it("does not affect sold_out / not_listed (no directional price) classifications", () => {
+    // A jalan sold_out row carries no directional price; the booking floor must not touch it.
+    const soldOut = jalanRow({ dp_usage: "excluded", availability_status: "sold_out", normalized_total_price: null, source_primary_price: null, is_price_usable_for_dp_directional: false });
+    const plan = buildAppendPlan(basePlan({ bookingRows: [], jalanRows: [soldOut] }));
+    expect(plan.price_sanity_excluded_records).toHaveLength(0);
+  });
+
+  it("only excludes the low-priced row, not other valid rows in the same run", () => {
+    const plan = buildAppendPlan(basePlan({
+      bookingRows: [
+        bookingRow({ property_slug: "hammond-takamiya", canonical_property_name: "HAMMOND", checkin: "2026-07-18", primary_price_numeric: 100 }),
+        bookingRow({ property_slug: "zao-kokusai", canonical_property_name: "蔵王国際ホテル", checkin: "2026-07-19", primary_price_numeric: 33000 })
+      ],
+      jalanRows: []
+    }));
+    expect(plan.approved_rows).toHaveLength(1);
+    expect(plan.approved_rows[0]!.canonicalPropertyName).toBe("蔵王国際ホテル");
+    expect(plan.price_sanity_excluded_records).toHaveLength(1);
+  });
+});
+
+describe("AUTO-RUNNER16X-C - Jalan live universe direct resolution", () => {
+  it("resolves verified Jalan targets from the live universe (>= 10, all yad ids with urls)", () => {
+    const targets = jalanLiveUniverseTargets();
+    expect(targets.length).toBeGreaterThanOrEqual(10);
+    expect(targets.every((t) => /^yad\d+$/u.test(t.jalanYadId))).toBe(true);
+    expect(targets.every((t) => t.sourceUrl.startsWith("https://www.jalan.net/"))).toBe(true);
+  });
+
+  it("matches the live universe count exactly (no legacy-list dependency)", () => {
+    expect(jalanLiveUniverseTargets().length).toBe(liveJalanTargets().length);
+  });
+
+  it("includes 16X-A4-promoted yad ids that the legacy fixed list lacks", () => {
+    const universeIds = new Set<string>(jalanLiveUniverseTargets().map((t) => t.jalanYadId));
+    const legacyIds = new Set<string>(VERIFIED_JALAN_TARGETS.map((t) => t.jalanYadId));
+    // 蔵王国際ホテル yad309590 and 深山荘 高見屋 yad321744 were promoted in 16X-A4.
+    expect(universeIds.has("yad309590")).toBe(true);
+    expect(universeIds.has("yad321744")).toBe(true);
+    expect(legacyIds.has("yad309590")).toBe(false);
+    expect(universeIds.size).toBeGreaterThan(legacyIds.size);
+  });
+
+  it("produces no duplicate yad ids", () => {
+    const ids = jalanLiveUniverseTargets().map((t) => t.jalanYadId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("buildJalanMatrixFromPlannerTargets resolves a newly promoted yad id (was excluded under the legacy list)", () => {
+    const matrix = buildJalanMatrixFromPlannerTargets([
+      { source: "jalan", property_slug: "yad309590", canonical_property_name: "蔵王国際ホテル", stay_date: "2026-07-18" }
+    ]);
+    expect(matrix.excluded_missing_mapping).toHaveLength(0);
+    expect(matrix.targets).toHaveLength(1);
+    expect(matrix.targets[0]!.jalan_yad_id).toBe("yad309590");
+  });
+
+  it("buildJalanMatrixFromPlannerTargets still excludes an unknown / candidate-only yad id", () => {
+    const matrix = buildJalanMatrixFromPlannerTargets([
+      { source: "jalan", property_slug: "yad000000", canonical_property_name: "ghost", stay_date: "2026-07-18" },
+      { source: "jalan", property_slug: "", canonical_property_name: "candidate only", stay_date: "2026-07-18" }
+    ]);
+    expect(matrix.targets).toHaveLength(0);
+    expect(matrix.excluded_missing_mapping).toHaveLength(2);
   });
 });
 

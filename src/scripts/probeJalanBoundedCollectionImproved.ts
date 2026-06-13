@@ -115,6 +115,16 @@ export interface PageResult {
   warning_flags: string[];
 }
 
+// Phase AUTO-RUNNER16X-C — idempotent debug-layout setup for any caller of
+// collectTarget (standalone run, rotating live runner, manual pilots).
+// collectTarget writes into these subdirectories and crashes if they are
+// missing (observed in the 16X-B pilot first attempt).
+export function ensureJalanDebugDirs(debugPath: string): void {
+  for (const sub of ["screenshots", "html", "text", "errors", "evidence_flags", "classification_decisions"]) {
+    mkdirSync(resolve(debugPath, sub), { recursive: true });
+  }
+}
+
 export async function collectTarget(input: {
   browser: Browser;
   target: JalanProbeTarget;
@@ -549,12 +559,7 @@ async function run(): Promise<void> {
   const reportDir = resolve(REPORT_DIR);
   const debugPath = resolve(DEBUG_ROOT, ts);
   mkdirSync(reportDir, { recursive: true });
-  mkdirSync(resolve(debugPath, "screenshots"), { recursive: true });
-  mkdirSync(resolve(debugPath, "html"), { recursive: true });
-  mkdirSync(resolve(debugPath, "text"), { recursive: true });
-  mkdirSync(resolve(debugPath, "errors"), { recursive: true });
-  mkdirSync(resolve(debugPath, "evidence_flags"), { recursive: true });
-  mkdirSync(resolve(debugPath, "classification_decisions"), { recursive: true });
+  ensureJalanDebugDirs(debugPath);
 
   const reportPath = resolve(REPORT_DIR, `jalan_bounded_collection_probe_improved_${ts}.md`);
   const jsonPath = resolve(REPORT_DIR, `jalan_bounded_collection_probe_improved_${ts}.json`);
