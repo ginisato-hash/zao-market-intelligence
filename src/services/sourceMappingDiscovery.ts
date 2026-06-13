@@ -98,6 +98,29 @@ export const BOOKING_SLUG_SEEDS: Readonly<Record<string, string>> = {
   "蔵王・和歌（うた）の宿 わかまつや": "wakamatsuya"
 };
 
+// Phase AUTO-RUNNER16X-F — derive discovery candidates from the expanded Zao
+// Onsen property master. Every master entry whose expected_sources include
+// booking/jalan becomes a discovery candidate for those sources, carrying the
+// master aliases. tier_monitor_only entries map onto our existing tier set as
+// tier_budget_small (no separate discovery behavior). This is the source of
+// truth the runner uses; the legacy DISCOVERY_CANDIDATES above is kept for the
+// 16X-A4 tests and as a fallback.
+export function discoveryCandidatesFromMaster(
+  master: readonly {
+    canonical_property_name: string;
+    aliases: readonly string[];
+    tier: "tier_anchor_high" | "tier_direct_mid" | "tier_budget_small" | "tier_monitor_only";
+    expected_sources: readonly ("booking" | "jalan" | "rakuten" | "google_hotels")[];
+  }[]
+): SourceMappingDiscoveryCandidate[] {
+  return master.map((e) => ({
+    canonical_property_name: e.canonical_property_name,
+    aliases: [...e.aliases],
+    tier: e.tier,
+    target_sources: e.expected_sources.filter((s): s is DiscoverySource => s === "booking" || s === "jalan")
+  })).filter((c) => c.target_sources.length > 0);
+}
+
 // ---------------------------------------------------------------------------
 // Extraction helpers.
 

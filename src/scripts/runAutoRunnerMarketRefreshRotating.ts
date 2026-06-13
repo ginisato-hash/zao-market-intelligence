@@ -35,6 +35,7 @@ import { type JalanImprovedPreviewRow } from "../services/jalanBoundedCollection
 import { collectTarget, ensureJalanDebugDirs } from "./probeJalanBoundedCollectionImproved";
 import { liveTargets } from "../services/marketRefreshTargetUniverse";
 import {
+  DAILY_PAGE_CAPACITY,
   ROTATING_CAPS,
   buildRotatingPlan,
   type RotatingDemandConfig,
@@ -293,7 +294,11 @@ async function run(): Promise<void> {
     jalan_source_level_captcha_or_block: sourceBlockReport.jalan_source_level_captcha_or_block,
     blocked_or_captcha_rejected_rows_count: sourceBlockReport.blocked_or_captcha_rejected_rows_count,
     pricing_output_generated: false, pms_output_generated: false,
-    caps: plan.caps, selected_targets: plan.selected,
+    caps: plan.caps,
+    theoretical_daily_page_capacity: DAILY_PAGE_CAPACITY.theoretical_daily_page_capacity,
+    booking_daily_capacity: DAILY_PAGE_CAPACITY.booking_daily_capacity,
+    jalan_daily_capacity: DAILY_PAGE_CAPACITY.jalan_daily_capacity,
+    selected_targets: plan.selected,
     report_path: resolve(REPORT_DIR, `${runId}.md`), json_path: resolve(REPORT_DIR, `${runId}.json`), csv_path: resolve(REPORT_DIR, `${runId}.csv`), debug_artifact_path: debugPath
   };
 

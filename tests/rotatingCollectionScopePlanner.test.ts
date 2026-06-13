@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DAILY_PAGE_CAPACITY,
   MAX_TARGETS_PER_PROPERTY_PER_RUN,
   ROTATING_CAPS,
   SLOT_HOURS,
@@ -150,5 +151,42 @@ describe("AUTO-RUNNER16X-A2 - property diversity", () => {
     const p = plan(8, new Map([[key, `${RUN_DATE}T02:00:00+09:00`]]));
     expect(p.excluded_by_cooldown.length).toBeGreaterThan(0);
     for (const [, count] of Object.entries(p.selected_targets_by_property)) expect(count).toBeLessThanOrEqual(MAX_TARGETS_PER_PROPERTY_PER_RUN);
+  });
+});
+
+describe("AUTO-RUNNER16X-F - expanded caps and capacity", () => {
+  it("ROTATING_CAPS expanded to 24 / 12 / 12; Rakuten+Google stay 0", () => {
+    expect(ROTATING_CAPS.total_pages_per_run).toBe(24);
+    expect(ROTATING_CAPS.booking_pages_per_run).toBe(12);
+    expect(ROTATING_CAPS.jalan_pages_per_run).toBe(12);
+    expect(ROTATING_CAPS.rakuten_pages_per_run).toBe(0);
+    expect(ROTATING_CAPS.google_hotels_pages_per_run).toBe(0);
+  });
+
+  it("theoretical daily capacity = 288 (booking 144 / jalan 144)", () => {
+    expect(DAILY_PAGE_CAPACITY.theoretical_daily_page_capacity).toBe(288);
+    expect(DAILY_PAGE_CAPACITY.booking_daily_capacity).toBe(144);
+    expect(DAILY_PAGE_CAPACITY.jalan_daily_capacity).toBe(144);
+  });
+
+  it("respects the new total/booking/jalan caps with the expanded universe", () => {
+    const p = plan(8);
+    expect(p.selected.length).toBeLessThanOrEqual(24);
+    expect(p.selected_by_source["booking"] ?? 0).toBeLessThanOrEqual(12);
+    expect(p.selected_by_source["jalan"] ?? 0).toBeLessThanOrEqual(12);
+  });
+
+  it("selects >= 6 distinct properties per source under cap 24", () => {
+    const p = plan(8);
+    expect(p.selected_distinct_properties_by_source["booking"]).toBeGreaterThanOrEqual(6);
+    expect(p.selected_distinct_properties_by_source["jalan"]).toBeGreaterThanOrEqual(6);
+  });
+
+  it("selects >= 18 distinct stay dates under cap 24 (1 target/stay_date)", () => {
+    expect(plan(8).selected_distinct_stay_dates).toBeGreaterThanOrEqual(18);
+  });
+
+  it("never selects Rakuten or Google", () => {
+    expect(plan(8).selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
   });
 });

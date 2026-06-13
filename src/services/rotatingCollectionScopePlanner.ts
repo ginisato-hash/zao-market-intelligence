@@ -13,15 +13,26 @@ import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefre
 
 export type RotatingBucket = "short" | "mid" | "long";
 
+// Phase AUTO-RUNNER16X-F — per-run caps expanded to 24 (Booking 12 / Jalan 12)
+// to cover the enlarged verified universe. Rakuten/Google remain 0 (never live).
 export const ROTATING_CAPS = {
-  total_pages_per_run: 12,
-  booking_pages_per_run: 6,
-  jalan_pages_per_run: 6,
+  total_pages_per_run: 24,
+  booking_pages_per_run: 12,
+  jalan_pages_per_run: 12,
   rakuten_pages_per_run: 0,
   google_hotels_pages_per_run: 0
 } as const;
 
 export const SLOT_HOURS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22] as const;
+
+// Theoretical daily page capacity = per-run cap x number of 2-hourly slots.
+// Reported for ops visibility; actual volume is bounded further by cooldown,
+// diversity caps, and the size of the verified universe.
+export const DAILY_PAGE_CAPACITY = {
+  theoretical_daily_page_capacity: ROTATING_CAPS.total_pages_per_run * SLOT_HOURS.length,
+  booking_daily_capacity: ROTATING_CAPS.booking_pages_per_run * SLOT_HOURS.length,
+  jalan_daily_capacity: ROTATING_CAPS.jalan_pages_per_run * SLOT_HOURS.length
+} as const;
 
 const BUCKET_RANGES = { short: [1, 14], mid: [15, 90], long: [91, 240] } as const;
 const WINTER_RANGE = ["2026-12-19", "2027-03-15"] as const;

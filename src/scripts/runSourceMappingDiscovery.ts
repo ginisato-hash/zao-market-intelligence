@@ -22,7 +22,7 @@ import { join, resolve } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import {
   BOOKING_SLUG_SEEDS,
-  DISCOVERY_CANDIDATES,
+  discoveryCandidatesFromMaster,
   alreadyLiveVerified,
   bookingHotelUrl,
   decideDiscovery,
@@ -38,6 +38,10 @@ import {
   type SourceMappingDiscoveryResult
 } from "../services/sourceMappingDiscovery";
 import { liveBookingTargets, liveJalanTargets } from "../services/marketRefreshTargetUniverse";
+import { ZAO_ONSEN_EXPANDED_PROPERTY_MASTER } from "../services/zaoOnsenPropertyMaster";
+
+// 16X-F: discovery candidates are derived from the expanded property master.
+const MASTER_CANDIDATES = discoveryCandidatesFromMaster(ZAO_ONSEN_EXPANDED_PROPERTY_MASTER);
 
 const REPORT_DIR = ".data/reports/source-mapping-discovery";
 const DEBUG_ROOT = ".data/debug/source-mapping-discovery";
@@ -86,7 +90,7 @@ function parseOptions(): RunnerOptions {
 }
 
 function selectCandidates(source: DiscoverySource, options: RunnerOptions): SourceMappingDiscoveryCandidate[] {
-  return DISCOVERY_CANDIDATES
+  return MASTER_CANDIDATES
     .filter((c) => c.target_sources.includes(source))
     .filter((c) => options.candidateFilter === "" || c.canonical_property_name.includes(options.candidateFilter))
     .slice(0, options.maxCandidates);

@@ -130,3 +130,12 @@ describe("AUTO-RUNNER16X-E0 - real source-block reporting wiring", () => {
     expect(RUNNER_SOURCE).toMatch(/sourceBlockReport[\s\S]{0,200}source_block_or_captcha_detected:\s*false/u);
   });
 });
+
+describe("AUTO-RUNNER16X-F - daily capacity reporting", () => {
+  it("runner emits theoretical/booking/jalan daily capacity from DAILY_PAGE_CAPACITY", () => {
+    expect(RUNNER_SOURCE).toContain("DAILY_PAGE_CAPACITY");
+    expect(RUNNER_SOURCE).toContain("theoretical_daily_page_capacity: DAILY_PAGE_CAPACITY.theoretical_daily_page_capacity");
+    expect(RUNNER_SOURCE).toContain("booking_daily_capacity: DAILY_PAGE_CAPACITY.booking_daily_capacity");
+    expect(RUNNER_SOURCE).toContain("jalan_daily_capacity: DAILY_PAGE_CAPACITY.jalan_daily_capacity");
+  });
+});

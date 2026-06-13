@@ -61,9 +61,25 @@ describe("AUTO-RUNNER16X - target universe", () => {
     expect(s.jalan_live_verified).toBe(liveJalanTargets().length);
     expect(s.rakuten_live).toBe(0);
     expect(s.google_hotels_live).toBe(0);
-    // AUTO-RUNNER16X-A4 expansion goals: booking >= 8, jalan >= 10.
-    expect(s.booking_live_verified).toBeGreaterThanOrEqual(8);
-    expect(s.jalan_live_verified).toBeGreaterThanOrEqual(10);
+    // AUTO-RUNNER16X-F expansion goals: booking >= 20, jalan >= 20.
+    expect(s.booking_live_verified).toBeGreaterThanOrEqual(20);
+    expect(s.jalan_live_verified).toBeGreaterThanOrEqual(20);
+  });
+
+  it("16X-F promoted targets carry slug + url + discovery evidence note", () => {
+    const promoted = liveTargets().filter((t) => t.verification_note.includes("16X-F"));
+    expect(promoted.length).toBeGreaterThanOrEqual(13);
+    for (const t of promoted) {
+      expect(t.property_slug.length).toBeGreaterThan(0);
+      expect(t.source_url ?? "").toMatch(/^https:\/\/(www\.)?(jalan\.net\/yad\d+\/|booking\.com\/hotel\/jp\/[a-z0-9-]+\.ja\.html)$/u);
+      expect(t.verification_note).toContain("name+region match");
+      if (t.source === "jalan") expect(t.source_property_id).toBe(t.property_slug);
+    }
+  });
+
+  it("16X-F adds 三浦屋 (own property self-monitor) on both sources", () => {
+    expect(isLiveVerified("jalan", "yad302145")).toBe(true);
+    expect(isLiveVerified("booking", "japanese-hostel-miuraya")).toBe(true);
   });
 
   it("16X-A4 promoted targets carry slug + url + discovery evidence note", () => {
