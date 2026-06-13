@@ -194,6 +194,25 @@ describe("AUTO-RUNNER16X-C - Booking price sanity floor", () => {
   });
 });
 
+describe("AUTO-RUNNER16X-F - source-level check respects an expanded page cap", () => {
+  it("12 booking rows pass when maxPages=12 but fail at the legacy default", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => bookingRow({ property_slug: `slug-${i}`, checkin: `2026-07-${String(i + 1).padStart(2, "0")}` }));
+    const atDefault = buildBookingSourceLevelCheck(rows); // legacy MAX_BOOKING_PAGES (9)
+    expect(atDefault.page_cap_respected).toBe(false);
+    expect(atDefault.failure_reasons).toContain("page_cap_exceeded");
+    const atRotating = buildBookingSourceLevelCheck(rows, 12);
+    expect(atRotating.page_cap_respected).toBe(true);
+    expect(atRotating.append_allowed).toBe(true);
+  });
+
+  it("12 jalan rows pass when maxPages=12", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => jalanRow({ source_slug_or_code: `yad${100000 + i}`, checkin: `2026-07-${String(i + 1).padStart(2, "0")}` }));
+    const check = buildJalanSourceLevelCheck(rows, 12);
+    expect(check.page_cap_respected).toBe(true);
+    expect(check.append_allowed).toBe(true);
+  });
+});
+
 describe("AUTO-RUNNER16X-E0 - real source block/captcha reporting", () => {
   const clean = { source_level_captcha_or_block: false };
   const blocked = { source_level_captcha_or_block: true };

@@ -138,4 +138,10 @@ describe("AUTO-RUNNER16X-F - daily capacity reporting", () => {
     expect(RUNNER_SOURCE).toContain("booking_daily_capacity: DAILY_PAGE_CAPACITY.booking_daily_capacity");
     expect(RUNNER_SOURCE).toContain("jalan_daily_capacity: DAILY_PAGE_CAPACITY.jalan_daily_capacity");
   });
+
+  it("source-level checks use the rotating per-run caps (not the legacy 09:00 caps)", () => {
+    // Without the rotating cap, MAX_BOOKING_PAGES (9) would reject all 12 booking rows.
+    expect(RUNNER_SOURCE).toContain("buildBookingSourceLevelCheck(bookingRows, ROTATING_CAPS.booking_pages_per_run)");
+    expect(RUNNER_SOURCE).toContain("buildJalanSourceLevelCheck(jalanRows, ROTATING_CAPS.jalan_pages_per_run)");
+  });
 });

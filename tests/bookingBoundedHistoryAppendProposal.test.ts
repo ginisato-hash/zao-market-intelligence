@@ -194,8 +194,10 @@ describe("BOOKING-B10X — history preflight", () => {
     // + 24 rows each from scheduled 09:00 runs on 2026-06-09 and 2026-06-10 = 323,
     // + 24 rows each from scheduled 09:00 runs on 2026-06-11, 2026-06-12, 2026-06-13 = 395,
     // + 11 rows each from the AUTO-RUNNER16X-D manual live-append pilot (x2) on 2026-06-14 = 417,
-    // + 10 rows from the AUTO-RUNNER16X-E2 rotating-live cutover kickstart = 427.
-    expect(actualHistorySummary().total_rows).toBe(427);
+    // + 10 rows from the AUTO-RUNNER16X-E2 rotating-live cutover kickstart = 427,
+    // + AUTO-RUNNER16X-F expanded-universe kickstarts (jalan 12, then 12 booking +
+    //   12 jalan after the source-cap fix) = 463.
+    expect(actualHistorySummary().total_rows).toBe(463);
   });
 
   it("computes touched shards and expected after-append rows", () => {

@@ -118,8 +118,10 @@ function run(): AutoRunnerHealthCheckOutput {
   // (275 -> 299 -> 323 -> 347 -> 371 -> 395), then the AUTO-RUNNER16X-D manual
   // gated live-append pilot appended 11 rows per run x2 on 2026-06-14
   // (395 -> 406 -> 417), then the AUTO-RUNNER16X-E2 rotating-live cutover
-  // kickstart appended 10 rows (417 -> 427).
-  const EXPECTED_BASELINE_ROW_COUNT = 427;
+  // kickstart appended 10 rows (417 -> 427), then the AUTO-RUNNER16X-F expanded
+  // universe + cap-24 cutover kickstarts appended jalan 12 then booking 12 +
+  // jalan 12 (427 -> 439 -> 463).
+  const EXPECTED_BASELINE_ROW_COUNT = 463;
   const before = currentStateBefore.current_state_summary;
   const after = currentStateAfter.current_state_summary;
   const stateCountsMatchExpected =

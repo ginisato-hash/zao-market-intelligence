@@ -237,8 +237,11 @@ async function run(): Promise<void> {
       }
     } finally { await browser.close().catch(() => undefined); }
 
-    const bookingCheck = buildBookingSourceLevelCheck(bookingRows);
-    const jalanCheck = buildJalanSourceLevelCheck(jalanRows);
+    // Source-level page caps must match the rotating per-run caps (16X-F: 12/12),
+    // not the legacy 09:00-runner defaults (Booking 9), or a full source would be
+    // rejected as page_cap_exceeded.
+    const bookingCheck = buildBookingSourceLevelCheck(bookingRows, ROTATING_CAPS.booking_pages_per_run);
+    const jalanCheck = buildJalanSourceLevelCheck(jalanRows, ROTATING_CAPS.jalan_pages_per_run);
     appendPlan = buildAppendPlan({ bookingRows, jalanRows, existingKeys: readExistingKeys(), bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, bookingReportPath: "", bookingCsvPath: "" });
     sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
