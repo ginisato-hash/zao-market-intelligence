@@ -114,9 +114,9 @@ function run(): AutoRunnerHealthCheckOutput {
   const safetyConfirmation = buildSafetyConfirmation();
   // Expected canonical baseline after 15X-B controlled planner-driven live run
   // (270 -> 275; +5 intraday Booking price-change rows). Then scheduled 09:00
-  // planner-driven runs appended 24 rows each on 2026-06-09 through 2026-06-11
-  // (275 -> 299 -> 323 -> 347).
-  const EXPECTED_BASELINE_ROW_COUNT = 347;
+  // planner-driven runs appended 24 rows each on 2026-06-09 through 2026-06-13
+  // (275 -> 299 -> 323 -> 347 -> 371 -> 395).
+  const EXPECTED_BASELINE_ROW_COUNT = 395;
   const before = currentStateBefore.current_state_summary;
   const after = currentStateAfter.current_state_summary;
   const stateCountsMatchExpected =
