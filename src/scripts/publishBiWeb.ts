@@ -13,8 +13,28 @@ import { resolve } from "node:path";
 const APP_DIR = "apps/zmi-bi-web";
 const DATA_DIR = `${APP_DIR}/data`;
 const PROJECT_NAME = "zmi-bi-web";
+const ENV_FILE = ".env.cloudflare.local";
+
+// Load Cloudflare auth from .env.cloudflare.local when it is not already in the
+// environment. launchd does not inherit interactive `export`s, and under macOS
+// TCC a launchd shell cannot `source` a file under ~/Documents — but node CAN
+// read it (same as the rotating collector reads package.json/history). Only
+// CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN are read; values are never logged.
+function loadCloudflareEnvFile(): void {
+  if (process.env["CLOUDFLARE_API_TOKEN"] && process.env["CLOUDFLARE_ACCOUNT_ID"]) return;
+  if (!existsSync(resolve(ENV_FILE))) return;
+  const text = readFileSync(resolve(ENV_FILE), "utf8");
+  for (const line of text.split(/\r?\n/u)) {
+    const m = line.match(/^\s*(?:export\s+)?(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID)\s*=\s*(.*)\s*$/u);
+    if (!m) continue;
+    let val = m[2]!.trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+    if (!process.env[m[1]!]) process.env[m[1]!] = val;
+  }
+}
 
 function run(): void {
+  loadCloudflareEnvFile();
   // 1. Export (read-only).
   const exp = spawnSync("npm", ["run", "bi:web:export"], { encoding: "utf8" });
   process.stdout.write(exp.stdout ?? "");
