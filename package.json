@@ -173,6 +173,7 @@
     "auto-runner:market-refresh-rotating": "node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
     "auto-runner:market-refresh-rotating:dry-run": "ZMI_ROTATING_DRY_RUN=1 node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
     "report:collection-coverage": "node --import tsx src/scripts/runCollectionCoverageReport.ts",
+    "report:inventory-kpi": "node --import tsx src/scripts/runInventoryPressureReport.ts",
     "verify:source-mappings": "node --import tsx src/scripts/runSourceMappingVerification.ts",
     "discover:source-mappings": "node --import tsx src/scripts/runSourceMappingDiscovery.ts",
     "auto-runner:16x-b:manual-live-pilot": "node --import tsx src/scripts/runAutoRunner16xBManualLivePilot.ts",
