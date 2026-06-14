@@ -44,7 +44,8 @@ describe("ZMI BI UI v3 - functional controls present", () => {
       expect(HTML).toContain(`data-tab="${t}"`);
     }
     expect(JS).toContain("dataset.tab");
-    expect(JS).toContain("setTab");
+    expect(JS).toMatch(/\[data-tab\]|\.tab/);
+    expect(JS).toMatch(/activeTab\s*=/);
   });
 });
 
@@ -92,8 +93,9 @@ describe("ZMI BI UI v3 - mobile / data loading", () => {
   });
   it("URL state sync for tab/period/group/confidence/q", () => {
     expect(JS).toContain("syncUrlState");
-    expect(JS).toContain('q.set("tab"');
-    expect(JS).toContain('q.set("period"');
+    expect(JS).toMatch(/\.set\("tab"/);
+    expect(JS).toMatch(/\.set\("period"/);
+    expect(JS).toContain("URLSearchParams");
   });
 });
 

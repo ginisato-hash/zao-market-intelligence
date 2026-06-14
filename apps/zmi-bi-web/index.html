@@ -1,82 +1,80 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>ZMI 蔵王温泉 市場BI（全ソース統合）</title>
-<link rel="stylesheet" href="assets/app.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>ZMI 蔵王温泉 市場BI</title>
+  <link rel="stylesheet" href="assets/app.css" />
 </head>
 <body>
-<div class="page">
-  <header class="header">
-    <div class="header-title">
-      <h1>ZMI 蔵王温泉 市場BI</h1>
-      <div class="badges">
-        <span class="badge badge-blue">全ソース統合</span>
-        <span class="badge" id="sourcesBadge">Booking / Jalan / Rakuten</span>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Zao Market Intelligence</div>
+        <h1>ZMI 蔵王温泉 市場BI</h1>
+        <div class="badges" aria-label="データ仕様">
+          <span class="badge badge-blue">全ソース統合</span>
+          <span class="badge" id="sourcesBadge">Booking / Jalan / Rakuten</span>
+          <span class="badge" id="periodPolicyBadge">当期間 + 過去3期</span>
+        </div>
       </div>
-    </div>
-    <div class="header-actions">
-      <div class="header-meta">
-        <div><span class="meta-label">最終データ取得</span><strong id="lastCollected">—</strong></div>
-        <div><span class="meta-label">画面更新</span><strong id="renderedAt">—</strong></div>
+      <div class="hero-actions">
+        <div class="meta-box"><span>最終データ取得</span><strong id="lastCollected">—</strong></div>
+        <div class="meta-box"><span>画面更新</span><strong id="renderedAt">—</strong></div>
+        <button type="button" class="btn btn-primary" id="refreshBtn">最新データを再読込</button>
       </div>
-      <button type="button" class="btn btn-primary" id="refreshBtn">最新データを再読込</button>
-    </div>
-  </header>
+    </header>
 
-  <p class="notice">※ZMIはOTA上の販売可否を観測しています。PMS実在庫・実稼働率ではありません。「OTA販売不可日率」は観測日付ベースの sold_out 比率です。</p>
+    <section class="notice" role="note">
+      ZMIはOTA上の販売可否を観測しています。PMS実在庫・実稼働率ではありません。「OTA販売不可日率」は観測日付ベースの sold_out 比率です。
+    </section>
 
-  <section class="controls" aria-label="フィルタ">
-    <div class="control">
-      <label for="periodSelect">月×期間</label>
-      <select id="periodSelect"></select>
-      <span class="control-note">表示期間: 当期間を自動選択。過去は3期分まで保持。</span>
-    </div>
-    <div class="control">
-      <label for="groupSelect">施設グループ</label>
-      <select id="groupSelect">
-        <option value="all">全施設</option>
-        <option value="own">自社（三浦屋/喜らく）</option>
-        <option value="room_comp">重点競合（HAMMOND/OAKHILL/吉田屋）</option>
-        <option value="anchor">高級・アンカー</option>
-        <option value="mid">中価格帯</option>
-        <option value="budget">小規模・素泊まり</option>
-      </select>
-    </div>
-    <div class="control">
-      <label for="confSelect">信頼度</label>
-      <select id="confSelect">
-        <option value="all">すべて</option>
-        <option value="high">high のみ</option>
-        <option value="medium_or_high">medium 以上</option>
-        <option value="low">low のみ</option>
-      </select>
-    </div>
-    <div class="control">
-      <label for="searchInput">施設検索</label>
-      <input id="searchInput" type="search" inputmode="search" placeholder="施設名で絞り込み" />
-    </div>
-    <div class="control control-actions">
-      <button type="button" class="btn btn-ghost" id="resetBtn">条件リセット</button>
-      <button type="button" class="btn btn-secondary" id="exportVisibleBtn">表示中CSVを保存</button>
-      <button type="button" class="btn btn-secondary" id="copyStateBtn">表示条件URLをコピー</button>
-    </div>
-  </section>
+    <section class="controls" aria-label="表示条件">
+      <label class="control">月×期間
+        <select id="periodSelect"></select>
+        <small>当期間を自動選択。過去は3期分まで保持。</small>
+      </label>
+      <label class="control">施設グループ
+        <select id="groupSelect">
+          <option value="all">全施設</option>
+          <option value="own">自社（三浦屋/喜らく）</option>
+          <option value="room_comp">重点競合</option>
+          <option value="anchor">高級・アンカー</option>
+          <option value="mid">中価格帯</option>
+          <option value="budget">小規模・素泊まり</option>
+        </select>
+      </label>
+      <label class="control">信頼度
+        <select id="confSelect">
+          <option value="all">すべて</option>
+          <option value="high">highのみ</option>
+          <option value="medium_or_high">medium以上</option>
+          <option value="low">lowのみ</option>
+        </select>
+      </label>
+      <label class="control">施設検索
+        <input id="searchInput" type="search" inputmode="search" placeholder="例: 喜らく / OAKHILL" />
+      </label>
+      <div class="control action-control" aria-label="操作">
+        <button type="button" class="btn btn-ghost" id="resetBtn">条件リセット</button>
+        <button type="button" class="btn btn-secondary" id="exportVisibleBtn">表示中CSV</button>
+        <button type="button" class="btn btn-secondary" id="copyStateBtn">URLコピー</button>
+      </div>
+    </section>
 
-  <nav class="tabs" aria-label="BI sections">
-    <button type="button" class="tab active" data-tab="overview">市場概要</button>
-    <button type="button" class="tab" data-tab="facilities">施設別</button>
-    <button type="button" class="tab" data-tab="competitors">重点競合</button>
-    <button type="button" class="tab" data-tab="daily">日別</button>
-    <button type="button" class="tab" data-tab="data">データ状態</button>
-  </nav>
+    <nav class="tabs" aria-label="BI sections">
+      <button type="button" class="tab active" data-tab="overview">市場概要</button>
+      <button type="button" class="tab" data-tab="facilities">施設別</button>
+      <button type="button" class="tab" data-tab="competitors">重点競合</button>
+      <button type="button" class="tab" data-tab="daily">日別</button>
+      <button type="button" class="tab" data-tab="data">データ状態</button>
+    </nav>
 
-  <div id="errorBanner" class="error-banner" hidden></div>
-  <main id="main" class="main"></main>
-  <div class="footer" id="footer">ZMI history only. All sources unified. No external data.</div>
-</div>
-<div id="toast" class="toast" hidden></div>
-<script src="assets/app.js"></script>
+    <div id="errorBanner" class="error-banner" hidden></div>
+    <main id="main" class="main"></main>
+    <footer class="footer" id="footer">ZMI history only. All sources unified. No external data.</footer>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="assets/app.js"></script>
 </body>
 </html>
