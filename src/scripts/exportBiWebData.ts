@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import {
   BI_CSV_HEADERS,
+  applyPeriodRetention,
   buildBiMetadata,
   latestObservations,
   renderUnifiedCsv,
@@ -90,8 +91,11 @@ function run(): void {
   const generatedAtJst = jstIso();
   const { rows, total } = readHistory();
   const latest = latestObservations(rows);
-  const unified = unifyByPropertyCheckin(latest);
-  const metadata = buildBiMetadata({ generatedAtJst, historyRowsTotal: total, latest, unified });
+  const unifiedAll = unifyByPropertyCheckin(latest);
+  // BI publish scope: keep default period + 3 previous + all future periods.
+  const retention = applyPeriodRetention(unifiedAll, new Date());
+  const unified = retention.retainedRows;
+  const metadata = buildBiMetadata({ generatedAtJst, historyRowsTotal: total, latest, unifiedBeforeRetention: unifiedAll, retention });
 
   mkdirSync(resolve(OUT_DIR), { recursive: true });
   const csvPath = resolve(OUT_DIR, "zmi_market_unified.csv");
@@ -110,6 +114,12 @@ function run(): void {
   console.log(`unified_rows=${metadata.unified_rows}`);
   console.log(`distinct_properties=${metadata.distinct_properties}`);
   console.log(`distinct_checkins=${metadata.distinct_checkins}`);
+  console.log(`unified_rows_before_retention=${metadata.unified_rows_before_retention}`);
+  console.log(`current_period_key_jst=${metadata.current_period_key_jst}`);
+  console.log(`default_period_key=${metadata.default_period_key}`);
+  console.log(`retained_period_keys=${metadata.retained_period_keys.join(",")}`);
+  console.log(`dropped_past_period_keys_count=${metadata.dropped_past_period_keys_count}`);
+  console.log(`dropped_past_rows_count=${metadata.dropped_past_rows_count}`);
   console.log(`latest_collected_at_jst=${metadata.latest_collected_at_jst}`);
   console.log(`sources_included=${metadata.sources_included.join(",")}`);
   console.log(`csv_path=${csvPath}`);

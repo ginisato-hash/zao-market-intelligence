@@ -3,15 +3,20 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BI_CSV_HEADERS,
+  applyPeriodRetention,
   buildBiMetadata,
+  getCurrentPeriodKeyJst,
   halfOf,
   latestObservations,
   normalizeAvailability,
   periodKey,
   periodLabel,
-  renderUnifiedCsv,
+  pickDefaultPeriodKey,
+  sortPeriodKeys,
   unifyByPropertyCheckin,
-  type BiHistoryRow
+  renderUnifiedCsv,
+  type BiHistoryRow,
+  type UnifiedRow
 } from "../src/services/biWebDataExport";
 
 const INDEX_HTML = readFileSync(resolve(__dirname, "../apps/zmi-bi-web/index.html"), "utf8");
@@ -162,7 +167,8 @@ describe("ZMI BI export - flags, csv, metadata", () => {
   it("metadata contains latest_collected_at_jst and policy, no external data", () => {
     const latest = latestObservations([row({ source: "jalan", collected_at_jst: "2026-06-14T12:00:00+09:00" }), row({ source: "booking", collected_at_jst: "2026-06-14T08:00:00+09:00" })]);
     const unified = unifyByPropertyCheckin(latest);
-    const meta = buildBiMetadata({ generatedAtJst: "2026-06-14T13:00:00+09:00", historyRowsTotal: 2, latest, unified });
+    const retention = applyPeriodRetention(unified, new Date("2026-06-14T04:00:00Z"));
+    const meta = buildBiMetadata({ generatedAtJst: "2026-06-14T13:00:00+09:00", historyRowsTotal: 2, latest, unifiedBeforeRetention: unified, retention });
     expect(meta.latest_collected_at_jst).toBe("2026-06-14T12:00:00+09:00");
     expect(meta.sources_included).toEqual(["booking", "jalan"]);
     expect(meta.data_policy).toContain("All sources unified");
@@ -171,6 +177,76 @@ describe("ZMI BI export - flags, csv, metadata", () => {
 
   it("export script is read-only (no append/sync/refresh/publish/pricing/pms)", () => {
     expect(SCRIPT_SOURCE).not.toMatch(/appendHistoryRowsAtomic|sync:history-to-db|build:ai-context-packs|publish:chatgpt-db|beds24|airhost|pricing_recommendation/iu);
+  });
+});
+
+describe("ZMI BI export - period retention", () => {
+  function uRow(period_key: string, checkin: string): UnifiedRow {
+    return {
+      period_key, period_label: period_key, checkin, canonical_property_name: "X",
+      unified_availability_status: "available", source_count: 1, available_source_count: 1,
+      sold_out_source_count: 0, no_data_source_count: 0, median_directional_price: 10000,
+      avg_directional_price: 10000, price_sample_count: 1, price_confidence: "medium",
+      inventory_confidence: "medium", latest_collected_at_jst: "2026-06-14T12:00:00+09:00",
+      is_room_only_comp: false, is_own_property: false, tier: "tier_budget_small"
+    };
+  }
+  // synthetic universe spanning many periods
+  const rows: UnifiedRow[] = [
+    "2026-04_early", "2026-04_late", "2026-05_early", "2026-05_late",
+    "2026-06_early", "2026-06_late", "2026-07_early", "2026-08_early"
+  ].map((k) => uRow(k, k.endsWith("early") ? `${k.slice(0, 7)}-05` : `${k.slice(0, 7)}-20`));
+
+  it("getCurrentPeriodKeyJst maps a JST date to its period", () => {
+    expect(getCurrentPeriodKeyJst(new Date("2026-06-14T01:00:00Z"))).toBe("2026-06_early"); // 10:00 JST 14th
+    expect(getCurrentPeriodKeyJst(new Date("2026-06-16T01:00:00Z"))).toBe("2026-06_late");
+  });
+
+  it("sortPeriodKeys orders chronologically", () => {
+    expect(sortPeriodKeys(["2026-07_early", "2026-06_late", "2026-06_early"])).toEqual(["2026-06_early", "2026-06_late", "2026-07_early"]);
+  });
+
+  it("pickDefaultPeriodKey prefers current, else next future, else latest", () => {
+    const keys = sortPeriodKeys(rows.map((r) => r.period_key));
+    expect(pickDefaultPeriodKey(keys, "2026-06_late")).toBe("2026-06_late");
+    expect(pickDefaultPeriodKey(keys, "2026-05_15_missing")).not.toBe(""); // falls to next/latest
+    expect(pickDefaultPeriodKey(keys, "2026-09_early")).toBe("2026-08_early"); // no future → latest
+    expect(pickDefaultPeriodKey(["2026-06_early", "2026-08_early"], "2026-07_early")).toBe("2026-08_early"); // next future
+  });
+
+  it("retains default + 3 previous + all future; drops older", () => {
+    // current period 2026-06_late (16th)
+    const r = applyPeriodRetention(rows, new Date("2026-06-16T01:00:00Z"));
+    expect(r.current_period_key_jst).toBe("2026-06_late");
+    expect(r.default_period_key).toBe("2026-06_late");
+    // default index (2026-06_late) - 3 = 2026-05_early; keep from there + all future
+    expect(r.retained_period_keys.sort()).toEqual(
+      ["2026-05_early", "2026-05_late", "2026-06_early", "2026-06_late", "2026-07_early", "2026-08_early"].sort()
+    );
+    expect(r.dropped_past_period_keys).toEqual(["2026-04_early", "2026-04_late"]);
+    expect(r.retainedRows.every((x) => x.period_key >= "2026-05")).toBe(true);
+    // no retained row is from a dropped period
+    expect(r.retainedRows.some((x) => x.period_key.startsWith("2026-04"))).toBe(false);
+  });
+
+  it("retains all when fewer than 3 past periods exist", () => {
+    const few = [uRow("2026-06_early", "2026-06-05"), uRow("2026-06_late", "2026-06-20")];
+    const r = applyPeriodRetention(few, new Date("2026-06-16T01:00:00Z"));
+    expect(r.dropped_past_period_keys).toEqual([]);
+    expect(r.retainedRows).toHaveLength(2);
+  });
+
+  it("metadata exposes retention fields", () => {
+    const latest = [{ source: "jalan", canonical_property_name: "X", source_slug_or_code: "x", checkin: "2026-06-20", checkout: "", availability_status: "available", normalized_total_price: 10000, is_price_usable_for_dp_directional: true, collected_at_jst: "2026-06-14T12:00:00+09:00", tier: "t" }];
+    const retention = applyPeriodRetention(rows, new Date("2026-06-16T01:00:00Z"));
+    const meta = buildBiMetadata({ generatedAtJst: "g", historyRowsTotal: 1, latest, unifiedBeforeRetention: rows, retention });
+    expect(meta.current_period_key_jst).toBe("2026-06_late");
+    expect(meta.default_period_key).toBe("2026-06_late");
+    expect(meta.retention_previous_periods).toBe(3);
+    expect(meta.retained_period_keys.length).toBeGreaterThan(0);
+    expect(meta.dropped_past_period_keys_count).toBe(2);
+    expect(meta.unified_rows_before_retention).toBe(rows.length);
+    expect(meta.period_retention_policy).toContain("3_previous_periods");
   });
 });
 

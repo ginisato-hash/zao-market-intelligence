@@ -54,7 +54,7 @@ function run(): void {
   }
 
   // 4. Deploy via wrangler.
-  const dep = spawnSync("npx", ["wrangler", "pages", "deploy", APP_DIR, "--project-name", PROJECT_NAME, "--branch", "main"], { encoding: "utf8" });
+  const dep = spawnSync("npx", ["wrangler", "pages", "deploy", APP_DIR, "--project-name", PROJECT_NAME, "--branch", "main", "--commit-dirty=true"], { encoding: "utf8" });
   process.stdout.write(dep.stdout ?? "");
   process.stderr.write(dep.stderr ?? "");
   if (dep.status !== 0) {

@@ -62,6 +62,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-19,吉田屋,available,1,1,0,0,18700,18700,1,medium,medium,2026-06-14T00:51:18+09:00,true,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-19,名湯リゾート ルーセント,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-19,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T12:00:06+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-19,蔵王四季のホテル,sold_out,1,0,1,0,,,0,low,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-19,蔵王国際ホテル,available,2,2,0,0,44385,44385,2,high,high,2026-06-14T08:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,HAMMOND,available,2,1,1,0,12814,12814,1,medium,high,2026-06-14T00:51:18+09:00,true,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,JURIN,available,2,1,1,0,51480,51480,1,medium,high,2026-06-14T02:00:06+09:00,false,false,unknown
@@ -72,12 +73,13 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,三浦屋,available,2,2,0,0,19096,19096,2,high,high,2026-06-14T08:00:06+09:00,false,true,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,吉田屋,available,2,1,1,0,20000,20000,1,medium,high,2026-06-14T01:16:12+09:00,true,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,名湯リゾート ルーセント,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
-2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,深山荘 高見屋,available,1,1,0,0,68414,68414,1,medium,medium,2026-06-13T09:00:06+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,深山荘 高見屋,available,2,1,1,0,68414,68414,1,medium,high,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,蔵王四季のホテル,available,1,1,0,0,42770,42770,1,medium,medium,2026-06-13T09:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-20,蔵王国際ホテル,available,3,1,2,0,34800,34800,1,medium,high,2026-06-14T10:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,HAMMOND,available,1,1,0,0,10559,10559,1,medium,medium,2026-06-14T01:51:59+09:00,true,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,JURIN,available,1,1,0,0,25300,25300,1,medium,medium,2026-06-14T04:00:05+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,ＫＫＲ蔵王 白銀荘,available,1,1,0,0,19700,19700,1,medium,medium,2026-06-14T06:00:06+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,ル・ベール蔵王,available,1,1,0,0,34000,34000,1,medium,medium,2026-06-14T08:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,三浦屋,available,2,2,0,0,15345,15345,2,high,high,2026-06-14T10:00:06+09:00,false,true,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-21,吉田屋,available,1,1,0,0,18700,18700,1,medium,medium,2026-06-14T00:47:47+09:00,true,false,unknown
@@ -95,6 +97,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-23,三浦屋,available,2,2,0,0,16539,16539,2,high,high,2026-06-14T08:00:06+09:00,false,true,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-23,吉田屋,available,1,1,0,0,18700,18700,1,medium,medium,2026-06-14T00:47:47+09:00,true,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-23,名湯リゾート ルーセント,available,1,1,0,0,34100,34100,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-23,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-23,蔵王国際ホテル,available,2,2,0,0,64790,64790,1,medium,high,2026-06-14T10:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-24,名湯リゾート ルーセント,available,1,1,0,0,34100,34100,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-24,蔵王国際ホテル,available,1,1,0,0,64790,64790,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
@@ -103,6 +106,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,JURIN,available,1,1,0,0,67650,67650,1,medium,medium,2026-06-14T00:47:47+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,ＫＫＲ蔵王 白銀荘,available,1,1,0,0,19700,19700,1,medium,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T08:00:06+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,ホテル喜らく,available,1,1,0,0,,,0,low,medium,2026-06-14T14:00:06+09:00,false,true,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,ル・ベール蔵王,available,1,1,0,0,24596,24596,1,medium,medium,2026-06-14T02:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,三浦屋,available,2,2,0,0,15806,15806,2,high,high,2026-06-14T06:00:06+09:00,false,true,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-26,吉田屋,available,1,1,0,0,18700,18700,1,medium,medium,2026-06-14T00:51:18+09:00,true,false,unknown
@@ -113,6 +117,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,HAMMOND,available,1,1,0,0,,,0,low,medium,2026-06-13T09:00:05+09:00,true,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,JURIN,available,2,2,0,0,75956,75956,1,medium,high,2026-06-14T00:47:47+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,ＫＫＲ蔵王 白銀荘,available,1,1,0,0,23700,23700,1,medium,medium,2026-06-14T01:51:59+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,ホテル喜らく,available,1,1,0,0,22770,22770,1,medium,medium,2026-06-13T09:00:05+09:00,false,true,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,ル・ベール蔵王,available,2,2,0,0,26293,26293,2,high,high,2026-06-14T08:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-27,三浦屋,available,2,2,0,0,17187,17187,2,high,high,2026-06-14T10:00:06+09:00,false,true,unknown
@@ -129,7 +134,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-28,名湯リゾート ルーセント,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-28,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-04T16:16:23+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-28,蔵王四季のホテル,available,1,1,0,0,34840,34840,1,medium,medium,2026-06-04T16:16:23+09:00,false,false,unknown
-2026-06_late,2026年6月 下旬（16〜末日）,2026-06-28,蔵王国際ホテル,available,2,2,0,0,50365,50365,2,high,high,2026-06-04T16:16:23+09:00,false,false,unknown
+2026-06_late,2026年6月 下旬（16〜末日）,2026-06-28,蔵王国際ホテル,available,3,2,1,0,50365,50365,2,high,high,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-29,名湯リゾート ルーセント,available,1,1,0,0,34100,34100,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-29,蔵王国際ホテル,available,1,1,0,0,64790,64790,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-06_late,2026年6月 下旬（16〜末日）,2026-06-30,名湯リゾート ルーセント,available,1,1,0,0,34100,34100,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
@@ -175,6 +180,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-07_early,2026年7月 上旬（1〜15日）,2026-07-10,名湯リゾート ルーセント,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-07_early,2026年7月 上旬（1〜15日）,2026-07-10,蔵王国際ホテル,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-07_early,2026年7月 上旬（1〜15日）,2026-07-11,JURIN,available,1,1,0,0,37000,37000,1,medium,medium,2026-06-14T08:00:06+09:00,false,false,unknown
+2026-07_early,2026年7月 上旬（1〜15日）,2026-07-11,ＫＫＲ蔵王 白銀荘,available,1,1,0,0,23700,23700,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-07_early,2026年7月 上旬（1〜15日）,2026-07-11,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T00:51:18+09:00,false,false,unknown
 2026-07_early,2026年7月 上旬（1〜15日）,2026-07-11,ル・ベール蔵王,available,1,1,0,0,30233,30233,1,medium,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-07_early,2026年7月 上旬（1〜15日）,2026-07-11,三浦屋,available,2,2,0,0,17647,17647,2,high,high,2026-06-14T06:00:06+09:00,false,true,unknown
@@ -207,7 +213,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,market_aggregate,available,1,1,0,0,12250,12250,1,medium,medium,2026-06-01T23:07:31+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T00:47:47+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,ホテル喜らく,not_found,1,0,0,1,,,0,low,medium,2026-06-05T00:29:41+09:00,false,true,unknown
-2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,ル・ベール蔵王,available,1,1,0,0,25000,25000,1,medium,medium,2026-06-05T00:29:41+09:00,false,false,unknown
+2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,ル・ベール蔵王,available,2,2,0,0,33000,33000,2,high,high,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,三浦屋,available,2,2,0,0,22165,22165,2,high,high,2026-06-14T08:00:06+09:00,false,true,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,吉田屋,available,2,2,0,0,35200,35200,1,medium,high,2026-06-14T10:00:06+09:00,true,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,名湯リゾート ルーセント,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
@@ -215,6 +221,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,蔵王四季のホテル,available,1,1,0,0,56620,56620,1,medium,medium,2026-06-04T16:16:23+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-18,蔵王国際ホテル,available,3,2,1,0,55590,55590,2,high,high,2026-06-14T00:51:18+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-19,JURIN,available,1,1,0,0,49500,49500,1,medium,medium,2026-06-14T06:00:06+09:00,false,false,unknown
+2026-07_late,2026年7月 下旬（16〜末日）,2026-07-19,ＫＫＲ蔵王 白銀荘,available,1,1,0,0,27700,27700,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-19,market_aggregate,excluded,1,0,0,1,,,0,low,medium,2026-06-01T23:07:31+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-19,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T00:47:47+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-19,三浦屋,available,2,2,0,0,23529,23529,2,high,high,2026-06-14T10:00:06+09:00,false,true,unknown
@@ -242,6 +249,7 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,JURIN,available,1,1,0,0,25104,25104,1,medium,medium,2026-06-14T10:00:06+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T01:16:12+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,三浦屋,available,2,2,0,0,19608,19608,2,high,high,2026-06-14T12:00:06+09:00,false,true,unknown
+2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,吉田屋,available,1,1,0,0,30800,30800,1,medium,medium,2026-06-14T14:00:06+09:00,true,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,名湯リゾート ルーセント,available,1,1,0,0,42900,42900,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T00:47:47+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-25,蔵王国際ホテル,available,2,1,1,0,50160,50160,1,medium,high,2026-06-14T01:44:08+09:00,false,false,unknown
@@ -257,27 +265,30 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-29,蔵王国際ホテル,sold_out,1,0,1,0,,,0,low,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-30,名湯リゾート ルーセント,available,1,1,0,0,34100,34100,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-30,蔵王国際ホテル,available,1,1,0,0,64790,64790,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
+2026-07_late,2026年7月 下旬（16〜末日）,2026-07-31,JURIN,available,1,1,0,0,23819,23819,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-31,吉田屋,available,1,1,0,0,26400,26400,1,medium,medium,2026-06-14T12:00:06+09:00,true,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-31,名湯リゾート ルーセント,available,1,1,0,0,38500,38500,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-07_late,2026年7月 下旬（16〜末日）,2026-07-31,蔵王国際ホテル,available,1,1,0,0,64790,64790,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-01,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T01:16:12+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-01,三浦屋,available,2,2,0,0,20801,20801,2,high,high,2026-06-14T12:00:06+09:00,false,true,unknown
+2026-08_early,2026年8月 上旬（1〜15日）,2026-08-01,吉田屋,available,1,1,0,0,30800,30800,1,medium,medium,2026-06-14T14:00:06+09:00,true,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-01,名湯リゾート ルーセント,available,1,1,0,0,42900,42900,1,medium,medium,2026-06-01T20:58:30+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-01,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T00:51:18+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-01,蔵王国際ホテル,available,2,1,1,0,46200,46200,1,medium,high,2026-06-14T01:44:08+09:00,false,false,unknown
+2026-08_early,2026年8月 上旬（1〜15日）,2026-08-02,JURIN,available,1,1,0,0,45100,45100,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,HAMMOND,available,1,1,0,0,,,0,low,medium,2026-06-05T00:29:41+09:00,true,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,JURIN,excluded,1,0,0,1,,,0,low,medium,2026-06-05T00:29:41+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,market_aggregate,available,1,1,0,0,25000,25000,1,medium,medium,2026-06-01T23:07:31+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T01:44:08+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,ホテル喜らく,not_found,1,0,0,1,,,0,low,medium,2026-06-05T00:29:41+09:00,false,true,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,ル・ベール蔵王,available,1,1,0,0,25000,25000,1,medium,medium,2026-06-05T00:29:41+09:00,false,false,unknown
-2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,三浦屋,available,1,1,0,0,21472,21472,1,medium,medium,2026-06-14T04:00:05+09:00,false,true,unknown
+2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,三浦屋,available,2,2,0,0,20801,20801,2,high,high,2026-06-14T14:00:06+09:00,false,true,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,吉田屋,available,1,1,0,0,,,0,low,medium,2026-06-05T00:29:41+09:00,true,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T00:51:18+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-08,蔵王国際ホテル,available,1,1,0,0,64680,64680,1,medium,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-09,market_aggregate,available,1,1,0,0,44150,44150,1,medium,medium,2026-06-01T23:07:31+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-09,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T02:00:06+09:00,false,false,unknown
-2026-08_early,2026年8月 上旬（1〜15日）,2026-08-09,三浦屋,available,1,1,0,0,23760,23760,1,medium,medium,2026-06-14T04:00:05+09:00,false,true,unknown
+2026-08_early,2026年8月 上旬（1〜15日）,2026-08-09,三浦屋,available,2,2,0,0,23018,23018,2,high,high,2026-06-14T14:00:06+09:00,false,true,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-09,蔵王国際ホテル,available,1,1,0,0,67760,67760,1,medium,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-10,HAMMOND,available,1,1,0,0,,,0,low,medium,2026-06-13T09:00:05+09:00,true,false,unknown
 2026-08_early,2026年8月 上旬（1〜15日）,2026-08-10,JURIN,available,1,1,0,0,,,0,low,medium,2026-06-13T09:00:05+09:00,false,false,unknown
@@ -313,20 +324,24 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,たかみや瑠璃倶楽,available,1,1,0,0,,,0,low,medium,2026-06-14T10:00:06+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,ホテル喜らく,available,1,1,0,0,29900,29900,1,medium,medium,2026-06-14T02:00:06+09:00,false,true,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,ル・ベール蔵王,available,1,1,0,0,28020,28020,1,medium,medium,2026-06-14T12:00:06+09:00,false,false,unknown
+2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,三浦屋,available,1,1,0,0,24992,24992,1,medium,medium,2026-06-14T14:00:06+09:00,false,true,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,深山荘 高見屋,available,2,2,0,0,83900,83900,1,medium,high,2026-06-14T01:44:08+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,蔵王四季のホテル,available,2,2,0,0,70000,70000,2,high,high,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-19,蔵王国際ホテル,available,1,1,0,0,63440,63440,1,medium,medium,2026-06-04T16:16:23+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-20,ホテル喜らく,available,1,1,0,0,31100,31100,1,medium,medium,2026-06-14T02:00:06+09:00,false,true,unknown
+2026-09_late,2026年9月 下旬（16〜末日）,2026-09-20,ル・ベール蔵王,available,1,1,0,0,38000,38000,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-20,三浦屋,available,1,1,0,0,24992,24992,1,medium,medium,2026-06-14T12:00:06+09:00,false,true,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-20,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T01:44:08+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-20,蔵王四季のホテル,available,1,1,0,0,69300,69300,1,medium,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-21,ホテル喜らく,available,1,1,0,0,29900,29900,1,medium,medium,2026-06-14T04:00:05+09:00,false,true,unknown
+2026-09_late,2026年9月 下旬（16〜末日）,2026-09-21,三浦屋,available,1,1,0,0,24288,24288,1,medium,medium,2026-06-14T14:00:06+09:00,false,true,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-21,深山荘 高見屋,sold_out,1,0,1,0,,,0,low,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-21,蔵王四季のホテル,available,1,1,0,0,69300,69300,1,medium,medium,2026-06-14T01:44:08+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-21,蔵王国際ホテル,available,1,1,0,0,70840,70840,1,medium,medium,2026-06-14T12:00:06+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-22,ホテル喜らく,available,1,1,0,0,29400,29400,1,medium,medium,2026-06-14T04:00:05+09:00,false,true,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-22,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T01:51:59+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-22,蔵王四季のホテル,available,1,1,0,0,66220,66220,1,medium,medium,2026-06-14T01:44:08+09:00,false,false,unknown
+2026-09_late,2026年9月 下旬（16〜末日）,2026-09-22,蔵王国際ホテル,available,1,1,0,0,72380,72380,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown
 2026-09_late,2026年9月 下旬（16〜末日）,2026-09-23,ホテル喜らく,available,1,1,0,0,28800,28800,1,medium,medium,2026-06-14T01:44:08+09:00,false,true,unknown
 2026-10_early,2026年10月 上旬（1〜15日）,2026-10-10,HAMMOND,available,1,1,0,0,,,0,low,medium,2026-06-05T00:29:41+09:00,true,false,unknown
 2026-10_early,2026年10月 上旬（1〜15日）,2026-10-10,JURIN,excluded,1,0,0,1,,,0,low,medium,2026-06-05T00:29:41+09:00,false,false,unknown
@@ -365,7 +380,9 @@ period_key,period_label,checkin,canonical_property_name,unified_availability_sta
 2026-12_early,2026年12月 上旬（1〜15日）,2026-12-12,深山荘 高見屋,available,1,1,0,0,59700,59700,1,medium,medium,2026-06-04T16:16:23+09:00,false,false,unknown
 2026-12_early,2026年12月 上旬（1〜15日）,2026-12-12,蔵王四季のホテル,available,1,1,0,0,61900,61900,1,medium,medium,2026-06-04T16:16:23+09:00,false,false,unknown
 2026-12_early,2026年12月 上旬（1〜15日）,2026-12-12,蔵王国際ホテル,available,1,1,0,0,51120,51120,1,medium,medium,2026-06-04T16:16:23+09:00,false,false,unknown
+2026-12_late,2026年12月 下旬（16〜末日）,2026-12-19,ホテル喜らく,sold_out,1,0,1,0,,,0,low,medium,2026-06-14T14:00:06+09:00,false,true,unknown
 2026-12_late,2026年12月 下旬（16〜末日）,2026-12-19,深山荘 高見屋,available,1,1,0,0,,,0,low,medium,2026-06-14T10:00:06+09:00,false,false,unknown
 2026-12_late,2026年12月 下旬（16〜末日）,2026-12-19,蔵王四季のホテル,available,1,1,0,0,83600,83600,1,medium,medium,2026-06-14T12:00:06+09:00,false,false,unknown
 2026-12_late,2026年12月 下旬（16〜末日）,2026-12-26,蔵王四季のホテル,available,1,1,0,0,151800,151800,1,medium,medium,2026-06-14T10:00:06+09:00,false,false,unknown
 2026-12_late,2026年12月 下旬（16〜末日）,2026-12-28,蔵王四季のホテル,available,1,1,0,0,156200,156200,1,medium,medium,2026-06-14T10:00:06+09:00,false,false,unknown
+2026-12_late,2026年12月 下旬（16〜末日）,2026-12-29,蔵王四季のホテル,available,1,1,0,0,160600,160600,1,medium,medium,2026-06-14T14:00:06+09:00,false,false,unknown

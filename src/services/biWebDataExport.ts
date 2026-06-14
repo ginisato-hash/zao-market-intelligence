@@ -209,34 +209,118 @@ export function renderUnifiedCsv(rows: readonly UnifiedRow[]): string {
   return [BI_CSV_HEADERS.join(","), ...body].join("\n") + "\n";
 }
 
+// ---------------------------------------------------------------------------
+// Period retention (BI publish scope only — NEVER touches raw history).
+// Keep: default period + previous 3 periods + all future periods.
+
+export const RETENTION_PREVIOUS_PERIODS = 3;
+
+/** Period key (YYYY-MM_early|late) containing a given checkin date. */
+export function getCurrentPeriodKeyJst(date: Date): string {
+  const jst = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  return periodKey(jst);
+}
+
+/** Chronological sort of period keys (string sort works: YYYY-MM_early < _late). */
+export function sortPeriodKeys(keys: readonly string[]): string[] {
+  return [...new Set(keys)].sort((a, b) => {
+    const ra = a.slice(0, 7) + (a.endsWith("_early") ? "0" : "1");
+    const rb = b.slice(0, 7) + (b.endsWith("_early") ? "0" : "1");
+    return ra.localeCompare(rb);
+  });
+}
+
+/**
+ * Default period: the current period if present, else the first future period,
+ * else the latest available period.
+ */
+export function pickDefaultPeriodKey(sortedKeys: readonly string[], currentPeriodKey: string): string {
+  if (sortedKeys.length === 0) return "";
+  if (sortedKeys.includes(currentPeriodKey)) return currentPeriodKey;
+  const future = sortedKeys.find((k) => comparePeriodKeys(k, currentPeriodKey) > 0);
+  return future ?? sortedKeys[sortedKeys.length - 1]!;
+}
+
+function comparePeriodKeys(a: string, b: string): number {
+  const ra = a.slice(0, 7) + (a.endsWith("_early") ? "0" : "1");
+  const rb = b.slice(0, 7) + (b.endsWith("_early") ? "0" : "1");
+  return ra < rb ? -1 : ra > rb ? 1 : 0;
+}
+
+export interface PeriodRetentionResult {
+  retainedRows: UnifiedRow[];
+  current_period_key_jst: string;
+  default_period_key: string;
+  retained_period_keys: string[];
+  dropped_past_period_keys: string[];
+  dropped_past_rows_count: number;
+}
+
+export function applyPeriodRetention(rows: readonly UnifiedRow[], now: Date): PeriodRetentionResult {
+  const allKeys = sortPeriodKeys(rows.map((r) => r.period_key));
+  const currentKey = getCurrentPeriodKeyJst(now);
+  const defaultKey = pickDefaultPeriodKey(allKeys, currentKey);
+  const defaultIndex = allKeys.indexOf(defaultKey);
+  const startIndex = defaultIndex < 0 ? 0 : Math.max(0, defaultIndex - RETENTION_PREVIOUS_PERIODS);
+  const retained = new Set(defaultIndex < 0 ? allKeys : allKeys.slice(startIndex));
+  const dropped = allKeys.filter((k) => !retained.has(k));
+  const retainedRows = rows.filter((r) => retained.has(r.period_key));
+  return {
+    retainedRows,
+    current_period_key_jst: currentKey,
+    default_period_key: defaultKey,
+    retained_period_keys: [...retained],
+    dropped_past_period_keys: dropped,
+    dropped_past_rows_count: rows.length - retainedRows.length
+  };
+}
+
 export interface BiMetadata {
   generated_at_jst: string;
   latest_collected_at_jst: string;
   history_rows_total: number;
   latest_observation_rows: number;
   unified_rows: number;
+  unified_rows_before_retention: number;
   distinct_properties: number;
   distinct_checkins: number;
   sources_included: string[];
   data_policy: string;
+  period_retention_policy: string;
+  current_period_key_jst: string;
+  default_period_key: string;
+  retention_previous_periods: number;
+  retained_period_keys: string[];
+  dropped_past_period_keys_count: number;
+  dropped_past_rows_count: number;
 }
 
 export function buildBiMetadata(input: {
   generatedAtJst: string;
   historyRowsTotal: number;
   latest: readonly BiHistoryRow[];
-  unified: readonly UnifiedRow[];
+  unifiedBeforeRetention: readonly UnifiedRow[];
+  retention: PeriodRetentionResult;
 }): BiMetadata {
   const latestCollected = input.latest.reduce((acc, r) => (r.collected_at_jst > acc ? r.collected_at_jst : acc), "");
+  const retained = input.retention.retainedRows;
   return {
     generated_at_jst: input.generatedAtJst,
     latest_collected_at_jst: latestCollected,
     history_rows_total: input.historyRowsTotal,
     latest_observation_rows: input.latest.length,
-    unified_rows: input.unified.length,
-    distinct_properties: new Set(input.unified.map((r) => r.canonical_property_name)).size,
-    distinct_checkins: new Set(input.unified.map((r) => r.checkin)).size,
+    unified_rows: retained.length,
+    unified_rows_before_retention: input.unifiedBeforeRetention.length,
+    distinct_properties: new Set(retained.map((r) => r.canonical_property_name)).size,
+    distinct_checkins: new Set(retained.map((r) => r.checkin)).size,
     sources_included: [...new Set(input.latest.map((r) => r.source))].sort(),
-    data_policy: "ZMI history only. All sources unified. No external data."
+    data_policy: "ZMI history only. All sources unified. No external data.",
+    period_retention_policy: "current_or_next_period_plus_3_previous_periods_and_all_future_periods",
+    current_period_key_jst: input.retention.current_period_key_jst,
+    default_period_key: input.retention.default_period_key,
+    retention_previous_periods: RETENTION_PREVIOUS_PERIODS,
+    retained_period_keys: sortPeriodKeys(input.retention.retained_period_keys),
+    dropped_past_period_keys_count: input.retention.dropped_past_period_keys.length,
+    dropped_past_rows_count: input.retention.dropped_past_rows_count
   };
 }
