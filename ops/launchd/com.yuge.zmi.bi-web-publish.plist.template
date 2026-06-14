@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase ZMI BI Web — launchd template for the BI dashboard publish job.
+
+  SEPARATE from the live rotating collector. This job only runs the read-only
+  data export + Cloudflare Pages deploy (npm run bi:web:publish). It NEVER
+  collects, appends history, syncs the DB, refreshes AI context, or emits
+  pricing/PMS output, and it shares no state with com.yuge.zmi.market-refresh-rotating.
+
+  Scheduled at odd hours :10 (01:10, 03:10, ..., 23:10 JST) so it reads AFTER
+  the rotating collector's even-hour :00 runs have appended + synced. A deploy
+  failure (or missing Cloudflare auth) is local to this job and never affects
+  the live collector.
+
+  Install ONLY after a successful authenticated deploy. If CLOUDFLARE_API_TOKEN /
+  CLOUDFLARE_ACCOUNT_ID are absent, the publish step stops at deploy-ready and
+  this job should NOT be installed.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.bi-web-publish</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; npm run bi:web:publish</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/bi-web-publish.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.logs/bi-web-publish.err.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict><key>Hour</key><integer>1</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>10</integer></dict>
+		<dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>10</integer></dict>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

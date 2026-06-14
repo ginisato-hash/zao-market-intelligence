@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ZMI 蔵王温泉 市場BI（全ソース統合）</title>
+<link rel="stylesheet" href="assets/app.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="logo">ZMI ダッシュボード</div>
+    <div class="sub">蔵王温泉 市場BI</div>
+    <nav class="nav">
+      <a class="active">🏠 概要</a><a>🏨 施設比較</a><a>✅ 在庫KPI</a><a>📈 価格推移</a><a>🕒 更新履歴</a>
+    </nav>
+    <div class="sourcebadge">データソース: 全ソース統合<br />Booking / Jalan / Rakuten を1つの市場ビューに統合</div>
+    <div class="mountain"></div>
+  </aside>
+  <main class="main">
+    <div class="top">
+      <div>
+        <h1>市場サマリー</h1>
+        <div class="smallnote">ZMI canonical history のみで構成。全ソース統合。外部API・架空項目なし。</div>
+      </div>
+      <div class="updated">
+        <span>最終更新</span><strong id="lastUpdated">—</strong><span class="ok" id="policyBadge">全ソース統合</span>
+      </div>
+    </div>
+
+    <section class="filters">
+      <div class="control"><label>月×期間（上旬/下旬）</label><select id="periodSelect"></select></div>
+      <div class="control"><label>データソース</label><select id="sourceFixed" disabled><option>全ソース統合</option></select></div>
+      <div class="control"><label>施設セグメント</label><select id="tierSelect"><option value="all">すべて</option><option value="tier_anchor_high">高級・アンカー</option><option value="tier_direct_mid">中価格・直接競合</option><option value="tier_budget_small">小規模・素泊まり</option></select></div>
+      <div class="control"><label>施設フィルタ</label><select id="segSelect"><option value="all">全施設</option><option value="room_comp">重点競合 (HAMMOND/OAKHILL/吉田屋)</option><option value="own">自社 (三浦屋/喜らく)</option></select></div>
+    </section>
+    <section class="filters" style="grid-template-columns:1fr">
+      <div class="control"><label>CSV読込（任意・ローカル確認用 / 通常は data/zmi_market_unified.csv を自動読込）</label><input id="fileInput" type="file" accept=".csv,text/csv" /></div>
+    </section>
+
+    <section class="cards">
+      <div class="card"><div class="label">エリア平均価格</div><div class="big" id="avgPrice">—</div><div class="delta" id="avgDelta">—</div></div>
+      <div class="card"><div class="label">エリア在庫圧（売り切れ率）</div><div class="big" id="soldRate">—</div><div class="delta" id="soldDelta">—</div></div>
+      <div class="card"><div class="label">追跡施設数</div><div class="big" id="trackedProps">—</div><div class="delta flat">統合後の施設数</div></div>
+      <div class="card"><div class="label">価格上昇施設数</div><div class="big" id="risingProps">—</div><div class="delta flat">前期間比</div></div>
+      <div class="card"><div class="label">重点競合 在庫圧</div><div class="big" id="compPressure">—</div><div class="delta" id="compCoverage">—</div></div>
+      <div class="card"><div class="label">最終データ取得</div><div class="big" id="lastShort">—</div><div class="delta flat">JST</div></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel"><h2>エリア全体の価格推移</h2><div class="legend"><span><i class="dot" style="background:var(--blue)"></i>エリア平均価格（統合）</span></div><svg class="chart" id="priceChart"></svg></div>
+      <div class="panel"><h2>エリア全体の在庫状況</h2><div class="legend"><span><i class="dot" style="background:var(--green)"></i>Available</span><span><i class="dot" style="background:var(--red)"></i>Sold Out</span><span><i class="dot" style="background:#98a2b3"></i>No data</span></div><svg class="chart" id="inventoryChart"></svg></div>
+      <div class="panel"><h2>日付別 在庫圧ヒートマップ</h2><div class="heat" id="heatmap"></div></div>
+    </section>
+
+    <section class="tablewrap">
+      <div class="panel">
+        <h2>施設別 価格変化と在庫状況（全ソース統合）</h2>
+        <table>
+          <thead><tr><th>施設</th><th>在庫</th><th>統合価格(中央値)</th><th>前期間比</th><th>src</th><th>価格信頼度</th><th>在庫信頼度</th><th>取得時刻</th><th>推移</th></tr></thead>
+          <tbody id="facilityBody"></tbody>
+        </table>
+      </div>
+      <div style="display:grid;gap:14px">
+        <div class="panel"><h2>重点競合 在庫状況</h2><div class="comp" id="competitorPanel"></div></div>
+        <div class="panel insight"><h2>三浦屋・喜らく向けシグナル（在庫KPI → 価格KPI）</h2><p id="signalText">—</p></div>
+      </div>
+    </section>
+    <div class="footer" id="footer">ZMI history only. All sources unified. No external data.</div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
