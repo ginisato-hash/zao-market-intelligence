@@ -198,7 +198,7 @@ describe("BOOKING-B10X — history preflight", () => {
     // + AUTO-RUNNER16X-F expanded-universe kickstarts (jalan 12, then 12 booking +
     //   12 jalan after the source-cap fix) = 463, + ongoing 2-hourly rotating-live
     //   scheduled runs = 596.
-    expect(actualHistorySummary().total_rows).toBe(618);
+    expect(actualHistorySummary().total_rows).toBe(686);
   });
 
   it("computes touched shards and expected after-append rows", () => {
