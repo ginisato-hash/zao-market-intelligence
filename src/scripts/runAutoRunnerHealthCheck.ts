@@ -122,7 +122,7 @@ function run(): AutoRunnerHealthCheckOutput {
   // universe + cap-24 cutover kickstarts appended jalan 12 then booking 12 +
   // jalan 12 (427 -> 439 -> 463), then ongoing 2-hourly rotating-live scheduled
   // runs (463 -> 596).
-  const EXPECTED_BASELINE_ROW_COUNT = 596;
+  const EXPECTED_BASELINE_ROW_COUNT = 618;
   const before = currentStateBefore.current_state_summary;
   const after = currentStateAfter.current_state_summary;
   const stateCountsMatchExpected =

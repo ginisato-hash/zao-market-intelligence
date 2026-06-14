@@ -60,15 +60,15 @@ function sampleOutput(): AutoRunnerHealthCheckOutput {
 describe("AUTO-RUNNER07F - state and gates", () => {
   it("Builds current-state summary", () => {
     const snapshot = currentSnapshot();
-    expect(snapshot.current_state_summary.history_rows).toBe(596);
+    expect(snapshot.current_state_summary.history_rows).toBe(618);
     expect(snapshot.current_state_summary.db_rows).toBeGreaterThanOrEqual(0);
     expect(snapshot.current_state_summary.ai_context_rows).toBeGreaterThanOrEqual(0);
   });
 
   it("Confirms expected row counts", () => {
     const summary = currentSnapshot().current_state_summary;
-    expect(summary.booking).toMatchObject({ rows: 213, directional: 209, excluded: 4, direct: 0 });
-    expect(summary.jalan).toMatchObject({ rows: 257, directional: 110, excluded: 141, direct: 6 });
+    expect(summary.booking).toMatchObject({ rows: 223, directional: 219, excluded: 4, direct: 0 });
+    expect(summary.jalan).toMatchObject({ rows: 269, directional: 114, excluded: 149, direct: 6 });
     expect(summary.rakuten.rows).toBe(126);
   });
 
