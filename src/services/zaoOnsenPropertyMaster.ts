@@ -135,7 +135,7 @@ export const ZAO_ONSEN_EXPANDED_PROPERTY_MASTER: readonly ZaoOnsenPropertyMaster
   },
   {
     canonical_property_name: "ホテル喜らく",
-    aliases: ["喜らく", "Hotel Kiraku", "旅館きらく"],
+    aliases: ["喜らく", "Hotel Kiraku", "旅館きらく", "ZAO SPA HOTEL Kiraku", "Zao Spa Hotel Kiraku", "Kiraku"],
     category: "ryokan",
     tier: "tier_direct_mid",
     priority: "high",

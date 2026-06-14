@@ -13,6 +13,27 @@ export type Confidence = "high" | "medium" | "low";
 export const ROOM_ONLY_COMPS = ["HAMMOND", "ONSEN & STAY OAKHILL", "吉田屋"] as const;
 export const OWN_PROPERTIES = ["三浦屋", "ホテル喜らく", "喜らく"] as const;
 
+// Canonical alias folding (BI/aggregation ONLY — never mutates raw history).
+// Different OTAs label the same property differently; fold every known alias to
+// the single existing canonical so BI shows ONE facility, not split rows.
+// e.g. jalan "喜らく" and Booking "ZAO SPA HOTEL Kiraku" → "ホテル喜らく".
+export const CANONICAL_ALIASES: Readonly<Record<string, string>> = {
+  "喜らく": "ホテル喜らく",
+  "ホテル喜らく": "ホテル喜らく",
+  "旅館きらく": "ホテル喜らく",
+  "kiraku": "ホテル喜らく",
+  "hotelkiraku": "ホテル喜らく",
+  "zaospahotelkiraku": "ホテル喜らく"
+};
+
+/** Fold a raw canonical_property_name to the unified canonical (alias-aware). */
+export function canonicalizeName(name: string): string {
+  const raw = (name ?? "").trim();
+  if (CANONICAL_ALIASES[raw]) return CANONICAL_ALIASES[raw];
+  const key = raw.normalize("NFKC").toLowerCase().replace(/[\s　・･]+/gu, "");
+  return CANONICAL_ALIASES[key] ?? raw;
+}
+
 export interface BiHistoryRow {
   source: string;
   canonical_property_name: string;
@@ -70,10 +91,16 @@ export function periodLabel(key: string): string {
   return `${y}年${Number(m)}月 ${label}`;
 }
 
-/** Latest observation per (source, canonical_property_name, checkin) by collected_at_jst. */
+/**
+ * Latest observation per (source, canonical_property_name, checkin) by
+ * collected_at_jst. canonical_property_name is alias-folded first so OTA naming
+ * variants (e.g. jalan 喜らく / booking ZAO SPA HOTEL Kiraku) collapse to one
+ * property — BI/aggregation only; raw history rows are not modified on disk.
+ */
 export function latestObservations(rows: readonly BiHistoryRow[]): BiHistoryRow[] {
   const latest = new Map<string, BiHistoryRow>();
-  for (const r of rows) {
+  for (const raw of rows) {
+    const r = { ...raw, canonical_property_name: canonicalizeName(raw.canonical_property_name) };
     const key = `${r.source}|${r.canonical_property_name}|${r.checkin}`;
     const prev = latest.get(key);
     if (prev === undefined || r.collected_at_jst > prev.collected_at_jst) latest.set(key, r);

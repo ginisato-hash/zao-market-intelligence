@@ -79,7 +79,7 @@ export const DISCOVERY_CANDIDATES: readonly SourceMappingDiscoveryCandidate[] = 
   { canonical_property_name: "BED'n ONSEN HAMMOND", aliases: ["ホテルハモンドたかみや", "蔵王温泉 ホテルハモンドたかみや", "ハモンド", "hammond", "hammond-takamiya"], tier: "tier_direct_mid", target_sources: ["booking"] },
   { canonical_property_name: "吉田屋", aliases: ["蔵王温泉 吉田屋", "yoshidaya", "yoshida-ya"], tier: "tier_direct_mid", target_sources: ["booking"] },
   { canonical_property_name: "JURIN", aliases: ["蔵王温泉 JURIN", "ジュリン", "jurin"], tier: "tier_direct_mid", target_sources: ["booking"] },
-  { canonical_property_name: "ホテル喜らく", aliases: ["喜らく", "kiraku", "hotel kiraku"], tier: "tier_direct_mid", target_sources: ["booking"] }
+  { canonical_property_name: "ホテル喜らく", aliases: ["喜らく", "kiraku", "hotel kiraku", "ZAO SPA HOTEL Kiraku", "Zao Spa Hotel Kiraku", "旅館きらく"], tier: "tier_direct_mid", target_sources: ["booking"] }
 ] as const;
 
 // Phase 47X repo-internal seeds: Booking hotel slugs previously found via
@@ -95,7 +95,8 @@ export const BOOKING_SLUG_SEEDS: Readonly<Record<string, string>> = {
   "BED'n ONSEN HAMMOND": "hammond-takamiya",
   "JURIN": "jurin",
   "名湯舎 創": "meitoya-sou",
-  "蔵王・和歌（うた）の宿 わかまつや": "wakamatsuya"
+  "蔵王・和歌（うた）の宿 わかまつや": "wakamatsuya",
+  "ホテル喜らく": "xi-raku"
 };
 
 // Phase AUTO-RUNNER16X-F — derive discovery candidates from the expanded Zao

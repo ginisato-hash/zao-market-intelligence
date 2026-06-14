@@ -170,6 +170,30 @@ function stackChart(daily) {
 }
 function heatColor(v) { if (v == null) return "#f1f3f5"; const hue = 120 - Math.min(1, v) * 120; return `hsl(${hue} 75% 88%)`; }
 
+// --- axis / caption helpers (every chart & table shows axes, unit, period, source) ---
+function srcLabel() { return (state.meta?.sources_included?.length ? state.meta.sources_included.join(" / ") : "booking / jalan / rakuten") + " 統合"; }
+function periodText() { return state.period ? periodLabel(state.period) : "—"; }
+function axisBlock(xLabel, yLabel) {
+  return `<div class="axis"><span class="axis-item"><b>横軸</b>: ${esc(xLabel)}</span><span class="axis-item"><b>縦軸</b>: ${esc(yLabel)}</span></div>`;
+}
+function chartCaption(metric, xLabel, yLabel, unit, granularity) {
+  return `<p class="chart-cap">指標: ${esc(metric)} ／ 横軸: ${esc(xLabel)} ／ 縦軸: ${esc(yLabel)}（単位: ${esc(unit)}） ／ 集計粒度: ${esc(granularity)} ／ 対象期間: ${esc(periodText())} ／ source: ${esc(srcLabel())}</p>`;
+}
+// Full chart panel: title, description, legend, axis labels, svg, caption.
+function chartPanel(opts) {
+  return `<div class="panel">
+    <h2>${esc(opts.title)}</h2>
+    <p class="chart-desc">${esc(opts.description)}</p>
+    ${opts.legend || ""}
+    ${axisBlock(opts.xLabel, opts.yLabel)}
+    ${opts.svg}
+    ${chartCaption(opts.metric, opts.xLabel, opts.yLabel, opts.unit, opts.granularity)}
+  </div>`;
+}
+function tableCaption(title, description, count) {
+  return `<caption class="tbl-cap"><span class="tbl-title">${esc(title)}</span><span class="tbl-desc">${esc(description)} ／ 件数: ${count}件 ／ 対象期間: ${esc(periodText())} ／ source: ${esc(srcLabel())}</span></caption>`;
+}
+
 function render() {
   renderHeader();
   $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.activeTab));
@@ -213,10 +237,30 @@ function renderOverview() {
     </section>
     <section class="signal"><b>判断シグナル:</b> 在庫KPI → 価格KPIの順で判断。選択期間のOTA販売不可日率 ${pct(sr)}、重点競合 sold_out ${compSold}/${compObserved} → 在庫圧 ${level}。喜らく/三浦屋はPMS実在庫ではなくOTA販売可否との比較で見る。</section>
     <section class="panel-grid">
-      <div class="panel"><h2>エリア価格推移</h2>${lineChart(daily.map((d) => ({ x: d.checkin, y: d.avg })))}</div>
-      <div class="panel"><h2>OTA販売可否構成</h2><div class="legend"><span><i class="dot" style="background:var(--green)"></i>available</span><span><i class="dot" style="background:var(--red)"></i>sold_out</span><span><i class="dot" style="background:#cbd5e1"></i>no data</span></div>${stackChart(daily)}</div>
+      ${chartPanel({
+        title: "エリア価格推移",
+        description: "選択期間における蔵王温泉エリアのOTA表示価格の推移（各施設のOTA表示価格中央値を、チェックイン日ごとに平均した値）。",
+        metric: "OTA表示価格中央値の日次平均",
+        xLabel: "チェックイン日",
+        yLabel: "表示価格（円）",
+        unit: "円",
+        granularity: "チェックイン日（日次）",
+        legend: `<div class="legend"><span><i class="dot" style="background:var(--blue)"></i>OTA表示価格（円）</span></div>`,
+        svg: lineChart(daily.map((d) => ({ x: d.checkin, y: d.avg })))
+      })}
+      ${chartPanel({
+        title: "OTA販売可否構成の推移",
+        description: "選択期間のチェックイン日ごとに、観測施設のOTA販売可否（available / sold_out / 観測なし）の構成を積み上げ表示。PMS実在庫ではなくOTA上の販売可否です。",
+        metric: "OTA販売可否の施設数構成",
+        xLabel: "チェックイン日",
+        yLabel: "観測施設数（件）",
+        unit: "件",
+        granularity: "チェックイン日（日次）",
+        legend: `<div class="legend"><span><i class="dot" style="background:var(--green)"></i>販売可（available）</span><span><i class="dot" style="background:var(--red)"></i>販売不可（sold_out）</span><span><i class="dot" style="background:#cbd5e1"></i>観測なし</span></div>`,
+        svg: stackChart(daily)
+      })}
     </section>
-    <section class="panel"><h2>自社施設ショートカード</h2><div class="comp-grid">${own}</div></section>`;
+    <section class="panel"><h2>自社施設ショートカード</h2><p class="chart-desc">自社施設（三浦屋 / 喜らく）の選択期間サマリー。喜らくは全OTA（じゃらん 喜らく / Booking ZAO SPA HOTEL Kiraku）を同一施設に統合済み。</p><div class="comp-grid">${own}</div></section>`;
 }
 function renderFacilities() {
   const props = aggregateByProperty(filteredRows()).sort((a, b) => (b.medianPrice || 0) - (a.medianPrice || 0));
@@ -224,7 +268,16 @@ function renderFacilities() {
   if (!props.length) return `<section class="panel"><div class="empty">条件に一致する施設がありません</div></section>`;
   const rows = props.map((p) => facilityRow(p, prevMap.get(p.name))).join("");
   const cards = props.map((p) => facilityCard(p, prevMap.get(p.name))).join("");
-  return `<section class="panel"><h2>施設別 価格変化とOTA販売可否</h2><table class="desktop-table"><thead><tr><th>施設</th><th>販売可否</th><th>価格中央値</th><th>前期間比</th><th>src</th><th>信頼度</th><th>取得</th><th>推移</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-cards">${cards}</div></section>`;
+  return `<section class="panel">
+    <h2>施設別サマリー</h2>
+    <p class="chart-desc">選択期間における施設別のOTA表示価格・販売可否の集計。価格は各施設のOTA表示価格中央値（円）。「前期間比」は中央値の増減率（%）。</p>
+    <table class="desktop-table">
+      ${tableCaption("施設別サマリー", "施設別のOTA表示価格中央値・OTA販売可否・観測ソース数・信頼度", props.length)}
+      <thead><tr><th>施設名</th><th>OTA販売可否</th><th>表示価格中央値（円）</th><th>前期間比（%）</th><th>観測ソース数（件）</th><th>信頼度（価格/在庫）</th><th>最終観測（JST）</th><th>価格推移</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="mobile-cards">${cards}</div>
+  </section>`;
 }
 function deltaText(p, prev) {
   if (p.medianPrice == null || prev?.medianPrice == null || prev.medianPrice <= 0) return { text: "—", cls: "flat" };
@@ -247,16 +300,33 @@ function renderCompetitors() {
     if (!p) return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="empty">観測なし</div></article>`;
     return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="comp-row"><span>OTA販売可否</span>${statusPill(p.status)}</div><div class="comp-row"><span>価格中央値</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>source</span><strong>${p.srcMax}</strong></div><div class="comp-row"><span>信頼度</span><span>${confPill(p.priceConf)} ${confPill(p.invConf)}</span></div><div class="comp-row"><span>sold_out日数</span><strong>${p.soldDays}/${p.days}</strong></div></article>`;
   }).join("");
-  return `<section class="panel"><h2>重点競合</h2><div class="comp-grid">${cards}</div></section>`;
+  return `<section class="panel">
+    <h2>重点競合（HAMMOND / OAKHILL / 吉田屋）</h2>
+    <p class="chart-desc">素泊まり競合のOTA販売可否・OTA表示価格中央値（円）・期間内 sold_out 日数。PMS実在庫ではなくOTA観測です。対象期間: ${esc(periodText())} ／ source: ${esc(srcLabel())}</p>
+    <div class="comp-grid">${cards}</div>
+  </section>`;
 }
 function renderDaily() {
   const daily = aggregateDaily(filteredRows());
   const cells = daily.map((d) => `<div class="heat-cell" style="background:${heatColor(d.rate)}">${esc(d.checkin.slice(5))}<small>${pct(d.rate)}</small><small>A:${d.avail} S:${d.sold} N:${d.nodata}</small></div>`).join("");
-  return `<section class="panel"><h2>日別 OTA販売不可日率</h2><div class="heat">${cells || `<div class="empty">日別データなし</div>`}</div></section>`;
+  const tableRows = daily.map((d) => `<tr><td>${esc(d.checkin)}</td><td>${pct(d.rate)}</td><td>${d.avail}</td><td>${d.sold}</td><td>${d.nodata}</td><td>${yen(d.avg)}</td></tr>`).join("");
+  return `<section class="panel">
+    <h2>日別観測データ</h2>
+    <p class="chart-desc">チェックイン日ごとのOTA販売不可日率（%）と販売可否の観測施設数（件）、OTA表示価格中央値の日次平均（円）。「OTA販売不可日率」= sold_out /(available + sold_out)。色が濃い（赤寄り）ほど販売不可が多い。</p>
+    ${axisBlock("チェックイン日", "OTA販売不可日率（%）")}
+    <div class="heat" aria-label="日別 OTA販売不可日率ヒートマップ">${cells || `<div class="empty">日別データなし</div>`}</div>
+    <p class="chart-cap">凡例: 各セル＝チェックイン日 ／ %＝OTA販売不可日率 ／ A=販売可 S=販売不可 N=観測なし（件） ／ 集計粒度: 日次 ／ 対象期間: ${esc(periodText())} ／ source: ${esc(srcLabel())}</p>
+    <table class="desktop-table">
+      ${tableCaption("日別観測明細", "チェックイン日別のOTA販売不可日率・販売可否件数・表示価格中央値の日次平均", daily.length)}
+      <thead><tr><th>チェックイン日</th><th>OTA販売不可日率（%）</th><th>販売可（件）</th><th>販売不可（件）</th><th>観測なし（件）</th><th>表示価格（円）</th></tr></thead>
+      <tbody>${tableRows || ""}</tbody>
+    </table>
+    <div class="mobile-cards">${daily.map((d) => `<div class="facility-card"><div class="fc-top"><div class="fc-name">${esc(d.checkin)}</div><span class="status-pill ${d.rate != null && d.rate >= 0.4 ? "status-sold_out" : "status-available"}">${pct(d.rate)}</span></div><div class="fc-grid"><div><div class="k">販売可（件）</div>${d.avail}</div><div><div class="k">販売不可（件）</div>${d.sold}</div><div><div class="k">観測なし（件）</div>${d.nodata}</div><div><div class="k">表示価格（円）</div>${yen(d.avg)}</div></div></div>`).join("") || `<div class="empty">日別データなし</div>`}</div>
+  </section>`;
 }
 function renderDataStatus() {
   const meta = state.meta || {}; const keys = ["generated_at_jst", "latest_collected_at_jst", "history_rows_total", "latest_observation_rows", "unified_rows", "unified_rows_before_retention", "distinct_properties", "distinct_checkins", "sources_included", "data_policy", "period_retention_policy", "current_period_key_jst", "default_period_key", "retention_previous_periods", "retained_period_keys", "dropped_past_period_keys_count", "dropped_past_rows_count"];
-  return `<section class="panel"><h2>データ状態</h2><dl class="kv">${keys.map((k) => `<dt>${esc(k)}</dt><dd>${esc(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k] ?? "—")}</dd>`).join("")}</dl></section>`;
+  return `<section class="panel"><h2>データ状態</h2><p class="chart-desc">公開データ（metadata.json）の内容。対象期間の保持方針・行数・統合ソース等。喜らくは全OTAを同一施設に統合済み。</p><dl class="kv">${keys.map((k) => `<dt>${esc(k)}</dt><dd>${esc(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k] ?? "—")}</dd>`).join("")}</dl></section>`;
 }
 
 function syncControls() {

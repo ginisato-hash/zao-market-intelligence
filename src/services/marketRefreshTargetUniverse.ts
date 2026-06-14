@@ -96,7 +96,13 @@ export const VERIFIED_LIVE_TARGETS: readonly MarketRefreshPropertyTarget[] = [
   { source: "booking", canonical_property_name: "蔵王温泉 高砂屋旅館", property_slug: "takasagoya-ryokan", source_url: "https://www.booking.com/hotel/jp/takasagoya-ryokan.ja.html", tier: "tier_budget_small", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity via 16X-F discover:source-mappings 2026-06-14 (A, name+region match, clean load); booking area searchresults" },
   { source: "booking", canonical_property_name: "ロッジまつぽっくり", property_slug: "matsupokkuri", source_url: "https://www.booking.com/hotel/jp/matsupokkuri.ja.html", tier: "tier_budget_small", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity via 16X-F discover:source-mappings 2026-06-14 (A, name+region match, clean load); booking area searchresults" },
   { source: "booking", canonical_property_name: "ペンションぷうたろう", property_slug: "pension-puutaro-yamagata", source_url: "https://www.booking.com/hotel/jp/pension-puutaro-yamagata.ja.html", tier: "tier_budget_small", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity via 16X-F discover:source-mappings 2026-06-14 (A, name+region match, clean load); booking area searchresults" },
-  { source: "booking", canonical_property_name: "ペンション木いちご", property_slug: "pensiyonmu-itigo", source_url: "https://www.booking.com/hotel/jp/pensiyonmu-itigo.ja.html", tier: "tier_budget_small", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity via 16X-F discover:source-mappings 2026-06-14 (A, name+region match, clean load); booking area searchresults" }
+  { source: "booking", canonical_property_name: "ペンション木いちご", property_slug: "pensiyonmu-itigo", source_url: "https://www.booking.com/hotel/jp/pensiyonmu-itigo.ja.html", tier: "tier_budget_small", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity via 16X-F discover:source-mappings 2026-06-14 (A, name+region match, clean load); booking area searchresults" },
+  // Kiraku alias-mapping fix (2026-06-14): jalan 喜らく (yad325153) and Booking
+  // "ZAO SPA HOTEL Kiraku" (slug xi-raku) are the SAME property. Booking verified
+  // by identity probe: title "ZAO SPA HOTEL Kiraku（山形市）", region 山形県/山形市,
+  // name match, clean load, no captcha (A). Kept under the EXISTING canonical
+  // "ホテル喜らく" (no new canonical) so both sources unify in BI/aggregation.
+  { source: "booking", canonical_property_name: "ホテル喜らく", property_slug: "xi-raku", source_url: "https://www.booking.com/hotel/jp/xi-raku.ja.html", tier: "tier_direct_mid", enabled_for_live: true, verified_mapping: true, verification_note: "verified identity 2026-06-14 (A, booking searchresults ZAO SPA HOTEL Kiraku -> slug xi-raku; title 山形市 / region 山形県; same property as jalan yad325153 喜らく)" }
 ] as const;
 
 // Candidate-only properties — NOT live-collected. No slug/id is invented.
@@ -113,7 +119,6 @@ export const CANDIDATE_ONLY_TARGETS: readonly MarketRefreshPropertyTarget[] = [
   { source: "jalan", canonical_property_name: "松尾ハウス", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "16X-A4 not_found_after_public_search on jalan (booking side IS live-verified); provide jalan URL manually if listed" },
   { source: "booking", canonical_property_name: "ぼくのうち", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "16X-A4 not_found_after_public_search (booking area scan + fallback searches 2026-06-10); provide URL manually if listed" },
   { source: "booking", canonical_property_name: "こけしの宿 招仙閣", property_slug: "", tier: "tier_budget_small", enabled_for_live: false, verified_mapping: false, verification_note: "16X-A4 not_found_after_public_search on booking (jalan side IS live-verified: yad348951); provide booking URL manually if listed" },
-  { source: "booking", canonical_property_name: "ホテル喜らく", property_slug: "", tier: "tier_direct_mid", enabled_for_live: false, verified_mapping: false, verification_note: "16X-A4 not_found_after_public_search on booking (jalan side IS live-verified: yad325153); provide booking URL manually if listed" },
   // AUTO-RUNNER16X-F expanded-master candidates that could not be verified on the
   // target OTA (run 20260614_013135). enabled_for_live=false / verified_mapping=false;
   // provide a property URL manually to promote. No slug/id invented.

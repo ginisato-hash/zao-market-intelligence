@@ -105,3 +105,50 @@ describe("ZMI BI UI v3 - publish dirty flag", () => {
     expect(PUB).toContain("--commit-dirty=true");
   });
 });
+
+describe("ZMI BI UI - axis labels & captions on every chart/table", () => {
+  it("charts/tables render explicit 横軸 / 縦軸 labels", () => {
+    expect(JS).toContain("横軸");
+    expect(JS).toContain("縦軸");
+    expect(JS).toContain("axisBlock");
+    expect(JS).toContain("chartCaption");
+  });
+  it("エリア価格推移 has チェックイン日 x-axis and 表示価格（円） y-axis", () => {
+    expect(JS).toContain("エリア価格推移");
+    expect(JS).toContain("チェックイン日");
+    expect(JS).toContain("表示価格（円）");
+  });
+  it("daily uses OTA販売不可日率（%） axis", () => {
+    expect(JS).toContain("OTA販売不可日率（%）");
+  });
+  it("tables have captions/titles", () => {
+    expect(JS).toContain("tableCaption");
+    expect(JS).toContain("施設別サマリー");
+    expect(JS).toContain("<caption");
+  });
+  it("every chartPanel supplies title/description/axis labels/unit", () => {
+    for (const k of ["title:", "description:", "xLabel:", "yLabel:", "unit:", "metric:"]) {
+      expect(JS, k).toContain(k);
+    }
+  });
+  it("does not use forbidden occupancy/inventory-rate wording (as metrics)", () => {
+    // 在庫率 / 予約率 must never appear. 稼働率 only allowed inside the negating
+    // PMS disclaimer ("実稼働率ではありません"), never as a metric label.
+    for (const bad of ["在庫率", "予約率"]) {
+      expect(JS, bad).not.toContain(bad);
+      expect(HTML, bad).not.toContain(bad);
+    }
+    expect(JS).not.toContain("稼働率");
+    expect(HTML.replace(/PMS実在庫・実稼働率ではありません/g, "")).not.toContain("稼働率");
+  });
+  it("uses OTA wording instead", () => {
+    expect(JS).toContain("OTA販売不可日率");
+    expect(JS).toContain("OTA販売可否");
+  });
+});
+
+describe("ZMI BI UI - Kiraku unified labeling", () => {
+  it("mentions the Kiraku all-OTA unification in the UI copy", () => {
+    expect(JS).toContain("ZAO SPA HOTEL Kiraku");
+  });
+});

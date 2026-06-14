@@ -5,6 +5,7 @@ import {
   BI_CSV_HEADERS,
   applyPeriodRetention,
   buildBiMetadata,
+  canonicalizeName,
   getCurrentPeriodKeyJst,
   halfOf,
   latestObservations,
@@ -177,6 +178,29 @@ describe("ZMI BI export - flags, csv, metadata", () => {
 
   it("export script is read-only (no append/sync/refresh/publish/pricing/pms)", () => {
     expect(SCRIPT_SOURCE).not.toMatch(/appendHistoryRowsAtomic|sync:history-to-db|build:ai-context-packs|publish:chatgpt-db|beds24|airhost|pricing_recommendation/iu);
+  });
+});
+
+describe("ZMI BI export - Kiraku alias unification", () => {
+  it("folds all Kiraku aliases to the single canonical ホテル喜らく", () => {
+    for (const n of ["喜らく", "ホテル喜らく", "旅館きらく", "Kiraku", "Hotel Kiraku", "ZAO SPA HOTEL Kiraku", "Zao Spa Hotel Kiraku"]) {
+      expect(canonicalizeName(n), n).toBe("ホテル喜らく");
+    }
+  });
+  it("leaves other property names unchanged", () => {
+    expect(canonicalizeName("三浦屋")).toBe("三浦屋");
+    expect(canonicalizeName("HAMMOND")).toBe("HAMMOND");
+  });
+  it("unifies jalan 喜らく and booking ZAO SPA HOTEL Kiraku into one BI row per checkin", () => {
+    const rows: BiHistoryRow[] = [
+      { source: "jalan", canonical_property_name: "喜らく", source_slug_or_code: "yad325153", checkin: "2026-07-18", checkout: "2026-07-19", availability_status: "available", normalized_total_price: 18000, is_price_usable_for_dp_directional: true, collected_at_jst: "2026-06-14T20:00:00+09:00", tier: "tier_direct_mid" },
+      { source: "booking", canonical_property_name: "ZAO SPA HOTEL Kiraku", source_slug_or_code: "xi-raku", checkin: "2026-07-18", checkout: "2026-07-19", availability_status: "available_price_basis", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, collected_at_jst: "2026-06-14T20:00:00+09:00", tier: "tier_direct_mid" }
+    ];
+    const unified = unifyByPropertyCheckin(latestObservations(rows));
+    expect(unified).toHaveLength(1);
+    expect(unified[0]!.canonical_property_name).toBe("ホテル喜らく");
+    expect(unified[0]!.source_count).toBe(2);
+    expect(unified[0]!.is_own_property).toBe(true);
   });
 });
 
