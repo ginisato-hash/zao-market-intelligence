@@ -25,6 +25,11 @@ export type InventoryPressureLevel =
   | "medium_inventory_pressure"
   | "weak_inventory_pressure";
 
+// Confidence reflects how many of the 3 room-only competitors were actually
+// observed (available/sold_out) vs. no_data for a checkin. The pressure LEVEL
+// is unchanged by confidence; confidence only flags how trustworthy it is.
+export type InventoryPressureConfidence = "high" | "medium" | "low";
+
 // A competitor's collapsed status for one checkin across all its source rows.
 export type CompetitorStatus = "available" | "sold_out" | "no_data";
 
@@ -82,8 +87,12 @@ export interface DateInventoryRow {
   area_sold_out_rate: number; // sold_out / (available + sold_out); 0 when denominator 0
   room_only_comp_available_count: number;
   room_only_comp_sold_out_count: number;
+  room_only_comp_no_data_count: number;
+  room_only_comp_coverage_count: number;
+  room_only_comp_coverage_rate: number;
   competitor_status: Record<RoomOnlyCompetitor, CompetitorStatus>;
   inventory_pressure_level: InventoryPressureLevel;
+  inventory_pressure_confidence: InventoryPressureConfidence;
   recommended_action_for_kiraku: string;
   recommended_action_for_miuraya: string;
 }
@@ -116,17 +125,28 @@ export function judgeInventoryPressure(input: {
   return "weak_inventory_pressure";
 }
 
-const KIRAKU_ACTION: Record<InventoryPressureLevel, string> = {
-  strong_inventory_pressure: "hold_or_raise: area inventory tight; room-only overflow demand — keep rate firm, raise on peak dates",
-  medium_inventory_pressure: "hold: mixed sell-through; keep rate, watch comp inventory before moving",
-  weak_inventory_pressure: "competitive_or_discount: soft area inventory; price competitively to win occupancy"
-};
+/** Coverage rate over the 3 room-only competitors → confidence. */
+export function judgeInventoryPressureConfidence(coverageRate: number): InventoryPressureConfidence {
+  if (coverageRate >= 1) return "high";
+  if (coverageRate >= 2 / 3) return "medium";
+  return "low";
+}
 
-const MIURAYA_ACTION: Record<InventoryPressureLevel, string> = {
-  strong_inventory_pressure: "raise_or_hold: capture spillover; lift the floor while area is sold-out heavy",
-  medium_inventory_pressure: "hold: steady; no aggressive discount while demand is mixed",
-  weak_inventory_pressure: "discount_to_fill: soft area; prioritize occupancy with a lower floor"
-};
+// Recommended actions reflect BOTH pressure level and confidence. A weak signal
+// built on low competitor coverage must NOT trigger an aggressive discount.
+export function actionForKiraku(level: InventoryPressureLevel, confidence: InventoryPressureConfidence): string {
+  if (level === "strong_inventory_pressure") return "hold_or_raise: area/comp inventory tight; keep rate firm, raise on peak dates";
+  if (level === "medium_inventory_pressure") return "hold: mixed sell-through; watch comp inventory before moving";
+  if (confidence === "low") return "monitor_or_hold: weak signal but low comp coverage; do not discount aggressively until HAMMOND/OAKHILL/吉田屋 coverage improves";
+  return "competitive_or_discount: soft area inventory; price competitively to win occupancy";
+}
+
+export function actionForMiuraya(level: InventoryPressureLevel, confidence: InventoryPressureConfidence): string {
+  if (level === "strong_inventory_pressure") return "raise_or_hold: capture spillover; lift the floor while area is sold-out heavy";
+  if (level === "medium_inventory_pressure") return "hold: steady; no aggressive discount while demand is mixed";
+  if (confidence === "low") return "monitor_or_hold: weak signal but low comp coverage; avoid over-discounting";
+  return "discount_to_fill: soft area; prioritize occupancy with a lower floor";
+}
 
 export function buildDateInventoryRow(checkin: string, rows: readonly InventoryHistoryRow[]): DateInventoryRow {
   let available = 0;
@@ -147,6 +167,10 @@ export function buildDateInventoryRow(checkin: string, rows: readonly InventoryH
   const compStatuses = ROOM_ONLY_COMPETITORS.map((c) => competitor_status[c]);
   const compAvailable = compStatuses.filter((s) => s === "available").length;
   const compSoldOut = compStatuses.filter((s) => s === "sold_out").length;
+  const compNoData = compStatuses.filter((s) => s === "no_data").length;
+  const compCoverage = compAvailable + compSoldOut;
+  const compCoverageRate = Number((compCoverage / ROOM_ONLY_COMPETITORS.length).toFixed(4));
+  const confidence = judgeInventoryPressureConfidence(compCoverageRate);
   const areaSoldOutRate = rate(soldOut, available);
   const level = judgeInventoryPressure({ areaSoldOutRate, competitorStatuses: compStatuses });
   return {
@@ -158,10 +182,14 @@ export function buildDateInventoryRow(checkin: string, rows: readonly InventoryH
     area_sold_out_rate: areaSoldOutRate,
     room_only_comp_available_count: compAvailable,
     room_only_comp_sold_out_count: compSoldOut,
+    room_only_comp_no_data_count: compNoData,
+    room_only_comp_coverage_count: compCoverage,
+    room_only_comp_coverage_rate: compCoverageRate,
     competitor_status,
     inventory_pressure_level: level,
-    recommended_action_for_kiraku: KIRAKU_ACTION[level],
-    recommended_action_for_miuraya: MIURAYA_ACTION[level]
+    inventory_pressure_confidence: confidence,
+    recommended_action_for_kiraku: actionForKiraku(level, confidence),
+    recommended_action_for_miuraya: actionForMiuraya(level, confidence)
   };
 }
 
@@ -173,9 +201,12 @@ export interface InventoryKpiSummary {
   area_sold_out_rate_overall: number;
   room_only_comp_observations: number;
   room_only_comp_sold_out_observations: number;
+  room_only_comp_no_data_observations: number;
   room_only_comp_inventory_pressure: number; // sold_out / (available + sold_out) over comp observations
+  room_only_comp_coverage_rate_overall: number; // observed / (3 comps x checkins)
   level_counts: Record<InventoryPressureLevel, number>;
   overall_inventory_pressure_level: InventoryPressureLevel;
+  inventory_pressure_confidence_overall: InventoryPressureConfidence;
 }
 
 export interface InventoryKpiReport {
@@ -200,6 +231,7 @@ export function buildInventoryKpiReport(input: {
   let soldTotal = 0;
   let compObs = 0;
   let compSold = 0;
+  let compNoData = 0;
   const levelCounts: Record<InventoryPressureLevel, number> = {
     strong_inventory_pressure: 0,
     medium_inventory_pressure: 0,
@@ -212,11 +244,15 @@ export function buildInventoryKpiReport(input: {
       const s = r.competitor_status[comp];
       if (s === "available") { compObs += 1; }
       else if (s === "sold_out") { compObs += 1; compSold += 1; }
+      else { compNoData += 1; }
     }
     levelCounts[r.inventory_pressure_level] += 1;
   }
   const areaRateOverall = rate(soldTotal, availTotal);
   const compPressure = compObs === 0 ? 0 : Number((compSold / compObs).toFixed(4));
+  const compCells = rows.length * ROOM_ONLY_COMPETITORS.length;
+  const compCoverageRateOverall = compCells === 0 ? 0 : Number((compObs / compCells).toFixed(4));
+  const confidenceOverall = judgeInventoryPressureConfidence(compCoverageRateOverall);
   const overallLevel = judgeInventoryPressure({
     areaSoldOutRate: areaRateOverall,
     // overall comp judgment uses the count of comps that are sold-out on a
@@ -234,9 +270,12 @@ export function buildInventoryKpiReport(input: {
       area_sold_out_rate_overall: areaRateOverall,
       room_only_comp_observations: compObs,
       room_only_comp_sold_out_observations: compSold,
+      room_only_comp_no_data_observations: compNoData,
       room_only_comp_inventory_pressure: compPressure,
+      room_only_comp_coverage_rate_overall: compCoverageRateOverall,
       level_counts: levelCounts,
-      overall_inventory_pressure_level: overallLevel
+      overall_inventory_pressure_level: overallLevel,
+      inventory_pressure_confidence_overall: confidenceOverall
     },
     rows
   };
@@ -283,10 +322,14 @@ export const INVENTORY_CSV_HEADERS = [
   "area_sold_out_rate",
   "room_only_comp_available_count",
   "room_only_comp_sold_out_count",
+  "room_only_comp_no_data_count",
+  "room_only_comp_coverage_count",
+  "room_only_comp_coverage_rate",
   "HAMMOND_status",
   "OAKHILL_status",
   "吉田屋_status",
   "inventory_pressure_level",
+  "inventory_pressure_confidence",
   "recommended_action_for_kiraku",
   "recommended_action_for_miuraya"
 ] as const;
@@ -304,10 +347,14 @@ export function renderInventoryCsv(report: InventoryKpiReport): string {
       r.area_sold_out_rate.toFixed(4),
       String(r.room_only_comp_available_count),
       String(r.room_only_comp_sold_out_count),
+      String(r.room_only_comp_no_data_count),
+      String(r.room_only_comp_coverage_count),
+      r.room_only_comp_coverage_rate.toFixed(4),
       r.competitor_status["HAMMOND"],
       r.competitor_status["ONSEN & STAY OAKHILL"],
       r.competitor_status["吉田屋"],
       r.inventory_pressure_level,
+      r.inventory_pressure_confidence,
       r.recommended_action_for_kiraku,
       r.recommended_action_for_miuraya
     ].map(csvCell).join(",")
@@ -332,6 +379,8 @@ export function renderInventoryReport(input: {
     `- distinct_checkins: ${summary.distinct_checkins}`,
     `- area inventory pressure (overall sold_out rate): ${pct(summary.area_sold_out_rate_overall)} (${summary.area_sold_out_total} sold_out / ${summary.area_available_total + summary.area_sold_out_total} bookable)`,
     `- room_only_comp_inventory_pressure (HAMMOND/OAKHILL/吉田屋): ${pct(summary.room_only_comp_inventory_pressure)} (${summary.room_only_comp_sold_out_observations}/${summary.room_only_comp_observations} comp observations sold_out)`,
+    `- room_only_comp_coverage_rate_overall: ${pct(summary.room_only_comp_coverage_rate_overall)} (${summary.room_only_comp_no_data_observations} comp no_data observations)`,
+    `- inventory_pressure_confidence_overall: ${summary.inventory_pressure_confidence_overall}`,
     `- overall_inventory_pressure_level: ${summary.overall_inventory_pressure_level}`,
     `- by level: strong=${summary.level_counts.strong_inventory_pressure} medium=${summary.level_counts.medium_inventory_pressure} weak=${summary.level_counts.weak_inventory_pressure}`
   ];
@@ -340,10 +389,10 @@ export function renderInventoryReport(input: {
     "",
     "## 2. Date-level Inventory Pressure Table",
     "",
-    "| checkin | area_avail | area_sold | sold_rate | comp_avail | comp_sold | HAMMOND | OAKHILL | 吉田屋 | pressure | 喜らく action | 三浦屋 action |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    "| checkin | area_avail | area_sold | sold_rate | comp_avail | comp_sold | comp_no_data | coverage | coverage_rate | HAMMOND | OAKHILL | 吉田屋 | pressure | confidence | 喜らく action | 三浦屋 action |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ...rows.map((r) =>
-      `| ${r.checkin} | ${r.area_available_count} | ${r.area_sold_out_count} | ${pct(r.area_sold_out_rate)} | ${r.room_only_comp_available_count} | ${r.room_only_comp_sold_out_count} | ${compCell(r.competitor_status["HAMMOND"])} | ${compCell(r.competitor_status["ONSEN & STAY OAKHILL"])} | ${compCell(r.competitor_status["吉田屋"])} | ${r.inventory_pressure_level.replace("_inventory_pressure", "")} | ${r.recommended_action_for_kiraku.split(":")[0]} | ${r.recommended_action_for_miuraya.split(":")[0]} |`
+      `| ${r.checkin} | ${r.area_available_count} | ${r.area_sold_out_count} | ${pct(r.area_sold_out_rate)} | ${r.room_only_comp_available_count} | ${r.room_only_comp_sold_out_count} | ${r.room_only_comp_no_data_count} | ${r.room_only_comp_coverage_count}/3 | ${pct(r.room_only_comp_coverage_rate)} | ${compCell(r.competitor_status["HAMMOND"])} | ${compCell(r.competitor_status["ONSEN & STAY OAKHILL"])} | ${compCell(r.competitor_status["吉田屋"])} | ${r.inventory_pressure_level.replace("_inventory_pressure", "")} | ${r.inventory_pressure_confidence} | ${r.recommended_action_for_kiraku.split(":")[0]} | ${r.recommended_action_for_miuraya.split(":")[0]} |`
     )
   ];
 
@@ -351,10 +400,10 @@ export function renderInventoryReport(input: {
     "",
     "## 3. Room-only Competitor Inventory (HAMMOND / OAKHILL / 吉田屋)",
     "",
-    "| checkin | HAMMOND | OAKHILL | 吉田屋 | comp_sold_out_count |",
-    "|---|---|---|---|---|",
+    "| checkin | HAMMOND | OAKHILL | 吉田屋 | coverage | coverage_rate | confidence |",
+    "|---|---|---|---|---|---|---|",
     ...rows.map((r) =>
-      `| ${r.checkin} | ${compCell(r.competitor_status["HAMMOND"])} | ${compCell(r.competitor_status["ONSEN & STAY OAKHILL"])} | ${compCell(r.competitor_status["吉田屋"])} | ${r.room_only_comp_sold_out_count} |`
+      `| ${r.checkin} | ${compCell(r.competitor_status["HAMMOND"])} | ${compCell(r.competitor_status["ONSEN & STAY OAKHILL"])} | ${compCell(r.competitor_status["吉田屋"])} | ${r.room_only_comp_coverage_count}/3 | ${pct(r.room_only_comp_coverage_rate)} | ${r.inventory_pressure_confidence} |`
     )
   ];
 
@@ -374,7 +423,7 @@ export function renderInventoryReport(input: {
     "",
     "## 5. 喜らく判断 (inventory KPI → price KPI)",
     `- overall inventory pressure: ${summary.overall_inventory_pressure_level}`,
-    `- primary action: ${KIRAKU_ACTION[summary.overall_inventory_pressure_level]}`,
+    `- primary action: ${actionForKiraku(summary.overall_inventory_pressure_level, summary.inventory_pressure_confidence_overall)}`,
     "- decision order: read inventory pressure first; only then adjust within the price band. Room-only (素泊まり) demand tracks area availability, not nightly rate.",
     ...strongDates(rows).map((d) => `  - ${d.checkin}: ${d.inventory_pressure_level.replace("_inventory_pressure", "")} → ${d.recommended_action_for_kiraku.split(":")[0]}`)
   ];
@@ -383,7 +432,7 @@ export function renderInventoryReport(input: {
     "",
     "## 6. 三浦屋判断 (inventory KPI → price KPI)",
     `- overall inventory pressure: ${summary.overall_inventory_pressure_level}`,
-    `- primary action: ${MIURAYA_ACTION[summary.overall_inventory_pressure_level]}`,
+    `- primary action: ${actionForMiuraya(summary.overall_inventory_pressure_level, summary.inventory_pressure_confidence_overall)}`,
     "- decision order: inventory first. 三浦屋 is own-property self-monitor; fill when the area is soft, lift the floor when comps are sold out.",
     ...strongDates(rows).map((d) => `  - ${d.checkin}: ${d.inventory_pressure_level.replace("_inventory_pressure", "")} → ${d.recommended_action_for_miuraya.split(":")[0]}`)
   ];

@@ -2,16 +2,17 @@
 <!--
   Phase AUTO-RUNNER16X - launchd template for the rotating 2-hourly market refresh.
 
-  TEMPLATE ONLY — installed in a later staged-cutover phase (16X-D/E), NOT during
-  16X-A. Per the approved staged plan, the existing com.yuge.zmi.market-refresh-live
-  (09:00) keeps running until manual-live + shadow validation pass; only then is
-  this installed and the old job booted out (one live history writer at a time).
+  Installed live template for the active rotating market refresh.
+  The old 09:00 narrow live job is expected to remain disabled.
+  Only one live history writer should be loaded at a time.
 
   Runs every 2 hours (00,02,...,22 JST). Six live gates + PLANNER_ROTATION_ENABLED
-  drive planner-selected slugs/stay_dates with strict per-run caps (total 12,
-  booking 6, jalan 6). 24h cooldown per (source,property,stay_date). Rakuten/Google
-  never collected. PUBLISH_CHATGPT_DB=1 publishes to the chatgpt-db-latest release
-  after a successful aligned append (publish failure is non-fatal). No pricing/PMS.
+  drive planner-selected slugs/stay_dates. Strict per-run caps are code-defined in
+  rotatingCollectionScopePlanner: total 24, booking 12, jalan 12, rakuten 0,
+  google 0. Runs every 2 hours, so theoretical max is 288 pages/day. 24h cooldown
+  per (source,property,stay_date). Rakuten/Google never collected.
+  PUBLISH_CHATGPT_DB=1 publishes to the chatgpt-db-latest release after a
+  successful aligned append (publish failure is non-fatal). No pricing/PMS.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

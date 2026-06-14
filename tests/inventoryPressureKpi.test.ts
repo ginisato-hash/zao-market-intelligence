@@ -3,12 +3,15 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ROOM_ONLY_COMPETITORS,
+  actionForKiraku,
+  actionForMiuraya,
   buildDateInventoryRow,
   buildInventoryKpiReport,
   buildPricePressureRows,
   classifyAvailability,
   competitorStatus,
   judgeInventoryPressure,
+  judgeInventoryPressureConfidence,
   latestObservations,
   renderInventoryCsv,
   renderInventoryReport,
@@ -130,6 +133,77 @@ describe("ZMI Inventory KPI - date row + KPIs", () => {
   });
 });
 
+describe("ZMI Inventory KPI - coverage & confidence", () => {
+  it("all 3 comps observed → coverage 3/3, confidence high", () => {
+    const rows = [
+      row({ canonical_property_name: "HAMMOND", availability_status: "available" }),
+      row({ canonical_property_name: "ONSEN & STAY OAKHILL", availability_status: "sold_out" }),
+      row({ canonical_property_name: "吉田屋", availability_status: "available" })
+    ];
+    const d = buildDateInventoryRow("2026-07-18", rows);
+    expect(d.room_only_comp_coverage_count).toBe(3);
+    expect(d.room_only_comp_no_data_count).toBe(0);
+    expect(d.room_only_comp_coverage_rate).toBe(1);
+    expect(d.inventory_pressure_confidence).toBe("high");
+  });
+
+  it("2 comps observed + 1 no_data → coverage 2/3, confidence medium", () => {
+    const rows = [
+      row({ canonical_property_name: "HAMMOND", availability_status: "available" }),
+      row({ canonical_property_name: "吉田屋", availability_status: "sold_out" })
+    ];
+    const d = buildDateInventoryRow("2026-07-18", rows);
+    expect(d.room_only_comp_coverage_count).toBe(2);
+    expect(d.room_only_comp_no_data_count).toBe(1);
+    expect(d.inventory_pressure_confidence).toBe("medium");
+  });
+
+  it("1 comp observed + 2 no_data → coverage 1/3, confidence low", () => {
+    const rows = [row({ canonical_property_name: "HAMMOND", availability_status: "available" })];
+    const d = buildDateInventoryRow("2026-07-18", rows);
+    expect(d.room_only_comp_coverage_count).toBe(1);
+    expect(d.room_only_comp_no_data_count).toBe(2);
+    expect(d.inventory_pressure_confidence).toBe("low");
+  });
+
+  it("judgeInventoryPressureConfidence thresholds", () => {
+    expect(judgeInventoryPressureConfidence(1)).toBe("high");
+    expect(judgeInventoryPressureConfidence(2 / 3)).toBe("medium");
+    expect(judgeInventoryPressureConfidence(1 / 3)).toBe("low");
+    expect(judgeInventoryPressureConfidence(0)).toBe("low");
+  });
+
+  it("weak + low confidence → monitor_or_hold (no aggressive discount)", () => {
+    expect(actionForKiraku("weak_inventory_pressure", "low")).toMatch(/^monitor_or_hold/);
+    expect(actionForMiuraya("weak_inventory_pressure", "low")).toMatch(/^monitor_or_hold/);
+  });
+
+  it("weak + high confidence → competitive_or_discount / discount_to_fill", () => {
+    expect(actionForKiraku("weak_inventory_pressure", "high")).toMatch(/^competitive_or_discount/);
+    expect(actionForMiuraya("weak_inventory_pressure", "high")).toMatch(/^discount_to_fill/);
+  });
+
+  it("strong/medium actions are confidence-independent", () => {
+    for (const conf of ["high", "medium", "low"] as const) {
+      expect(actionForKiraku("strong_inventory_pressure", conf)).toMatch(/^hold_or_raise/);
+      expect(actionForMiuraya("strong_inventory_pressure", conf)).toMatch(/^raise_or_hold/);
+      expect(actionForKiraku("medium_inventory_pressure", conf)).toMatch(/^hold/);
+      expect(actionForMiuraya("medium_inventory_pressure", conf)).toMatch(/^hold/);
+    }
+  });
+
+  it("pressure LEVEL is unchanged by no_data (level rule preserved)", () => {
+    // weak area rate + 2 no_data: still weak level, but low confidence
+    const d = buildDateInventoryRow("2026-07-18", [
+      row({ canonical_property_name: "蔵王国際ホテル", availability_status: "available" }),
+      row({ canonical_property_name: "HAMMOND", availability_status: "available" })
+    ]);
+    expect(d.inventory_pressure_level).toBe("weak_inventory_pressure");
+    expect(d.inventory_pressure_confidence).toBe("low");
+    expect(d.recommended_action_for_kiraku).toMatch(/^monitor_or_hold/);
+  });
+});
+
 describe("ZMI Inventory KPI - report assembly", () => {
   const rows = [
     // 2026-07-18: strong (2 comps sold out)
@@ -151,6 +225,16 @@ describe("ZMI Inventory KPI - report assembly", () => {
     expect(report.summary.distinct_checkins).toBe(2);
     expect(report.summary.room_only_comp_sold_out_observations).toBe(2);
     expect(report.summary.level_counts.strong_inventory_pressure).toBe(1);
+  });
+
+  it("summary exposes coverage rate, no_data observations, and overall confidence", () => {
+    const report = buildInventoryKpiReport({ rows, generatedAtJst: "2026-06-14T02:00:00+09:00" });
+    // 2 checkins x 3 comps = 6 cells. 2026-07-18 observes HAMMOND+吉田屋 (2),
+    // 2026-08-10 observes all 3 → 5 observed, 1 no_data (OAKHILL on 07-18).
+    expect(report.summary.room_only_comp_observations).toBe(5);
+    expect(report.summary.room_only_comp_no_data_observations).toBe(1);
+    expect(report.summary.room_only_comp_coverage_rate_overall).toBeCloseTo(5 / 6, 3);
+    expect(report.summary.inventory_pressure_confidence_overall).toBe("medium");
   });
 
   it("price pressure is computed only from usable directional rows", () => {
@@ -178,12 +262,21 @@ describe("ZMI Inventory KPI - report assembly", () => {
     expect(iKiraku).toBeLessThan(iMiuraya);
   });
 
-  it("csv has the specified inventory headers and one row per checkin", () => {
+  it("report markdown surfaces confidence and coverage", () => {
+    const report = buildInventoryKpiReport({ rows, generatedAtJst: "2026-06-14T02:00:00+09:00" });
+    const md = renderInventoryReport({ report, pricePressure: buildPricePressureRows(rows) });
+    expect(md).toContain("inventory_pressure_confidence_overall:");
+    expect(md).toContain("room_only_comp_coverage_rate_overall:");
+    expect(md).toContain("confidence"); // table column header
+  });
+
+  it("csv has the specified inventory + coverage/confidence headers and one row per checkin", () => {
     const report = buildInventoryKpiReport({ rows, generatedAtJst: "2026-06-14T02:00:00+09:00" });
     const csv = renderInventoryCsv(report);
     const lines = csv.trim().split("\n");
     expect(lines[0]).toContain("checkin,area_available_count,area_sold_out_count,area_sold_out_rate");
-    expect(lines[0]).toContain("HAMMOND_status,OAKHILL_status,吉田屋_status,inventory_pressure_level,recommended_action_for_kiraku,recommended_action_for_miuraya");
+    expect(lines[0]).toContain("room_only_comp_no_data_count,room_only_comp_coverage_count,room_only_comp_coverage_rate");
+    expect(lines[0]).toContain("inventory_pressure_level,inventory_pressure_confidence,recommended_action_for_kiraku,recommended_action_for_miuraya");
     expect(lines).toHaveLength(3); // header + 2 checkins
   });
 });
