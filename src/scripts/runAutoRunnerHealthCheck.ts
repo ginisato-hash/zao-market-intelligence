@@ -120,8 +120,9 @@ function run(): AutoRunnerHealthCheckOutput {
   // (395 -> 406 -> 417), then the AUTO-RUNNER16X-E2 rotating-live cutover
   // kickstart appended 10 rows (417 -> 427), then the AUTO-RUNNER16X-F expanded
   // universe + cap-24 cutover kickstarts appended jalan 12 then booking 12 +
-  // jalan 12 (427 -> 439 -> 463).
-  const EXPECTED_BASELINE_ROW_COUNT = 463;
+  // jalan 12 (427 -> 439 -> 463), then ongoing 2-hourly rotating-live scheduled
+  // runs (463 -> 596).
+  const EXPECTED_BASELINE_ROW_COUNT = 596;
   const before = currentStateBefore.current_state_summary;
   const after = currentStateAfter.current_state_summary;
   const stateCountsMatchExpected =
