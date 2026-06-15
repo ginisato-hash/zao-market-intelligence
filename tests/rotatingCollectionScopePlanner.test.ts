@@ -230,3 +230,65 @@ describe("AUTO-RUNNER16X - rotating crawl volume multiplier", () => {
     expect(m3.selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
   });
 });
+
+describe("AUTO-RUNNER17X - near-term dense + forced checkin dates", () => {
+  const NT_RUN = "2026-06-14";
+  function ntPlan(opts: { nearTermDenseDays?: number; forcedDates?: readonly string[]; multiplier?: number }) {
+    return buildRotatingPlan({
+      runDateIso: NT_RUN,
+      nowIso: `${NT_RUN}T08:00:00+09:00`,
+      slotHourJst: 8,
+      liveTargets: liveTargets(),
+      config: CONFIG,
+      lastCollectedAt: new Map<string, string>(),
+      caps: scaledRotatingCaps(opts.multiplier ?? 3),
+      nearTermDenseDays: opts.nearTermDenseDays ?? 30,
+      forcedDates: opts.forcedDates ?? []
+    });
+  }
+
+  it("§8.1 — the next 30 days are all-day candidates (incl. ordinary weekdays)", () => {
+    const dates = candidateStayDates(NT_RUN, CONFIG, { nearTermDenseDays: 30 });
+    const set = new Set(dates.map((d) => d.stayDate));
+    expect(set.has("2026-06-15")).toBe(true); // offset 1
+    expect(set.has("2026-06-16")).toBe(true); // Tuesday — ordinary weekday in range
+    expect(set.has("2026-07-14")).toBe(true); // offset 30
+    // every offset 1..30 present = 30 distinct near-term dates
+    const nearTerm = dates.filter((d) => d.stayDate >= "2026-06-15" && d.stayDate <= "2026-07-14");
+    expect(nearTerm.length).toBe(30);
+  });
+
+  it("§8.4 — 2026-06-25 (ordinary weekday) is never dropped from candidates", () => {
+    const set = new Set(candidateStayDates(NT_RUN, CONFIG, { nearTermDenseDays: 30 }).map((d) => d.stayDate));
+    expect(set.has("2026-06-25")).toBe(true);
+    const plan = ntPlan({});
+    const ow = plan.ordinary_weekday_near_term_candidate_count;
+    expect(ow).toBeGreaterThan(0);
+  });
+
+  it("§8.2 — forced dates carry forced_checkin_date and are selected/boosted", () => {
+    const plan = ntPlan({ forcedDates: ["2026-06-25"] });
+    expect(plan.forced_checkin_candidate_count).toBeGreaterThan(0);
+    const sixForced = plan.selected.filter((t) => t.stay_date === "2026-06-25");
+    expect(sixForced.length).toBeGreaterThan(0);
+    expect(sixForced.every((t) => t.reason_codes.includes("forced_checkin_date"))).toBe(true);
+    expect(plan.forced_checkin_selected_count).toBeGreaterThan(0);
+  });
+
+  it("forced dates outside the normal rules are still added as candidates", () => {
+    // 2026-09-15 is a Tuesday in the long bucket — not normally collected daily.
+    const dates = candidateStayDates(NT_RUN, CONFIG, { nearTermDenseDays: 30, forcedDates: ["2026-09-15"] });
+    const hit = dates.find((d) => d.stayDate === "2026-09-15");
+    expect(hit?.forced).toBe(true);
+  });
+
+  it("§8.3 — coexists with multiplier=3: ~72 pages, near-term weekdays selected, no leaks", () => {
+    const plan = ntPlan({ multiplier: 3 });
+    expect(plan.caps.total_pages_per_run).toBe(72);
+    expect(plan.selected.length).toBeLessThanOrEqual(72);
+    expect(plan.near_term_dense_candidate_count).toBeGreaterThan(0);
+    expect(plan.ordinary_weekday_near_term_candidate_count).toBeGreaterThan(0);
+    expect(plan.ordinary_weekday_near_term_selected_count).toBeGreaterThan(0);
+    expect(plan.selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
+  });
+});

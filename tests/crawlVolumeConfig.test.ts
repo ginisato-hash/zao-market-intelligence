@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   BASE_DATES_PER_PROPERTY,
+  DEFAULT_NEAR_TERM_DENSE_DAYS,
   MAX_MULTIPLIER,
+  MAX_NEAR_TERM_DENSE_DAYS,
   MIN_MULTIPLIER,
+  MIN_NEAR_TERM_DENSE_DAYS,
   datesPerProperty,
   expandedSaturdayCount,
+  isValidYmd,
   resolveCrawlVolumeMultiplier,
+  resolveForcedCheckinDates,
+  resolveNearTermDenseDays,
   scaleCap
 } from "../src/services/crawlVolumeConfig";
 
@@ -51,5 +57,41 @@ describe("AUTO-RUNNER16X - volume scaling helpers", () => {
     expect(scaleCap(9, 3)).toBe(27);
     expect(scaleCap(15, 3)).toBe(45);
     expect(scaleCap(30, 3)).toBe(90);
+  });
+});
+
+describe("AUTO-RUNNER17X - near-term dense days resolution", () => {
+  it("defaults to 30 when unset or invalid", () => {
+    expect(resolveNearTermDenseDays({})).toBe(DEFAULT_NEAR_TERM_DENSE_DAYS);
+    expect(resolveNearTermDenseDays({ ZMI_NEAR_TERM_DENSE_DAYS: "abc" })).toBe(30);
+    expect(resolveNearTermDenseDays({ ZMI_NEAR_TERM_DENSE_DAYS: "0" })).toBe(30);
+  });
+
+  it("reads and clamps to [7, 60]", () => {
+    expect(resolveNearTermDenseDays({ ZMI_NEAR_TERM_DENSE_DAYS: "14" })).toBe(14);
+    expect(resolveNearTermDenseDays({ ZMI_NEAR_TERM_DENSE_DAYS: "3" })).toBe(MIN_NEAR_TERM_DENSE_DAYS);
+    expect(resolveNearTermDenseDays({ ZMI_NEAR_TERM_DENSE_DAYS: "999" })).toBe(MAX_NEAR_TERM_DENSE_DAYS);
+  });
+});
+
+describe("AUTO-RUNNER17X - forced checkin dates (§8.2)", () => {
+  it("is a no-op when unset", () => {
+    expect(resolveForcedCheckinDates({})).toEqual({ valid: [], invalid: [] });
+  });
+
+  it("accepts valid dates, dedupes, rejects bad format, and sorts", () => {
+    const r = resolveForcedCheckinDates({ ZMI_FORCE_CHECKIN_DATES: "2026-06-25,2026-06-25,bad-date,2026-06-28" });
+    expect(r.valid).toEqual(["2026-06-25", "2026-06-28"]);
+    expect(r.invalid).toEqual(["bad-date"]);
+  });
+
+  it("rejects impossible calendar dates via isValidYmd", () => {
+    expect(isValidYmd("2026-06-25")).toBe(true);
+    expect(isValidYmd("2026-02-30")).toBe(false);
+    expect(isValidYmd("2026-6-25")).toBe(false);
+    expect(isValidYmd("bad-date")).toBe(false);
+    const r = resolveForcedCheckinDates({ ZMI_FORCE_CHECKIN_DATES: "2026-02-30,2026-06-25" });
+    expect(r.valid).toEqual(["2026-06-25"]);
+    expect(r.invalid).toEqual(["2026-02-30"]);
   });
 });

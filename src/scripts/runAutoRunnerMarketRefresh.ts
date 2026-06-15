@@ -41,7 +41,7 @@ import {
   type JalanImprovedPreviewRow
 } from "../services/jalanBoundedCollectionProbeImproved";
 import { collectTarget, type PageResult } from "./probeJalanBoundedCollectionImproved";
-import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
+import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates } from "../services/crawlVolumeConfig";
 import {
   backoffDelayMs,
   classifyBlock,
@@ -357,6 +357,8 @@ async function run(): Promise<RunnerOutput> {
 
   const gate = evaluateMarketRefreshGates(process.env);
   const multiplier = resolveCrawlVolumeMultiplier(process.env);
+  const forcedCheckin = resolveForcedCheckinDates(process.env);
+  if (forcedCheckin.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forcedCheckin.invalid.join(",")}`);
   const preflight = readState();
   const preflightOk = preflight.history_rows > 0 && preflight.duplicate_row_id_count === 0;
   const plannerDriven = process.env["PLANNER_DRIVEN_MARKET_REFRESH"] === "1";
@@ -377,9 +379,10 @@ async function run(): Promise<RunnerOutput> {
     bookingPlan = plannerBooking;
     jalanTargets = plannerJalan.targets;
   } else {
-    // Fixed live target behavior (AUTO-RUNNER10X/11Y) scaled by the multiplier.
-    bookingPlan = buildBookingPlan(todayUtcYmd(), multiplier);
-    jalanTargets = buildJalanTargetMatrix(todayUtcYmd(), multiplier);
+    // Fixed live target behavior (AUTO-RUNNER10X/11Y) scaled by the multiplier,
+    // plus any forced spot-check dates.
+    bookingPlan = buildBookingPlan(todayUtcYmd(), multiplier, forcedCheckin.valid);
+    jalanTargets = buildJalanTargetMatrix(todayUtcYmd(), multiplier, forcedCheckin.valid);
   }
 
   let bookingRows: BookingPreviewRow[] = [];

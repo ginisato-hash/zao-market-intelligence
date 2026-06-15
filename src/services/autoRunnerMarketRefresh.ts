@@ -98,17 +98,17 @@ export interface MarketStateSummary {
   duplicate_row_id_count: number;
 }
 
-export function buildBookingPlan(todayIso: string, multiplier = 1): {
+export function buildBookingPlan(todayIso: string, multiplier = 1, forcedDates: readonly string[] = []): {
   dates: string[];
   target_matrix: ReturnType<typeof buildBookingTargetMatrix>;
   selected_targets: ReturnType<typeof enforceBookingPageCap>["selected"];
   max_pages: number;
   page_cap_respected: boolean;
 } {
-  const dates = selectBookingPreviewDates(todayIso, PEAK_DATE, multiplier);
-  const matrix = buildBookingTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, multiplier);
-  const cap = enforceBookingPageCap(matrix, multiplier);
-  const maxPages = scaleCap(MAX_BOOKING_PAGES, multiplier);
+  const dates = selectBookingPreviewDates(todayIso, PEAK_DATE, multiplier, forcedDates);
+  const matrix = buildBookingTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, multiplier, forcedDates.length);
+  const cap = enforceBookingPageCap(matrix, multiplier, forcedDates.length);
+  const maxPages = scaleCap(MAX_BOOKING_PAGES, multiplier) + forcedDates.length * VERIFIED_BOOKING_TARGETS.length;
   return {
     dates,
     target_matrix: matrix,
@@ -152,20 +152,20 @@ export const VERIFIED_JALAN_TARGETS = [
   { canonicalPropertyName: "JURIN", facilityTier: "tier_2" as const, jalanYadId: "yad332556", sourceUrl: "https://www.jalan.net/yad332556/" }
 ] as const;
 
-export function selectMarketRefreshDates(todayIso: string, peakDateIso = PEAK_DATE, multiplier = 1): string[] {
-  const dates = [...nextSaturdays(todayIso, expandedSaturdayCount(multiplier)), peakDateIso];
-  return [...new Set(dates)].slice(0, datesPerProperty(multiplier));
+export function selectMarketRefreshDates(todayIso: string, peakDateIso = PEAK_DATE, multiplier = 1, forcedDates: readonly string[] = []): string[] {
+  const dates = [...forcedDates, ...nextSaturdays(todayIso, expandedSaturdayCount(multiplier)), peakDateIso];
+  return [...new Set(dates)].slice(0, datesPerProperty(multiplier) + forcedDates.length);
 }
 
-export function buildJalanTargetMatrix(todayIso: string, multiplier = 1): JalanProbeTarget[] {
-  const dates = selectMarketRefreshDates(todayIso, PEAK_DATE, multiplier);
+export function buildJalanTargetMatrix(todayIso: string, multiplier = 1, forcedDates: readonly string[] = []): JalanProbeTarget[] {
+  const dates = selectMarketRefreshDates(todayIso, PEAK_DATE, multiplier, forcedDates);
   const targets: JalanProbeTarget[] = [];
   for (const property of VERIFIED_JALAN_TARGETS.slice(0, MAX_JALAN_PROPERTIES)) {
     for (const checkin of dates) {
       targets.push(buildJalanProbeTarget({ ...property, checkin }));
     }
   }
-  return targets.slice(0, scaleCap(MAX_JALAN_PAGES, multiplier));
+  return targets.slice(0, scaleCap(MAX_JALAN_PAGES, multiplier) + MAX_JALAN_PROPERTIES * forcedDates.length);
 }
 
 export function totalPageCapRespected(input: { bookingPages: number; jalanPages: number }, multiplier = 1): boolean {

@@ -37,12 +37,13 @@ import { liveTargets } from "../services/marketRefreshTargetUniverse";
 import {
   DAILY_PAGE_CAPACITY,
   buildRotatingPlan,
+  candidateStayDates,
   scaledRotatingCaps,
   type RotatingDemandConfig,
   type RotatingPlan,
   type RotatingTarget
 } from "../services/rotatingCollectionScopePlanner";
-import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
+import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates, resolveNearTermDenseDays } from "../services/crawlVolumeConfig";
 import {
   backoffDelayMs,
   classifyBlock,
@@ -217,21 +218,34 @@ async function run(): Promise<void> {
   const env = process.env;
   const multiplier = resolveCrawlVolumeMultiplier(env);
   const caps = scaledRotatingCaps(multiplier);
+  const nearTermDenseDays = resolveNearTermDenseDays(env);
+  const forced = resolveForcedCheckinDates(env);
+  if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
   const liveMode = !dryRun && liveGates && rotationEnabled;
 
   const preflight = readState();
-  const plan: RotatingPlan = buildRotatingPlan({
+  const planInput = {
     runDateIso: jst.date,
     nowIso: jst.iso,
     slotHourJst: jst.hour,
     liveTargets: liveTargets(),
     config: DEMAND_CONFIG,
     lastCollectedAt: readLastCollectedAt(),
-    caps
-  });
+    nearTermDenseDays,
+    forcedDates: forced.valid
+  };
+  const plan: RotatingPlan = buildRotatingPlan({ ...planInput, caps });
+  // Baseline (multiplier=1) plan for before/after reporting (no extra collection).
+  const planBefore: RotatingPlan = buildRotatingPlan({ ...planInput, caps: scaledRotatingCaps(1) });
+  // 6/25-style regression visibility: is the spot-check date in candidates/selected?
+  const SPOT_CHECK_DATE = "2026-06-25";
+  const sixCandidate = plan.candidate_count > 0
+    ? candidateStayDates(jst.date, DEMAND_CONFIG, { nearTermDenseDays, forcedDates: forced.valid }).some((d) => d.stayDate === SPOT_CHECK_DATE)
+    : false;
+  const sixSelectedOrBoosted = plan.selected.some((t) => t.stay_date === SPOT_CHECK_DATE) || forced.valid.includes(SPOT_CHECK_DATE);
 
   let decision = dryRun || !liveMode ? "rotating_market_refresh_dry_run_ready" : "rotating_market_refresh_pending";
   let rowsAppended = 0;
@@ -319,10 +333,26 @@ async function run(): Promise<void> {
   const out = {
     run_id: runId, generated_at_jst: jst.iso, decision, dry_run: dryRun || !liveMode,
     crawl_volume_multiplier: multiplier,
+    near_term_dense_days: nearTermDenseDays,
+    forced_checkin_dates: forced.valid.join(","),
+    invalid_forced_checkin_dates: forced.invalid.join(","),
     slot_key: plan.slot_key, slot_index: plan.slot_index,
     live_collection_executed: liveExecuted,
     booking_pages: plan.selected.filter((t) => t.source === "booking").length,
     jalan_pages: plan.selected.filter((t) => t.source === "jalan").length,
+    planned_requests: plan.selected.length,
+    planned_requests_before: planBefore.selected.length,
+    planned_requests_after: plan.selected.length,
+    near_term_dense_candidate_count: plan.near_term_dense_candidate_count,
+    near_term_dense_selected_count: plan.near_term_dense_selected_count,
+    ordinary_weekday_near_term_candidate_count: plan.ordinary_weekday_near_term_candidate_count,
+    ordinary_weekday_near_term_selected_count: plan.ordinary_weekday_near_term_selected_count,
+    forced_checkin_candidate_count: plan.forced_checkin_candidate_count,
+    forced_checkin_selected_count: plan.forced_checkin_selected_count,
+    six_25_candidate_included: sixCandidate,
+    six_25_selected_or_priority_boosted: sixSelectedOrBoosted,
+    candidate_only_included: 0,
+    unverified_targets_included: 0,
     rows_appended: rowsAppended,
     skipped_identical_rows: appendPlan?.skipped_identical_rows ?? 0,
     intraday_rows: appendPlan?.intraday_rows?.length ?? 0,

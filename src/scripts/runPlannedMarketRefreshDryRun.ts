@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { VERIFIED_BOOKING_TARGETS } from "../services/autoRunnerBookingPreview";
 import { VERIFIED_JALAN_TARGETS, buildBookingPlan, buildJalanTargetMatrix } from "../services/autoRunnerMarketRefresh";
-import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
+import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates, resolveNearTermDenseDays } from "../services/crawlVolumeConfig";
 import { buildScopePlan, type DemandConfig, type PlannerProperty } from "../services/collectionScopePlanner";
 import {
   buildDryRunSummary,
@@ -77,9 +77,9 @@ function buildProperties(): PlannerProperty[] {
 // Actual live-runner volume at a given multiplier (what the rotating job will
 // crawl), as opposed to the aspirational planner caps. targets = verified
 // properties (unchanged), checkins = distinct stay dates, requests = pages.
-function liveVolume(todayIso: string, multiplier: number): { targets: number; checkins: number; requests: number } {
-  const booking = buildBookingPlan(todayIso, multiplier);
-  const jalan = buildJalanTargetMatrix(todayIso, multiplier);
+function liveVolume(todayIso: string, multiplier: number, forcedDates: readonly string[] = []): { targets: number; checkins: number; requests: number } {
+  const booking = buildBookingPlan(todayIso, multiplier, forcedDates);
+  const jalan = buildJalanTargetMatrix(todayIso, multiplier, forcedDates);
   const checkins = new Set<string>([...booking.dates, ...jalan.map((t) => t.checkin)]);
   const targets = new Set<string>([
     ...booking.selected_targets.map((t) => t.property_slug),
@@ -95,13 +95,16 @@ function run(): void {
   mkdirSync(resolve(REPORT_DIR), { recursive: true });
 
   const multiplier = resolveCrawlVolumeMultiplier(process.env);
+  const nearTermDenseDays = resolveNearTermDenseDays(process.env);
+  const forced = resolveForcedCheckinDates(process.env);
+  if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const plan = buildScopePlan({ runDateIso: runDate, properties: buildProperties(), config: DEMAND_CONFIG, multiplier });
   const index = buildMappingIndex();
   const summary = buildDryRunSummary(plan, index);
 
   // Actual rotating-job live volume: baseline (m=1) vs the configured multiplier.
   const before = liveVolume(runDate, 1);
-  const after = liveVolume(runDate, multiplier);
+  const after = liveVolume(runDate, multiplier, forced.valid);
 
   const reportPath = resolve(REPORT_DIR, `planned_market_refresh_${ts}.md`);
   const csvPath = resolve(REPORT_DIR, `planned_market_refresh_${ts}.csv`);
@@ -114,6 +117,9 @@ function run(): void {
   const wouldCollect = summary.selected.filter((t) => t.dry_run_action === "would_collect");
   console.log(`decision=${summary.status}`);
   console.log(`crawl_volume_multiplier=${multiplier}`);
+  console.log(`near_term_dense_days=${nearTermDenseDays}`);
+  console.log(`forced_checkin_dates=${forced.valid.join(",")}`);
+  console.log(`invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   console.log(`planned_targets_before=${before.targets}`);
   console.log(`planned_targets_after=${after.targets}`);
   console.log(`planned_checkins_before=${before.checkins}`);

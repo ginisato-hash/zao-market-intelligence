@@ -21,6 +21,7 @@ import {
 } from "../services/bookingRenderedDomProbe";
 import {
   MAX_PAGES,
+  MAX_PROPERTIES,
   SOURCE_PHASE,
   VERIFIED_BOOKING_TARGETS,
   buildSafetyConfirmation,
@@ -37,7 +38,7 @@ import {
   type PreviewRow,
   type TargetCell
 } from "../services/autoRunnerBookingPreview";
-import { resolveCrawlVolumeMultiplier, scaleCap } from "../services/crawlVolumeConfig";
+import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates, scaleCap } from "../services/crawlVolumeConfig";
 import {
   backoffDelayMs,
   classifyBlock,
@@ -187,15 +188,17 @@ async function run(): Promise<PreviewResult> {
 
   const gate = readGate(process.env);
   const multiplier = resolveCrawlVolumeMultiplier(process.env);
-  const dates = selectPreviewDates(todayUtcYmd(), PEAK_DATE, multiplier);
-  const targetMatrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, multiplier);
-  const pageCap = enforcePageCap(targetMatrix, multiplier);
+  const forcedCheckin = resolveForcedCheckinDates(process.env);
+  if (forcedCheckin.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forcedCheckin.invalid.join(",")}`);
+  const dates = selectPreviewDates(todayUtcYmd(), PEAK_DATE, multiplier, forcedCheckin.valid);
+  const targetMatrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, multiplier, forcedCheckin.valid.length);
+  const pageCap = enforcePageCap(targetMatrix, multiplier, forcedCheckin.valid.length);
 
   let previewRows: PreviewRow[] = [];
   let liveExecuted = false;
   if (gate.live_collection_authorized) {
     liveExecuted = true;
-    previewRows = await collectLive(pageCap.selected, debugPath, generatedAtJst, 35_000, scaleCap(MAX_PAGES, multiplier));
+    previewRows = await collectLive(pageCap.selected, debugPath, generatedAtJst, 35_000, scaleCap(MAX_PAGES, multiplier) + MAX_PROPERTIES * forcedCheckin.valid.length);
   }
 
   const classificationSummary = summarizeClassification(previewRows);

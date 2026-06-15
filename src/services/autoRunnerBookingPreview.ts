@@ -64,25 +64,27 @@ export interface TargetCell {
   url_sanitized: string;
 }
 
-// Upcoming Saturdays (strictly after today, near-term first) plus one peak date,
-// capped to MAX_DATES_PER_PROPERTY * multiplier. multiplier defaults to 1 so the
-// baseline returns the original two Saturdays + peak (3 dates). Deterministic.
-export function selectPreviewDates(todayIso: string, peakDateIso: string, multiplier = 1): string[] {
-  const dates = [...nextSaturdays(todayIso, expandedSaturdayCount(multiplier)), peakDateIso];
+// Forced spot-check dates first (always retained), then upcoming Saturdays
+// (near-term first) plus one peak date, capped to MAX_DATES_PER_PROPERTY *
+// multiplier + forced count. multiplier defaults to 1 and forcedDates to [] so
+// the baseline returns the original two Saturdays + peak (3 dates). Deterministic.
+export function selectPreviewDates(todayIso: string, peakDateIso: string, multiplier = 1, forcedDates: readonly string[] = []): string[] {
+  const dates = [...forcedDates, ...nextSaturdays(todayIso, expandedSaturdayCount(multiplier)), peakDateIso];
   const unique: string[] = [];
   for (const d of dates) {
     if (!unique.includes(d)) unique.push(d);
   }
-  return unique.slice(0, datesPerProperty(multiplier));
+  return unique.slice(0, datesPerProperty(multiplier) + forcedDates.length);
 }
 
 export function buildTargetMatrix(
   targets: readonly BookingRenderedDomTarget[],
   dates: readonly string[],
-  multiplier = 1
+  multiplier = 1,
+  forcedDateCount = 0
 ): TargetCell[] {
   const boundedTargets = targets.slice(0, MAX_PROPERTIES);
-  const boundedDates = dates.slice(0, datesPerProperty(multiplier));
+  const boundedDates = dates.slice(0, datesPerProperty(multiplier) + forcedDateCount);
   const cells: TargetCell[] = [];
   for (const target of boundedTargets) {
     if (!/^[a-z0-9-]+$/u.test(target.slug)) continue; // only verified-shaped Booking slugs
@@ -109,8 +111,8 @@ export interface PageCapResult {
   respected: boolean;
 }
 
-export function enforcePageCap(cells: readonly TargetCell[], multiplier = 1): PageCapResult {
-  const maxPages = scaleCap(MAX_PAGES, multiplier);
+export function enforcePageCap(cells: readonly TargetCell[], multiplier = 1, forcedDateCount = 0): PageCapResult {
+  const maxPages = scaleCap(MAX_PAGES, multiplier) + MAX_PROPERTIES * forcedDateCount;
   const selected = cells.slice(0, maxPages);
   return {
     requested: cells.length,

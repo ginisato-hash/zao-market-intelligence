@@ -122,6 +122,10 @@ function run(): void {
   console.log(`dropped_past_rows_count=${metadata.dropped_past_rows_count}`);
   console.log(`latest_collected_at_jst=${metadata.latest_collected_at_jst}`);
   console.log(`sources_included=${metadata.sources_included.join(",")}`);
+  console.log(`availability_breakdown=${JSON.stringify(metadata.availability_breakdown)}`);
+  console.log(`ota_unavailable_rate=${metadata.availability_breakdown.ota_unavailable_rate}`);
+  console.log(`data_missing_rate=${metadata.availability_breakdown.data_missing_rate}`);
+  console.log(`data_reliability_rate=${metadata.availability_breakdown.data_reliability_rate}`);
   console.log(`csv_path=${csvPath}`);
   console.log(`metadata_path=${metaPath}`);
   console.log(`pricing_output_generated=false`);

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   BI_CSV_HEADERS,
   applyPeriodRetention,
+  availabilityBreakdown,
   buildBiMetadata,
   canonicalizeName,
   getCurrentPeriodKeyJst,
@@ -291,5 +292,47 @@ describe("ZMI BI web - HTML static checks (no source selector)", () => {
     expect(PACKAGE_JSON).toContain('"bi:web:publish"');
     expect(PACKAGE_JSON).toContain('"bi:web:serve"');
     expect(PACKAGE_JSON).toContain('"bi:web:check"');
+  });
+});
+
+describe("AUTO-RUNNER17X - availability rate separation (§8.5)", () => {
+  // One unified row per status (distinct checkin per status).
+  const unified = unifyByPropertyCheckin([
+    row({ checkin: "2026-07-18", availability_status: "available" }),
+    row({ checkin: "2026-07-19", availability_status: "sold_out", normalized_total_price: null, is_price_usable_for_dp_directional: false }),
+    row({ checkin: "2026-07-20", availability_status: "not_found", normalized_total_price: null, is_price_usable_for_dp_directional: false }),
+    row({ checkin: "2026-07-21", availability_status: "failed", normalized_total_price: null, is_price_usable_for_dp_directional: false })
+  ]);
+
+  it("OTA-unavailable rate excludes not_found / failed / excluded", () => {
+    const b = availabilityBreakdown(unified);
+    expect(b.total).toBe(4);
+    expect(b.available).toBe(1);
+    expect(b.sold_out).toBe(1);
+    expect(b.not_found).toBe(1);
+    expect(b.excluded).toBe(1); // failed normalizes to excluded
+    // sold_out / (available + sold_out) = 1/2 — NOT 1/4.
+    expect(b.ota_unavailable_rate).toBe(0.5);
+    expect(b.data_missing_rate).toBe(0.5); // (not_found + excluded) / total
+    expect(b.data_reliability_rate).toBe(0.5); // (available + sold_out) / total
+  });
+
+  it("adding more not_found/failed rows never inflates the OTA-unavailable rate", () => {
+    const withMoreMissing = unifyByPropertyCheckin([
+      row({ checkin: "2026-07-18", availability_status: "available" }),
+      row({ checkin: "2026-07-19", availability_status: "sold_out", normalized_total_price: null, is_price_usable_for_dp_directional: false }),
+      row({ checkin: "2026-07-22", availability_status: "not_found", normalized_total_price: null, is_price_usable_for_dp_directional: false }),
+      row({ checkin: "2026-07-23", availability_status: "not_found", normalized_total_price: null, is_price_usable_for_dp_directional: false }),
+      row({ checkin: "2026-07-24", availability_status: "failed", normalized_total_price: null, is_price_usable_for_dp_directional: false })
+    ]);
+    expect(availabilityBreakdown(withMoreMissing).ota_unavailable_rate).toBe(0.5); // still 1/(1+1)
+    expect(availabilityBreakdown(withMoreMissing).data_missing_rate).toBeGreaterThan(0.5);
+  });
+
+  it("metadata carries the availability breakdown and its policy", () => {
+    const retention = applyPeriodRetention(unified, new Date("2026-07-01T00:00:00+09:00"));
+    const meta = buildBiMetadata({ generatedAtJst: "2026-07-01T00:00:00+09:00", historyRowsTotal: 4, latest: [], unifiedBeforeRetention: unified, retention });
+    expect(meta.availability_breakdown.ota_unavailable_rate).toBe(meta.availability_breakdown.sold_out / (meta.availability_breakdown.available + meta.availability_breakdown.sold_out));
+    expect(meta.availability_rate_policy).toContain("never counted as sold_out");
   });
 });

@@ -185,6 +185,55 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
   return out.sort((a, b) => (a.checkin === b.checkin ? a.canonical_property_name.localeCompare(b.canonical_property_name) : a.checkin.localeCompare(b.checkin)));
 }
 
+// ---------------------------------------------------------------------------
+// Phase AUTO-RUNNER17X — availability separation for honest "unavailable" rates.
+//
+// not_found / failed / excluded mean "no inventory signal" (failed normalizes to
+// excluded), NOT "OTA sold out". They must never inflate the OTA-unavailable
+// rate. Rates are computed over unified (property, checkin) rows.
+
+export interface AvailabilityBreakdown {
+  total: number;
+  available: number;
+  sold_out: number;
+  not_found: number;
+  excluded: number;
+  // OTA販売不可日率 — only over rows with a real availability signal.
+  ota_unavailable_rate: number; // sold_out / (available + sold_out)
+  // データ未取得率 — not_found + excluded(+failed) share of all rows.
+  data_missing_rate: number; // (not_found + excluded) / total
+  // 取得信頼度 — share of rows with a usable available/sold_out signal.
+  data_reliability_rate: number; // (available + sold_out) / total
+}
+
+function ratio(numerator: number, denominator: number): number {
+  return denominator === 0 ? 0 : Number((numerator / denominator).toFixed(4));
+}
+
+export function availabilityBreakdown(rows: readonly UnifiedRow[]): AvailabilityBreakdown {
+  let available = 0;
+  let soldOut = 0;
+  let notFound = 0;
+  let excluded = 0;
+  for (const r of rows) {
+    if (r.unified_availability_status === "available") available += 1;
+    else if (r.unified_availability_status === "sold_out") soldOut += 1;
+    else if (r.unified_availability_status === "not_found") notFound += 1;
+    else excluded += 1;
+  }
+  const total = rows.length;
+  return {
+    total,
+    available,
+    sold_out: soldOut,
+    not_found: notFound,
+    excluded,
+    ota_unavailable_rate: ratio(soldOut, available + soldOut),
+    data_missing_rate: ratio(notFound + excluded, total),
+    data_reliability_rate: ratio(available + soldOut, total)
+  };
+}
+
 export const BI_CSV_HEADERS = [
   "period_key",
   "period_label",
@@ -320,6 +369,8 @@ export interface BiMetadata {
   retained_period_keys: string[];
   dropped_past_period_keys_count: number;
   dropped_past_rows_count: number;
+  availability_breakdown: AvailabilityBreakdown;
+  availability_rate_policy: string;
 }
 
 export function buildBiMetadata(input: {
@@ -348,6 +399,9 @@ export function buildBiMetadata(input: {
     retention_previous_periods: RETENTION_PREVIOUS_PERIODS,
     retained_period_keys: sortPeriodKeys(input.retention.retained_period_keys),
     dropped_past_period_keys_count: input.retention.dropped_past_period_keys.length,
-    dropped_past_rows_count: input.retention.dropped_past_rows_count
+    dropped_past_rows_count: input.retention.dropped_past_rows_count,
+    availability_breakdown: availabilityBreakdown(retained),
+    availability_rate_policy:
+      "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out"
   };
 }

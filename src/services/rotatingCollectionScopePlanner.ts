@@ -10,7 +10,7 @@
 // No I/O, no network, no DB. Rakuten/Google are never collected (cap 0).
 
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
-import { scaleCap } from "./crawlVolumeConfig";
+import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
 
 export type RotatingBucket = "short" | "mid" | "long";
 
@@ -107,6 +107,13 @@ export interface RotatingPlan {
   selected_targets_by_property: Record<string, number>;
   property_diversity_warning: string[];
   estimated_total_pages: number;
+  // Phase AUTO-RUNNER17X near-term-dense / forced-date diagnostics.
+  near_term_dense_candidate_count: number;
+  near_term_dense_selected_count: number;
+  ordinary_weekday_near_term_candidate_count: number;
+  ordinary_weekday_near_term_selected_count: number;
+  forced_checkin_candidate_count: number;
+  forced_checkin_selected_count: number;
 }
 
 function parseYmd(iso: string): Date {
@@ -148,8 +155,17 @@ function inPeak(iso: string, config: RotatingDemandConfig): string[] {
   return codes;
 }
 
-// §7.5 deterministic scoring.
-export function scoreTarget(stayDate: string, bucket: RotatingBucket, tier: TargetTier, config: RotatingDemandConfig, collectedRecently: boolean): { score: number; reasons: string[] } {
+// §7.5 deterministic scoring. options carry the near-term-dense offset and the
+// forced-spot-check flag (Phase AUTO-RUNNER17X) so recent ordinary weekdays and
+// operator-forced dates rank to the top instead of being out-competed.
+export function scoreTarget(
+  stayDate: string,
+  bucket: RotatingBucket,
+  tier: TargetTier,
+  config: RotatingDemandConfig,
+  collectedRecently: boolean,
+  options?: { offset?: number; forced?: boolean; nearTermDenseDays?: number }
+): { score: number; reasons: string[] } {
   const dow = parseYmd(stayDate).getUTCDay();
   const winter = inWinter(stayDate);
   const reasons: string[] = [bucket];
@@ -179,13 +195,41 @@ export function scoreTarget(stayDate: string, bucket: RotatingBucket, tier: Targ
   else if (tier === "tier_budget_small") { score += 10; reasons.push("budget_small_tier"); }
   else if (tier === "tier_anchor_high") { score += 5; reasons.push("anchor_high_tier"); }
 
+  // Near-term dense boost: keep recent dates (esp. ordinary weekdays) competitive.
+  const offset = options?.offset;
+  const denseDays = options?.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
+  if (offset !== undefined && offset >= 1 && offset <= denseDays) {
+    reasons.push("near_term_dense");
+    if (offset <= 7) score += 35;
+    else if (offset <= 14) score += 30;
+    else score += 20;
+  }
+  // Forced spot-check dates rank above everything else.
+  if (options?.forced === true) { score += 50; reasons.push("forced_checkin_date"); }
+
   return { score: Math.max(0, Math.min(100, score)), reasons };
 }
 
-// Candidate stay dates: all Fri/Sat/Sun, holidays, long-weekends, peak dates,
-// plus a deterministic sample of ordinary weekdays for backfill across buckets.
-export function candidateStayDates(runDateIso: string, config: RotatingDemandConfig): { stayDate: string; bucket: RotatingBucket }[] {
-  const out: { stayDate: string; bucket: RotatingBucket }[] = [];
+function offsetDays(fromIso: string, toIso: string): number {
+  return Math.round((parseYmd(toIso).getTime() - parseYmd(fromIso).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Candidate stay dates (Phase AUTO-RUNNER17X):
+//  - offset 1..nearTermDenseDays: EVERY day (so recent ordinary weekdays like
+//    6/25 are always candidates, not just Fri/Sat/Sun/holiday/peak),
+//  - offset (dense+1)..90: Fri/Sat/Sun + holidays + long-weekends + peak + winter
+//    + an ordinary-weekday every 3 days,
+//  - offset 91..240: the original logic (interesting + sparse %9 backfill).
+//  Forced spot-check dates within the horizon are always added.
+export function candidateStayDates(
+  runDateIso: string,
+  config: RotatingDemandConfig,
+  options?: { nearTermDenseDays?: number; forcedDates?: readonly string[] }
+): { stayDate: string; bucket: RotatingBucket; forced: boolean }[] {
+  const denseDays = options?.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
+  const forced = new Set(options?.forcedDates ?? []);
+  const out: { stayDate: string; bucket: RotatingBucket; forced: boolean }[] = [];
+  const seen = new Set<string>();
   for (let offset = 1; offset <= BUCKET_RANGES.long[1]; offset += 1) {
     const stayDate = addDays(runDateIso, offset);
     const bucket = bucketForOffset(offset);
@@ -197,8 +241,23 @@ export function candidateStayDates(runDateIso: string, config: RotatingDemandCon
       config.long_weekend_dates.has(stayDate) ||
       inPeak(stayDate, config).length > 0 ||
       inWinter(stayDate);
-    const backfill = offset % 9 === 0; // sparse ordinary-weekday backfill
-    if (interesting || backfill) out.push({ stayDate, bucket });
+    let include: boolean;
+    if (offset <= denseDays) include = true; // near-term: every day
+    else if (offset <= BUCKET_RANGES.mid[1]) include = interesting || offset % 3 === 0; // mid: + weekday every 3 days
+    else include = interesting || offset % 9 === 0; // long: sparse ordinary-weekday backfill (unchanged)
+    if (include) {
+      out.push({ stayDate, bucket, forced: forced.has(stayDate) });
+      seen.add(stayDate);
+    }
+  }
+  // Forced spot-check dates within the horizon the rules didn't already include.
+  for (const f of forced) {
+    if (seen.has(f)) continue;
+    const off = offsetDays(runDateIso, f);
+    if (off < 1 || off > BUCKET_RANGES.long[1]) continue;
+    const bucket = bucketForOffset(off);
+    if (bucket === null) continue;
+    out.push({ stayDate: f, bucket, forced: true });
   }
   return out;
 }
@@ -216,11 +275,13 @@ export function buildRotatingPlan(input: {
   config: RotatingDemandConfig;
   lastCollectedAt: ReadonlyMap<string, string>;
   caps?: RotatingCaps;
+  nearTermDenseDays?: number;
+  forcedDates?: readonly string[];
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
+  const denseDays = input.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
   const slot = buildSlot(input.runDateIso, input.slotHourJst);
-  const dates = candidateStayDates(input.runDateIso, input.config);
-  const nowMs = parseYmd(input.nowIso.slice(0, 10)).getTime() + hourMs(input.nowIso);
+  const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: input.forcedDates ?? [] });
 
   const excludedCooldown: RotatingPlan["excluded_by_cooldown"] = [];
   const candidates: RotatingTarget[] = [];
@@ -228,7 +289,7 @@ export function buildRotatingPlan(input: {
   for (const target of input.liveTargets) {
     if (target.source !== "booking" && target.source !== "jalan") continue; // Rakuten/Google never
     if (!target.enabled_for_live || !target.verified_mapping) continue;
-    for (const { stayDate, bucket } of dates) {
+    for (const { stayDate, bucket, forced } of dates) {
       const key = cooldownKey(target.source, target.property_slug, stayDate);
       const lastIso = input.lastCollectedAt.get(key);
       const collectedRecently = lastIso !== undefined && withinHours(lastIso, input.nowIso, COOLDOWN_HOURS);
@@ -236,7 +297,8 @@ export function buildRotatingPlan(input: {
         excludedCooldown.push({ source: target.source, property_slug: target.property_slug, stay_date: stayDate });
         continue;
       }
-      const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false);
+      const offset = offsetDays(input.runDateIso, stayDate);
+      const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false, { offset, forced, nearTermDenseDays: denseDays });
       candidates.push({
         source: target.source,
         property_slug: target.property_slug,
@@ -331,6 +393,11 @@ export function buildRotatingPlan(input: {
   if ((distinctPropBySource["jalan"] ?? 0) > 0 && (distinctPropBySource["jalan"] ?? 0) < 3) warnings.push(`jalan_distinct_properties_lt_3:${distinctPropBySource["jalan"]}`);
   for (const [k, v] of Object.entries(byPropertyOut)) if (v > MAX_TARGETS_PER_PROPERTY_PER_RUN) warnings.push(`property_over_cap:${k}=${v}`);
 
+  // Phase AUTO-RUNNER17X diagnostics (derived from reason_codes).
+  const isNearTerm = (t: RotatingTarget): boolean => t.reason_codes.includes("near_term_dense");
+  const isForced = (t: RotatingTarget): boolean => t.reason_codes.includes("forced_checkin_date");
+  const isOrdinaryWeekdayNearTerm = (t: RotatingTarget): boolean => isNearTerm(t) && t.reason_codes.includes("ordinary_weekday");
+
   return {
     slot_key: slot.slot_key,
     slot_index: slot.slot_index,
@@ -347,7 +414,13 @@ export function buildRotatingPlan(input: {
     selected_distinct_stay_dates: new Set(selected.map((t) => t.stay_date)).size,
     selected_targets_by_property: byPropertyOut,
     property_diversity_warning: warnings,
-    estimated_total_pages: selected.reduce((n, t) => n + t.estimated_page_count, 0)
+    estimated_total_pages: selected.reduce((n, t) => n + t.estimated_page_count, 0),
+    near_term_dense_candidate_count: candidates.filter(isNearTerm).length,
+    near_term_dense_selected_count: selected.filter(isNearTerm).length,
+    ordinary_weekday_near_term_candidate_count: candidates.filter(isOrdinaryWeekdayNearTerm).length,
+    ordinary_weekday_near_term_selected_count: selected.filter(isOrdinaryWeekdayNearTerm).length,
+    forced_checkin_candidate_count: candidates.filter(isForced).length,
+    forced_checkin_selected_count: selected.filter(isForced).length
   };
 }
 
