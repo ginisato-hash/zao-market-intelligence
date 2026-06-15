@@ -37,6 +37,14 @@ import {
   type PreviewRow,
   type TargetCell
 } from "../services/autoRunnerBookingPreview";
+import { resolveCrawlVolumeMultiplier, scaleCap } from "../services/crawlVolumeConfig";
+import {
+  backoffDelayMs,
+  classifyBlock,
+  jitterDelayMs,
+  shouldEarlyStop,
+  sleep
+} from "../services/crawlThrottlePolicy";
 
 const REPORT_DIR = ".data/reports/source-discovery";
 const DEBUG_ROOT = ".data/debug/auto-runner-booking-preview";
@@ -77,16 +85,21 @@ async function collectLive(
   cells: readonly TargetCell[],
   debugRootPath: string,
   collectedAtJst: string,
-  timeoutMs: number
+  timeoutMs: number,
+  maxPages: number
 ): Promise<PreviewRow[]> {
   const rows: PreviewRow[] = [];
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
+  let consecutiveBlocks = 0;
+  let backoffAttempt = 0;
   try {
     let pageCount = 0;
     for (const cell of cells) {
-      if (pageCount >= MAX_PAGES) break; // hard page-cap enforcement
+      if (pageCount >= maxPages) break; // hard page-cap enforcement (base * multiplier)
       pageCount += 1;
+      // Polite jitter between sequential requests (skip before the very first).
+      if (pageCount > 1) await sleep(jitterDelayMs());
       const target = { canonicalPropertyName: cell.canonical_property_name, slug: cell.property_slug };
       const probeUrl = buildBookingRenderedDomUrl({ ...target, checkin: cell.checkin });
       const artifactDir = join(debugRootPath, `${cell.property_slug}_${cell.checkin}`);
@@ -142,6 +155,19 @@ async function collectLive(
       await writeFile(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
       await writeFile(join(artifactDir, "visible_text.txt"), bodyText.slice(0, 250_000), "utf8");
       await writeFile(join(artifactDir, "preview_row.json"), JSON.stringify(previewRow, null, 2), "utf8");
+
+      // Detect a rate-limit/block signal and back off (never bypass). Stop the
+      // source after repeated consecutive blocks so we stay polite at volume.
+      const block = classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
+      if (block !== null) {
+        consecutiveBlocks += 1;
+        await sleep(backoffDelayMs(backoffAttempt));
+        backoffAttempt += 1;
+        if (shouldEarlyStop(consecutiveBlocks)) break;
+      } else {
+        consecutiveBlocks = 0;
+        backoffAttempt = 0;
+      }
     }
   } finally {
     await context.close().catch(() => undefined);
@@ -160,15 +186,16 @@ async function run(): Promise<PreviewResult> {
   mkdirSync(debugPath, { recursive: true });
 
   const gate = readGate(process.env);
-  const dates = selectPreviewDates(todayUtcYmd(), PEAK_DATE);
-  const targetMatrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates);
-  const pageCap = enforcePageCap(targetMatrix);
+  const multiplier = resolveCrawlVolumeMultiplier(process.env);
+  const dates = selectPreviewDates(todayUtcYmd(), PEAK_DATE, multiplier);
+  const targetMatrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, multiplier);
+  const pageCap = enforcePageCap(targetMatrix, multiplier);
 
   let previewRows: PreviewRow[] = [];
   let liveExecuted = false;
   if (gate.live_collection_authorized) {
     liveExecuted = true;
-    previewRows = await collectLive(pageCap.selected, debugPath, generatedAtJst, 35_000);
+    previewRows = await collectLive(pageCap.selected, debugPath, generatedAtJst, 35_000, scaleCap(MAX_PAGES, multiplier));
   }
 
   const classificationSummary = summarizeClassification(previewRows);
@@ -190,7 +217,7 @@ async function run(): Promise<PreviewResult> {
     decision,
     source_phase: SOURCE_PHASE,
     gate,
-    max_pages: MAX_PAGES,
+    max_pages: scaleCap(MAX_PAGES, multiplier),
     page_cap: pageCap,
     target_matrix: targetMatrix,
     selected_targets: pageCap.selected,
@@ -225,6 +252,7 @@ async function run(): Promise<PreviewResult> {
 run()
   .then((result) => {
     console.log(`decision=${result.decision}`);
+    console.log(`crawl_volume_multiplier=${resolveCrawlVolumeMultiplier(process.env)}`);
     console.log(`live_collection_executed=${result.safety_confirmation.live_collection_executed}`);
     console.log(`page_cap_respected=${result.safety_confirmation.page_cap_respected}`);
     console.log(`requested_pages=${result.page_cap.requested}`);

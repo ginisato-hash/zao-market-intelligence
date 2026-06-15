@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { VERIFIED_BOOKING_TARGETS } from "../services/autoRunnerBookingPreview";
 import { VERIFIED_JALAN_TARGETS } from "../services/autoRunnerMarketRefresh";
+import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
 import {
   buildScopePlan,
   renderPlanCsv,
@@ -87,7 +88,8 @@ function run(): void {
   const runDate = todayJstYmd();
   mkdirSync(resolve(REPORT_DIR), { recursive: true });
 
-  const plan = buildScopePlan({ runDateIso: runDate, properties: buildProperties(), config: DEFAULT_DEMAND_CONFIG });
+  const multiplier = resolveCrawlVolumeMultiplier(process.env);
+  const plan = buildScopePlan({ runDateIso: runDate, properties: buildProperties(), config: DEFAULT_DEMAND_CONFIG, multiplier });
 
   const reportPath = resolve(REPORT_DIR, `collection_scope_plan_${ts}.md`);
   const csvPath = resolve(REPORT_DIR, `collection_scope_plan_${ts}.csv`);
@@ -97,6 +99,8 @@ function run(): void {
   writeFileSync(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 
   console.log(`run_date_jst=${plan.run_date_jst}`);
+  console.log(`crawl_volume_multiplier=${multiplier}`);
+  console.log(`page_caps=${JSON.stringify(plan.page_caps)}`);
   console.log(`total_candidates=${plan.total_candidates}`);
   console.log(`selected=${plan.selected.length}`);
   console.log(`excluded_by_cap=${plan.excluded_by_cap.length}`);

@@ -148,3 +148,32 @@ describe("AUTO-RUNNER15X-A - safety scans", () => {
     expect(PACKAGE_JSON).toContain("auto-runner:market-refresh:planned-dry-run");
   });
 });
+
+describe("AUTO-RUNNER16X - dry-run reflects the crawl volume multiplier", () => {
+  it("baseline page caps are preserved at multiplier=1", () => {
+    const summary = buildDryRunSummary(
+      buildScopePlan({ runDateIso: RUN_DATE, properties: ALL_PROPS, config: CONFIG, multiplier: 1 }),
+      buildMappingIndex()
+    );
+    expect(summary.page_caps.total_daily_cap).toBe(60);
+    expect(summary.page_caps.booking_daily_cap).toBe(30);
+    expect(summary.page_caps.jalan_daily_cap).toBe(30);
+  });
+
+  it("multiplier=3 triples the dry-run page caps and stays within them", () => {
+    const summary = buildDryRunSummary(
+      buildScopePlan({ runDateIso: RUN_DATE, properties: ALL_PROPS, config: CONFIG, multiplier: 3 }),
+      buildMappingIndex()
+    );
+    expect(summary.page_caps.total_daily_cap).toBe(180);
+    expect(summary.page_caps.booking_daily_cap).toBe(90);
+    expect(summary.page_caps.jalan_daily_cap).toBe(90);
+    expect(summary.estimated_total_pages).toBeLessThanOrEqual(180);
+    const wouldCollect = summary.selected.filter((t) => t.dry_run_action === "would_collect");
+    expect(wouldCollect.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
+  });
+
+  it("package wires the market:refresh:dry-run alias", () => {
+    expect(PACKAGE_JSON).toContain("market:refresh:dry-run");
+  });
+});

@@ -10,18 +10,39 @@
 // No I/O, no network, no DB. Rakuten/Google are never collected (cap 0).
 
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
+import { scaleCap } from "./crawlVolumeConfig";
 
 export type RotatingBucket = "short" | "mid" | "long";
 
+export interface RotatingCaps {
+  total_pages_per_run: number;
+  booking_pages_per_run: number;
+  jalan_pages_per_run: number;
+  rakuten_pages_per_run: number;
+  google_hotels_pages_per_run: number;
+}
+
 // Phase AUTO-RUNNER16X-F — per-run caps expanded to 24 (Booking 12 / Jalan 12)
 // to cover the enlarged verified universe. Rakuten/Google remain 0 (never live).
-export const ROTATING_CAPS = {
+export const ROTATING_CAPS: RotatingCaps = {
   total_pages_per_run: 24,
   booking_pages_per_run: 12,
   jalan_pages_per_run: 12,
   rakuten_pages_per_run: 0,
   google_hotels_pages_per_run: 0
-} as const;
+};
+
+// Phase AUTO-RUNNER16X — scale the enabled-source rotating caps by the crawl
+// volume multiplier (cadence unchanged). Rakuten/Google always stay at 0.
+export function scaledRotatingCaps(multiplier: number): RotatingCaps {
+  return {
+    total_pages_per_run: scaleCap(ROTATING_CAPS.total_pages_per_run, multiplier),
+    booking_pages_per_run: scaleCap(ROTATING_CAPS.booking_pages_per_run, multiplier),
+    jalan_pages_per_run: scaleCap(ROTATING_CAPS.jalan_pages_per_run, multiplier),
+    rakuten_pages_per_run: 0,
+    google_hotels_pages_per_run: 0
+  };
+}
 
 export const SLOT_HOURS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22] as const;
 
@@ -72,7 +93,7 @@ export const MAX_TARGETS_PER_STAY_DATE_PER_RUN = 1;
 export interface RotatingPlan {
   slot_key: string;
   slot_index: number;
-  caps: typeof ROTATING_CAPS;
+  caps: RotatingCaps;
   selected: RotatingTarget[];
   excluded_by_cooldown: { source: string; property_slug: string; stay_date: string }[];
   excluded_by_cap: number;
@@ -194,7 +215,7 @@ export function buildRotatingPlan(input: {
   liveTargets: readonly MarketRefreshPropertyTarget[];
   config: RotatingDemandConfig;
   lastCollectedAt: ReadonlyMap<string, string>;
-  caps?: typeof ROTATING_CAPS;
+  caps?: RotatingCaps;
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
   const slot = buildSlot(input.runDateIso, input.slotHourJst);

@@ -37,6 +37,7 @@ import {
   type JalanProbeTarget
 } from "./jalanBoundedCollectionProbeImproved";
 import { liveJalanTargets } from "./marketRefreshTargetUniverse";
+import { datesPerProperty, expandedSaturdayCount, scaleCap } from "./crawlVolumeConfig";
 
 export type AutoRunnerMarketRefreshDecision =
   | "auto_runner_market_refresh_ready_not_run"
@@ -97,22 +98,23 @@ export interface MarketStateSummary {
   duplicate_row_id_count: number;
 }
 
-export function buildBookingPlan(todayIso: string): {
+export function buildBookingPlan(todayIso: string, multiplier = 1): {
   dates: string[];
   target_matrix: ReturnType<typeof buildBookingTargetMatrix>;
   selected_targets: ReturnType<typeof enforceBookingPageCap>["selected"];
   max_pages: number;
   page_cap_respected: boolean;
 } {
-  const dates = selectBookingPreviewDates(todayIso, PEAK_DATE);
-  const matrix = buildBookingTargetMatrix(VERIFIED_BOOKING_TARGETS, dates);
-  const cap = enforceBookingPageCap(matrix);
+  const dates = selectBookingPreviewDates(todayIso, PEAK_DATE, multiplier);
+  const matrix = buildBookingTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, multiplier);
+  const cap = enforceBookingPageCap(matrix, multiplier);
+  const maxPages = scaleCap(MAX_BOOKING_PAGES, multiplier);
   return {
     dates,
     target_matrix: matrix,
-    selected_targets: cap.selected.slice(0, MAX_BOOKING_PAGES),
-    max_pages: MAX_BOOKING_PAGES,
-    page_cap_respected: cap.selected.length <= MAX_BOOKING_PAGES
+    selected_targets: cap.selected.slice(0, maxPages),
+    max_pages: maxPages,
+    page_cap_respected: cap.selected.length <= maxPages
   };
 }
 
@@ -150,24 +152,24 @@ export const VERIFIED_JALAN_TARGETS = [
   { canonicalPropertyName: "JURIN", facilityTier: "tier_2" as const, jalanYadId: "yad332556", sourceUrl: "https://www.jalan.net/yad332556/" }
 ] as const;
 
-export function selectMarketRefreshDates(todayIso: string, peakDateIso = PEAK_DATE): string[] {
-  const dates = [...nextSaturdays(todayIso, 2), peakDateIso];
-  return [...new Set(dates)].slice(0, MAX_JALAN_DATES_PER_PROPERTY);
+export function selectMarketRefreshDates(todayIso: string, peakDateIso = PEAK_DATE, multiplier = 1): string[] {
+  const dates = [...nextSaturdays(todayIso, expandedSaturdayCount(multiplier)), peakDateIso];
+  return [...new Set(dates)].slice(0, datesPerProperty(multiplier));
 }
 
-export function buildJalanTargetMatrix(todayIso: string): JalanProbeTarget[] {
-  const dates = selectMarketRefreshDates(todayIso);
+export function buildJalanTargetMatrix(todayIso: string, multiplier = 1): JalanProbeTarget[] {
+  const dates = selectMarketRefreshDates(todayIso, PEAK_DATE, multiplier);
   const targets: JalanProbeTarget[] = [];
   for (const property of VERIFIED_JALAN_TARGETS.slice(0, MAX_JALAN_PROPERTIES)) {
     for (const checkin of dates) {
       targets.push(buildJalanProbeTarget({ ...property, checkin }));
     }
   }
-  return targets.slice(0, MAX_JALAN_PAGES);
+  return targets.slice(0, scaleCap(MAX_JALAN_PAGES, multiplier));
 }
 
-export function totalPageCapRespected(input: { bookingPages: number; jalanPages: number }): boolean {
-  return input.bookingPages + input.jalanPages <= MAX_TOTAL_LIVE_PAGES;
+export function totalPageCapRespected(input: { bookingPages: number; jalanPages: number }, multiplier = 1): boolean {
+  return input.bookingPages + input.jalanPages <= scaleCap(MAX_TOTAL_LIVE_PAGES, multiplier);
 }
 
 // Phase AUTO-RUNNER15X-B — planner-driven target builder.

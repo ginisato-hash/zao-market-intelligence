@@ -141,7 +141,8 @@ describe("AUTO-RUNNER16X-F - daily capacity reporting", () => {
 
   it("source-level checks use the rotating per-run caps (not the legacy 09:00 caps)", () => {
     // Without the rotating cap, MAX_BOOKING_PAGES (9) would reject all 12 booking rows.
-    expect(RUNNER_SOURCE).toContain("buildBookingSourceLevelCheck(bookingRows, ROTATING_CAPS.booking_pages_per_run)");
-    expect(RUNNER_SOURCE).toContain("buildJalanSourceLevelCheck(jalanRows, ROTATING_CAPS.jalan_pages_per_run)");
+    // caps = scaledRotatingCaps(multiplier), so the per-run caps scale with volume.
+    expect(RUNNER_SOURCE).toContain("buildBookingSourceLevelCheck(bookingRows, caps.booking_pages_per_run)");
+    expect(RUNNER_SOURCE).toContain("buildJalanSourceLevelCheck(jalanRows, caps.jalan_pages_per_run)");
   });
 });

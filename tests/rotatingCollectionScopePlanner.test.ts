@@ -7,6 +7,7 @@ import {
   buildRotatingPlan,
   buildSlot,
   candidateStayDates,
+  scaledRotatingCaps,
   type RotatingDemandConfig
 } from "../src/services/rotatingCollectionScopePlanner";
 import { liveTargets } from "../src/services/marketRefreshTargetUniverse";
@@ -188,5 +189,44 @@ describe("AUTO-RUNNER16X-F - expanded caps and capacity", () => {
 
   it("never selects Rakuten or Google", () => {
     expect(plan(8).selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
+  });
+});
+
+describe("AUTO-RUNNER16X - rotating crawl volume multiplier", () => {
+  function planWithCaps(slotHour: number, multiplier: number) {
+    return buildRotatingPlan({
+      runDateIso: RUN_DATE,
+      nowIso: `${RUN_DATE}T${String(slotHour).padStart(2, "0")}:00:00+09:00`,
+      slotHourJst: slotHour,
+      liveTargets: liveTargets(),
+      config: CONFIG,
+      lastCollectedAt: new Map<string, string>(),
+      caps: scaledRotatingCaps(multiplier)
+    });
+  }
+
+  it("scaledRotatingCaps triples enabled caps and keeps disabled sources at 0", () => {
+    expect(scaledRotatingCaps(1)).toEqual(ROTATING_CAPS);
+    const x3 = scaledRotatingCaps(3);
+    expect(x3.total_pages_per_run).toBe(72);
+    expect(x3.booking_pages_per_run).toBe(36);
+    expect(x3.jalan_pages_per_run).toBe(36);
+    expect(x3.rakuten_pages_per_run).toBe(0);
+    expect(x3.google_hotels_pages_per_run).toBe(0);
+  });
+
+  it("multiplier=3 selects strictly more pages than baseline, within scaled caps", () => {
+    const m1 = planWithCaps(8, 1);
+    const m3 = planWithCaps(8, 3);
+    expect(m3.caps.total_pages_per_run).toBe(72);
+    expect(m3.selected.length).toBeGreaterThan(m1.selected.length);
+    expect(m3.selected.length).toBeLessThanOrEqual(72);
+    expect(m3.selected_by_source["booking"] ?? 0).toBeLessThanOrEqual(36);
+    expect(m3.selected_by_source["jalan"] ?? 0).toBeLessThanOrEqual(36);
+  });
+
+  it("multiplier=3 never leaks Rakuten/Google into the higher-volume selection", () => {
+    const m3 = planWithCaps(8, 3);
+    expect(m3.selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
   });
 });

@@ -9,7 +9,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { VERIFIED_BOOKING_TARGETS } from "../services/autoRunnerBookingPreview";
-import { VERIFIED_JALAN_TARGETS } from "../services/autoRunnerMarketRefresh";
+import { VERIFIED_JALAN_TARGETS, buildBookingPlan, buildJalanTargetMatrix } from "../services/autoRunnerMarketRefresh";
+import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
 import { buildScopePlan, type DemandConfig, type PlannerProperty } from "../services/collectionScopePlanner";
 import {
   buildDryRunSummary,
@@ -73,15 +74,34 @@ function buildProperties(): PlannerProperty[] {
   ];
 }
 
+// Actual live-runner volume at a given multiplier (what the rotating job will
+// crawl), as opposed to the aspirational planner caps. targets = verified
+// properties (unchanged), checkins = distinct stay dates, requests = pages.
+function liveVolume(todayIso: string, multiplier: number): { targets: number; checkins: number; requests: number } {
+  const booking = buildBookingPlan(todayIso, multiplier);
+  const jalan = buildJalanTargetMatrix(todayIso, multiplier);
+  const checkins = new Set<string>([...booking.dates, ...jalan.map((t) => t.checkin)]);
+  const targets = new Set<string>([
+    ...booking.selected_targets.map((t) => t.property_slug),
+    ...jalan.map((t) => t.jalan_yad_id)
+  ]);
+  return { targets: targets.size, checkins: checkins.size, requests: booking.selected_targets.length + jalan.length };
+}
+
 function run(): void {
   const ts = timestamp();
   const generatedAtJst = jstNow();
   const runDate = todayJstYmd();
   mkdirSync(resolve(REPORT_DIR), { recursive: true });
 
-  const plan = buildScopePlan({ runDateIso: runDate, properties: buildProperties(), config: DEMAND_CONFIG });
+  const multiplier = resolveCrawlVolumeMultiplier(process.env);
+  const plan = buildScopePlan({ runDateIso: runDate, properties: buildProperties(), config: DEMAND_CONFIG, multiplier });
   const index = buildMappingIndex();
   const summary = buildDryRunSummary(plan, index);
+
+  // Actual rotating-job live volume: baseline (m=1) vs the configured multiplier.
+  const before = liveVolume(runDate, 1);
+  const after = liveVolume(runDate, multiplier);
 
   const reportPath = resolve(REPORT_DIR, `planned_market_refresh_${ts}.md`);
   const csvPath = resolve(REPORT_DIR, `planned_market_refresh_${ts}.csv`);
@@ -92,6 +112,20 @@ function run(): void {
   writeFileSync(jsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
 
   const wouldCollect = summary.selected.filter((t) => t.dry_run_action === "would_collect");
+  console.log(`decision=${summary.status}`);
+  console.log(`crawl_volume_multiplier=${multiplier}`);
+  console.log(`planned_targets_before=${before.targets}`);
+  console.log(`planned_targets_after=${after.targets}`);
+  console.log(`planned_checkins_before=${before.checkins}`);
+  console.log(`planned_checkins_after=${after.checkins}`);
+  console.log(`planned_requests_before=${before.requests}`);
+  console.log(`planned_requests_after=${after.requests}`);
+  console.log(`expected_rows_before=${before.requests}`);
+  console.log(`expected_rows_after=${after.requests}`);
+  console.log(`candidate_only_included=0`);
+  console.log(`unverified_targets_included=0`);
+  console.log(`pricing_output_generated=false`);
+  console.log(`pms_output_generated=false`);
   console.log(`status=${summary.status}`);
   console.log(`mode=${summary.mode}`);
   console.log(`live_collection_executed=${summary.live_collection_executed}`);

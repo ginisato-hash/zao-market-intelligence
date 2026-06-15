@@ -172,6 +172,8 @@
     "auto-runner:market-refresh:planned-dry-run": "node --import tsx src/scripts/runPlannedMarketRefreshDryRun.ts",
     "auto-runner:market-refresh-rotating": "node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
     "auto-runner:market-refresh-rotating:dry-run": "ZMI_ROTATING_DRY_RUN=1 node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
+    "market:refresh:dry-run": "node --import tsx src/scripts/runPlannedMarketRefreshDryRun.ts",
+    "market:refresh:live": "node --import tsx src/scripts/runAutoRunnerMarketRefresh.ts",
     "report:collection-coverage": "node --import tsx src/scripts/runCollectionCoverageReport.ts",
     "report:inventory-kpi": "node --import tsx src/scripts/runInventoryPressureReport.ts",
     "bi:web:export": "node --import tsx src/scripts/exportBiWebData.ts",

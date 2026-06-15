@@ -13,7 +13,12 @@ const envSchema = z.object({
   CLOUDFLARE_R2_BUCKET: z.string().default("zao-market-screenshots"),
   SCREENSHOT_STORAGE: z.enum(["local", "r2"]).default("local"),
   SCREENSHOT_STORAGE_BUCKET: z.string().default("zao-market-intelligence-local"),
-  LOCAL_SCREENSHOT_DIR: z.string().default(".data/screenshots")
+  LOCAL_SCREENSHOT_DIR: z.string().default(".data/screenshots"),
+  // Per-scheduled-run crawl volume multiplier. Default 1 (safe baseline); the
+  // always-on Mac rotating launchd job sets 3. Lenient parse + .catch(1) so an
+  // invalid value never crashes a scheduled run; resolveCrawlVolumeMultiplier
+  // (src/services/crawlVolumeConfig.ts) is the authority that clamps to [1, 5].
+  ZMI_CRAWL_VOLUME_MULTIPLIER: z.coerce.number().int().catch(1).default(1)
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

@@ -10,6 +10,7 @@ import {
   dayOffset,
   renderPlanCsv,
   renderPlanReport,
+  scaledPageCaps,
   scoreStayDate,
   selectWithinCaps,
   type DemandConfig,
@@ -182,5 +183,40 @@ describe("AUTO-RUNNER14X - rendering and safety", () => {
 
   it("package wires the planner script", () => {
     expect(PACKAGE_JSON).toContain("plan:collection-scope");
+  });
+});
+
+describe("AUTO-RUNNER16X - crawl volume multiplier", () => {
+  it("scaledPageCaps triples enabled caps and keeps disabled sources at 0", () => {
+    expect(scaledPageCaps(1)).toEqual(PAGE_CAPS);
+    const x3 = scaledPageCaps(3);
+    expect(x3.total_daily_cap).toBe(180);
+    expect(x3.booking_daily_cap).toBe(90);
+    expect(x3.jalan_daily_cap).toBe(90);
+    expect(x3.rakuten_daily_cap).toBe(0);
+    expect(x3.google_hotels_daily_cap).toBe(0);
+  });
+
+  it("baseline multiplier=1 is unchanged from the default plan", () => {
+    const base = buildScopePlan({ runDateIso: RUN_DATE, properties: PROPERTIES, config: CONFIG });
+    const m1 = buildScopePlan({ runDateIso: RUN_DATE, properties: PROPERTIES, config: CONFIG, multiplier: 1 });
+    expect(JSON.stringify(m1)).toBe(JSON.stringify(base));
+  });
+
+  it("multiplier=3 scales caps and selects strictly more without exceeding scaled caps", () => {
+    const m1 = buildScopePlan({ runDateIso: RUN_DATE, properties: PROPERTIES, config: CONFIG, multiplier: 1 });
+    const m3 = buildScopePlan({ runDateIso: RUN_DATE, properties: PROPERTIES, config: CONFIG, multiplier: 3 });
+    expect(m3.page_caps.total_daily_cap).toBe(180);
+    expect(m3.selected.length).toBeGreaterThan(m1.selected.length);
+    expect(m3.estimated_total_pages).toBeLessThanOrEqual(180);
+    expect(m3.selected_pages_by_source["booking"] ?? 0).toBeLessThanOrEqual(90);
+    expect(m3.selected_pages_by_source["jalan"] ?? 0).toBeLessThanOrEqual(90);
+  });
+
+  it("multiplier=3 never leaks disabled (candidate-only) sources into selection", () => {
+    const m3 = buildScopePlan({ runDateIso: RUN_DATE, properties: PROPERTIES, config: CONFIG, multiplier: 3 });
+    expect(m3.selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
+    expect(m3.selected_pages_by_source["rakuten"]).toBeUndefined();
+    expect(m3.selected_pages_by_source["google_hotels"]).toBeUndefined();
   });
 });

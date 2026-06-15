@@ -36,12 +36,20 @@ import { collectTarget, ensureJalanDebugDirs } from "./probeJalanBoundedCollecti
 import { liveTargets } from "../services/marketRefreshTargetUniverse";
 import {
   DAILY_PAGE_CAPACITY,
-  ROTATING_CAPS,
   buildRotatingPlan,
+  scaledRotatingCaps,
   type RotatingDemandConfig,
   type RotatingPlan,
   type RotatingTarget
 } from "../services/rotatingCollectionScopePlanner";
+import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
+import {
+  backoffDelayMs,
+  classifyBlock,
+  jitterDelayMs,
+  shouldEarlyStop,
+  sleep
+} from "../services/crawlThrottlePolicy";
 
 const HISTORY_DIR = ".data/history";
 const DB_PATH = ".data/zao-market-intelligence.sqlite";
@@ -145,8 +153,14 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
   const rows: BookingPreviewRow[] = [];
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
+  let consecutiveBlocks = 0;
+  let backoffAttempt = 0;
+  let index = 0;
   try {
     for (const t of targets) {
+      // Polite jitter between sequential requests (skip before the very first).
+      if (index > 0) await sleep(jitterDelayMs());
+      index += 1;
       const target = { canonicalPropertyName: t.canonical_property_name, slug: t.property_slug };
       const checkout = nextDay(t.checkin);
       const probeUrl = buildBookingRenderedDomUrl({ ...target, checkin: t.checkin });
@@ -168,6 +182,19 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
+
+      // Detect a rate-limit/block signal and back off (never bypass). Stop early
+      // after repeated consecutive blocks so the higher volume stays polite.
+      const block = classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
+      if (block !== null) {
+        consecutiveBlocks += 1;
+        await sleep(backoffDelayMs(backoffAttempt));
+        backoffAttempt += 1;
+        if (shouldEarlyStop(consecutiveBlocks)) break;
+      } else {
+        consecutiveBlocks = 0;
+        backoffAttempt = 0;
+      }
     }
   } finally { await context.close().catch(() => undefined); await browser.close().catch(() => undefined); }
   return rows;
@@ -188,6 +215,8 @@ async function run(): Promise<void> {
   mkdirSync(debugPath, { recursive: true });
 
   const env = process.env;
+  const multiplier = resolveCrawlVolumeMultiplier(env);
+  const caps = scaledRotatingCaps(multiplier);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
@@ -201,7 +230,7 @@ async function run(): Promise<void> {
     liveTargets: liveTargets(),
     config: DEMAND_CONFIG,
     lastCollectedAt: readLastCollectedAt(),
-    caps: ROTATING_CAPS
+    caps
   });
 
   let decision = dryRun || !liveMode ? "rotating_market_refresh_dry_run_ready" : "rotating_market_refresh_pending";
@@ -231,17 +260,35 @@ async function run(): Promise<void> {
     const browser = await chromium.launch({ headless: true });
     try {
       ensureJalanDebugDirs(resolve(debugPath, "jalan"));
+      let jalanConsecutiveBlocks = 0;
+      let jalanBackoffAttempt = 0;
+      let jalanIndex = 0;
       for (const target of jalanMatrix.targets) {
+        if (jalanIndex > 0) await sleep(jitterDelayMs());
+        jalanIndex += 1;
         const res = await collectTarget({ browser, target, runId, checkedAt: jst.iso, debugPath: resolve(debugPath, "jalan"), reportPath: "", csvPath: "" });
         jalanRows.push(res.row);
+
+        // Detect a rate-limit/block signal and back off; stop early after repeats.
+        const blockText = `${res.row.warning_flags};${res.row.error_reason};${res.pageResult.final_status}`;
+        const block = classifyBlock(res.pageResult.http_status, blockText);
+        if (block !== null) {
+          jalanConsecutiveBlocks += 1;
+          await sleep(backoffDelayMs(jalanBackoffAttempt));
+          jalanBackoffAttempt += 1;
+          if (shouldEarlyStop(jalanConsecutiveBlocks)) break;
+        } else {
+          jalanConsecutiveBlocks = 0;
+          jalanBackoffAttempt = 0;
+        }
       }
     } finally { await browser.close().catch(() => undefined); }
 
     // Source-level page caps must match the rotating per-run caps (16X-F: 12/12),
     // not the legacy 09:00-runner defaults (Booking 9), or a full source would be
     // rejected as page_cap_exceeded.
-    const bookingCheck = buildBookingSourceLevelCheck(bookingRows, ROTATING_CAPS.booking_pages_per_run);
-    const jalanCheck = buildJalanSourceLevelCheck(jalanRows, ROTATING_CAPS.jalan_pages_per_run);
+    const bookingCheck = buildBookingSourceLevelCheck(bookingRows, caps.booking_pages_per_run);
+    const jalanCheck = buildJalanSourceLevelCheck(jalanRows, caps.jalan_pages_per_run);
     appendPlan = buildAppendPlan({ bookingRows, jalanRows, existingKeys: readExistingKeys(), bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, bookingReportPath: "", bookingCsvPath: "" });
     sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
@@ -271,6 +318,7 @@ async function run(): Promise<void> {
   const post = readState();
   const out = {
     run_id: runId, generated_at_jst: jst.iso, decision, dry_run: dryRun || !liveMode,
+    crawl_volume_multiplier: multiplier,
     slot_key: plan.slot_key, slot_index: plan.slot_index,
     live_collection_executed: liveExecuted,
     booking_pages: plan.selected.filter((t) => t.source === "booking").length,

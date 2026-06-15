@@ -88,6 +88,43 @@ describe("AUTO-RUNNER10X - gates and caps", () => {
   });
 });
 
+describe("AUTO-RUNNER16X - crawl volume multiplier (live runner)", () => {
+  it("baseline multiplier=1 keeps the original ~24-page volume", () => {
+    const booking = buildBookingPlan("2026-06-06", 1);
+    const jalan = buildJalanTargetMatrix("2026-06-06", 1);
+    expect(booking.selected_targets.length).toBe(9);
+    expect(jalan.length).toBe(15);
+    expect(selectMarketRefreshDates("2026-06-06", undefined, 1)).toHaveLength(3);
+  });
+
+  it("multiplier=3 triples per-property dates and page volume to ~72", () => {
+    const booking = buildBookingPlan("2026-06-06", 3);
+    const jalan = buildJalanTargetMatrix("2026-06-06", 3);
+    expect(selectMarketRefreshDates("2026-06-06", undefined, 3)).toHaveLength(9);
+    expect(booking.selected_targets.length).toBe(27); // 3 properties x 9 dates
+    expect(jalan.length).toBe(45); // 5 properties x 9 dates
+    expect(booking.selected_targets.length + jalan.length).toBe(72);
+  });
+
+  it("multiplier=3 expands the verified properties' checkin window, not the property set", () => {
+    const jalan = buildJalanTargetMatrix("2026-06-06", 3);
+    expect(new Set(jalan.map((t) => t.jalan_yad_id)).size).toBeLessThanOrEqual(5);
+    const booking = buildBookingPlan("2026-06-06", 3);
+    expect(new Set(booking.selected_targets.map((t) => t.property_slug)).size).toBeLessThanOrEqual(3);
+  });
+
+  it("total page cap scales with the multiplier", () => {
+    expect(totalPageCapRespected({ bookingPages: 27, jalanPages: 45 }, 3)).toBe(true); // 72 <= 90
+    expect(totalPageCapRespected({ bookingPages: 27, jalanPages: 45 }, 1)).toBe(false); // 72 > 30
+    expect(totalPageCapRespected({ bookingPages: MAX_BOOKING_PAGES, jalanPages: MAX_JALAN_PAGES }, 1)).toBe(true);
+  });
+
+  it("Booking rows stay directional-or-excluded at higher volume (never direct)", () => {
+    const booking = buildBookingPlan("2026-06-06", 3);
+    expect(booking.selected_targets.every((t) => t.source === "booking")).toBe(true);
+  });
+});
+
 describe("AUTO-RUNNER10X - row policy", () => {
   it("7. Booking rows cannot be direct", () => {
     const plan = buildAppendPlan(basePlan({ bookingRows: [bookingRow()], jalanRows: [] }));

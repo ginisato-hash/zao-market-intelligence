@@ -317,3 +317,30 @@ describe("AUTO-RUNNER08X - decision matrix", () => {
     expect(PACKAGE_JSON).toContain("auto-runner:booking-preview");
   });
 });
+
+describe("AUTO-RUNNER16X - crawl volume multiplier (booking)", () => {
+  it("baseline multiplier=1 keeps 3 dates and a 9-page cap", () => {
+    expect(selectPreviewDates("2026-06-06", "2026-08-10", 1)).toHaveLength(3);
+    const matrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, selectPreviewDates("2026-06-06", "2026-08-10", 1), 1);
+    expect(matrix.length).toBe(9);
+    expect(enforcePageCap(matrix, 1).max_pages).toBe(MAX_PAGES);
+  });
+
+  it("multiplier=3 expands to 9 near-term dates and a 27-page cap", () => {
+    const dates = selectPreviewDates("2026-06-06", "2026-08-10", 3);
+    expect(dates).toHaveLength(9); // 8 upcoming Saturdays + peak
+    const matrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, 3);
+    expect(matrix.length).toBe(27); // 3 properties x 9 dates
+    const cap = enforcePageCap(matrix, 3);
+    expect(cap.max_pages).toBe(27);
+    expect(cap.selected.length).toBe(27);
+    expect(cap.respected).toBe(true);
+  });
+
+  it("multiplier=3 keeps the verified property set fixed (only dates grow)", () => {
+    const dates = selectPreviewDates("2026-06-06", "2026-08-10", 3);
+    const matrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, 3);
+    expect(new Set(matrix.map((c) => c.property_slug)).size).toBe(3);
+    expect(matrix.every((c) => c.source === "booking")).toBe(true);
+  });
+});

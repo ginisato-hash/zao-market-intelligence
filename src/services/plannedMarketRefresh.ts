@@ -5,7 +5,7 @@
 // the DB, refreshes AI context, calls a browser, or emits pricing/PMS output.
 // The live runner (autoRunnerMarketRefresh.ts) is untouched.
 
-import { PAGE_CAPS, type Bucket, type PlannerSource, type PlannerTarget, type ScopePlan } from "./collectionScopePlanner";
+import { type Bucket, type PageCaps, type PlannerSource, type PlannerTarget, type ScopePlan } from "./collectionScopePlanner";
 import { VERIFIED_BOOKING_TARGETS } from "./autoRunnerBookingPreview";
 import { VERIFIED_JALAN_TARGETS } from "./autoRunnerMarketRefresh";
 
@@ -59,7 +59,7 @@ export interface DryRunSummary {
   pages_by_bucket: Record<string, number>;
   targets_by_bucket: Record<string, number>;
   targets_by_source: Record<string, number>;
-  page_caps: typeof PAGE_CAPS;
+  page_caps: PageCaps;
   roadmap: readonly string[];
   recommended_next_action: string;
 }
@@ -172,7 +172,7 @@ export function buildDryRunSummary(plan: ScopePlan, index: MappingIndex): DryRun
     pages_by_bucket: countPages(wouldCollect, (t) => t.bucket),
     targets_by_bucket: countTargets(wouldCollect, (t) => t.bucket),
     targets_by_source: countTargets(wouldCollect, (t) => t.source),
-    page_caps: PAGE_CAPS,
+    page_caps: plan.page_caps,
     roadmap: ROADMAP,
     recommended_next_action: recommended
   };

@@ -41,6 +41,14 @@ import {
   type JalanImprovedPreviewRow
 } from "../services/jalanBoundedCollectionProbeImproved";
 import { collectTarget, type PageResult } from "./probeJalanBoundedCollectionImproved";
+import { resolveCrawlVolumeMultiplier } from "../services/crawlVolumeConfig";
+import {
+  backoffDelayMs,
+  classifyBlock,
+  jitterDelayMs,
+  shouldEarlyStop,
+  sleep
+} from "../services/crawlThrottlePolicy";
 
 const HISTORY_DIR = ".data/history";
 const DB_PATH = ".data/zao-market-intelligence.sqlite";
@@ -94,6 +102,17 @@ interface RunnerOutput {
   db_sync_result: CommandResult | { skipped: true; reason: string };
   ai_context_result: CommandResult | { skipped: true; reason: string };
   post_run_validation: Record<string, unknown>;
+  monitoring: {
+    crawl_volume_multiplier: number;
+    planned_requests: number;
+    executed_requests: number;
+    successful_observations: number;
+    failed_observations: number;
+    excluded_observations: number;
+    captcha_or_login_wall_count: number;
+    source_success_rate: { booking: number; jalan: number };
+    property_coverage_count: number;
+  };
   safety_confirmation: ReturnType<typeof buildSafetyConfirmation>;
   report_path: string;
   json_path: string;
@@ -281,8 +300,14 @@ async function runJalanCollection(input: {
   const browser = await chromium.launch({ headless: true });
   const rows: JalanImprovedPreviewRow[] = [];
   const pageResults: PageResult[] = [];
+  let consecutiveBlocks = 0;
+  let backoffAttempt = 0;
   try {
+    let index = 0;
     for (const target of input.targets) {
+      // Polite jitter between sequential requests (skip before the very first).
+      if (index > 0) await sleep(jitterDelayMs());
+      index += 1;
       const result = await collectTarget({
         browser,
         target,
@@ -294,6 +319,20 @@ async function runJalanCollection(input: {
       });
       rows.push(result.row);
       pageResults.push(result.pageResult);
+
+      // Detect a rate-limit/block signal and back off (never bypass). Stop the
+      // source after repeated consecutive blocks so we stay polite at volume.
+      const blockText = `${result.row.warning_flags};${result.row.error_reason};${result.pageResult.final_status}`;
+      const block = classifyBlock(result.pageResult.http_status, blockText);
+      if (block !== null) {
+        consecutiveBlocks += 1;
+        await sleep(backoffDelayMs(backoffAttempt));
+        backoffAttempt += 1;
+        if (shouldEarlyStop(consecutiveBlocks)) break;
+      } else {
+        consecutiveBlocks = 0;
+        backoffAttempt = 0;
+      }
     }
   } finally {
     await browser.close().catch(() => undefined);
@@ -317,18 +356,20 @@ async function run(): Promise<RunnerOutput> {
   mkdirSync(debugPath, { recursive: true });
 
   const gate = evaluateMarketRefreshGates(process.env);
+  const multiplier = resolveCrawlVolumeMultiplier(process.env);
   const preflight = readState();
   const preflightOk = preflight.history_rows > 0 && preflight.duplicate_row_id_count === 0;
   const plannerDriven = process.env["PLANNER_DRIVEN_MARKET_REFRESH"] === "1";
   let bookingPlan: ReturnType<typeof buildBookingPlan>;
   let jalanTargets: ReturnType<typeof buildJalanTargetMatrix>;
   if (plannerDriven) {
-    // Phase AUTO-RUNNER15X-B: use planner-selected targets.
+    // Phase AUTO-RUNNER15X-B: use planner-selected targets. The crawl volume
+    // multiplier scales the planner caps so more targets are selected per run.
     const props: PlannerProperty[] = [
       ...Array.from(buildMappingIndex().booking.entries()).map(([slug, name]) => ({ source: "booking" as const, property_slug: slug, canonical_property_name: name })),
       ...Array.from(buildMappingIndex().jalan.entries()).map(([yadId, name]) => ({ source: "jalan" as const, property_slug: yadId, canonical_property_name: name }))
     ];
-    const scopePlan = buildScopePlan({ runDateIso: todayUtcYmd(), properties: props, config: PLANNER_DEMAND_CONFIG });
+    const scopePlan = buildScopePlan({ runDateIso: todayUtcYmd(), properties: props, config: PLANNER_DEMAND_CONFIG, multiplier });
     const bookingSlugs = scopePlan.selected.filter((t) => t.source === "booking" && t.can_collect).map((t) => t.property_slug);
     const jalanYadIds = scopePlan.selected.filter((t) => t.source === "jalan" && t.can_collect).map((t) => t.property_slug);
     const plannerBooking = buildPlannerDrivenBookingPlan(bookingSlugs, todayUtcYmd());
@@ -336,9 +377,9 @@ async function run(): Promise<RunnerOutput> {
     bookingPlan = plannerBooking;
     jalanTargets = plannerJalan.targets;
   } else {
-    // Fixed live target behavior (unchanged from AUTO-RUNNER10X/11Y).
-    bookingPlan = buildBookingPlan(todayUtcYmd());
-    jalanTargets = buildJalanTargetMatrix(todayUtcYmd());
+    // Fixed live target behavior (AUTO-RUNNER10X/11Y) scaled by the multiplier.
+    bookingPlan = buildBookingPlan(todayUtcYmd(), multiplier);
+    jalanTargets = buildJalanTargetMatrix(todayUtcYmd(), multiplier);
   }
 
   let bookingRows: BookingPreviewRow[] = [];
@@ -371,6 +412,37 @@ async function run(): Promise<RunnerOutput> {
 
   const bookingSourceCheck = buildBookingSourceLevelCheck(bookingRows);
   const jalanSourceCheck = buildJalanSourceLevelCheck(jalanRows);
+
+  // §13 monitoring: how thick the run was and whether error rate degraded.
+  const bookingExecuted = bookingRows.length;
+  const jalanExecuted = jalanRows.length;
+  const bookingSuccess = bookingRows.filter((r) => r.classification === "directional").length;
+  const jalanSuccess = jalanRows.filter((r) => r.availability_status === "available").length;
+  const successfulObservations = bookingSuccess + jalanSuccess;
+  const excludedObservations =
+    bookingRows.filter((r) => r.classification === "excluded").length +
+    jalanRows.filter((r) => r.is_price_excluded_from_dp).length;
+  const executedRequests = bookingExecuted + jalanExecuted;
+  const monitoring: RunnerOutput["monitoring"] = {
+    crawl_volume_multiplier: multiplier,
+    planned_requests: bookingPlan.selected_targets.length + jalanTargets.length,
+    executed_requests: executedRequests,
+    successful_observations: successfulObservations,
+    failed_observations: Math.max(0, executedRequests - successfulObservations - excludedObservations),
+    excluded_observations: excludedObservations,
+    captcha_or_login_wall_count:
+      (bookingSourceCheck.source_level_captcha_or_block ? 1 : 0) +
+      (jalanSourceCheck.source_level_captcha_or_block ? 1 : 0),
+    source_success_rate: {
+      booking: bookingExecuted > 0 ? Number((bookingSuccess / bookingExecuted).toFixed(2)) : 0,
+      jalan: jalanExecuted > 0 ? Number((jalanSuccess / jalanExecuted).toFixed(2)) : 0
+    },
+    property_coverage_count: new Set([
+      ...bookingRows.map((r) => r.canonical_property_name),
+      ...jalanRows.map((r) => r.canonical_property_name)
+    ]).size
+  };
+
   const appendPlan = buildAppendPlan({
     bookingRows,
     jalanRows,
@@ -453,8 +525,9 @@ async function run(): Promise<RunnerOutput> {
     post_run_validation: {
       post_counts_aligned: postCountsAligned,
       duplicate_row_id_count: postState.duplicate_row_id_count,
-      total_page_cap_respected: totalPageCapRespected({ bookingPages: bookingRows.length, jalanPages: jalanRows.length })
+      total_page_cap_respected: totalPageCapRespected({ bookingPages: bookingRows.length, jalanPages: jalanRows.length }, multiplier)
     },
+    monitoring,
     safety_confirmation: safety,
     report_path: reportPath,
     json_path: jsonPath,
@@ -518,9 +591,18 @@ run()
   .then((result) => {
     console.log(`decision=${result.decision}`);
     console.log(`planner_driven=${(result as unknown as Record<string,unknown>)["planner_driven"] === true}`);
+    console.log(`crawl_volume_multiplier=${result.monitoring.crawl_volume_multiplier}`);
     console.log(`live_collection_executed=${result.safety_confirmation.live_booking_collection || result.safety_confirmation.live_jalan_collection}`);
     console.log(`booking_pages=${(result.booking_result["page_count"] as number | undefined) ?? 0}`);
     console.log(`jalan_pages=${(result.jalan_result["page_count"] as number | undefined) ?? 0}`);
+    console.log(`planned_requests=${result.monitoring.planned_requests}`);
+    console.log(`executed_requests=${result.monitoring.executed_requests}`);
+    console.log(`successful_observations=${result.monitoring.successful_observations}`);
+    console.log(`failed_observations=${result.monitoring.failed_observations}`);
+    console.log(`excluded_observations=${result.monitoring.excluded_observations}`);
+    console.log(`captcha_or_login_wall_count=${result.monitoring.captcha_or_login_wall_count}`);
+    console.log(`source_success_rate=${JSON.stringify(result.monitoring.source_success_rate)}`);
+    console.log(`property_coverage_count=${result.monitoring.property_coverage_count}`);
     console.log(`history_appended=${result.safety_confirmation.history_appended}`);
     console.log(`rows_appended=${result.append_result?.rows_written ?? 0}`);
     console.log(`db_synced=${result.safety_confirmation.db_synced}`);

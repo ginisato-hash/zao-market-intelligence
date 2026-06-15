@@ -11,13 +11,34 @@ export type PlannerSource = "booking" | "jalan" | "rakuten" | "google_hotels";
 
 export const ENABLED_SOURCES: ReadonlySet<PlannerSource> = new Set(["booking", "jalan"]);
 
-export const PAGE_CAPS = {
+export interface PageCaps {
+  total_daily_cap: number;
+  booking_daily_cap: number;
+  jalan_daily_cap: number;
+  rakuten_daily_cap: number;
+  google_hotels_daily_cap: number;
+}
+
+export const PAGE_CAPS: PageCaps = {
   total_daily_cap: 60,
   booking_daily_cap: 30,
   jalan_daily_cap: 30,
   rakuten_daily_cap: 0,
   google_hotels_daily_cap: 0
-} as const;
+};
+
+// Scale the enabled-source caps by the crawl volume multiplier (cadence
+// unchanged). Disabled sources (rakuten, google_hotels) always stay at 0.
+export function scaledPageCaps(multiplier: number): PageCaps {
+  const m = Number.isFinite(multiplier) && multiplier >= 1 ? Math.floor(multiplier) : 1;
+  return {
+    total_daily_cap: PAGE_CAPS.total_daily_cap * m,
+    booking_daily_cap: PAGE_CAPS.booking_daily_cap * m,
+    jalan_daily_cap: PAGE_CAPS.jalan_daily_cap * m,
+    rakuten_daily_cap: 0,
+    google_hotels_daily_cap: 0
+  };
+}
 
 export const BUCKET_RANGES = {
   short: { from: 0, to: 14 },
@@ -63,7 +84,7 @@ export interface ScopePlan {
   estimated_total_pages: number;
   selected_pages_by_source: Record<string, number>;
   selected_pages_by_bucket: Record<string, number>;
-  page_caps: typeof PAGE_CAPS;
+  page_caps: PageCaps;
 }
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -199,7 +220,7 @@ const BUCKET_ORDER: Record<Bucket, number> = { short: 0, mid: 1, long: 2 };
 
 // Selection order: priority desc, then short<mid<long, then Saturday/holiday
 // first, then round-robin source balance (stable by index for determinism).
-export function selectWithinCaps(candidates: readonly PlannerTarget[]): ScopePlan {
+export function selectWithinCaps(candidates: readonly PlannerTarget[], caps: PageCaps = PAGE_CAPS): ScopePlan {
   const runDate = candidates[0]?.run_date_jst ?? "";
   const collectable = candidates.filter((t) => t.can_collect);
   const disabled = candidates.filter((t) => !t.can_collect);
@@ -217,10 +238,10 @@ export function selectWithinCaps(candidates: readonly PlannerTarget[]): ScopePla
     .map((x) => x.t);
 
   const perSourceCap: Record<string, number> = {
-    booking: PAGE_CAPS.booking_daily_cap,
-    jalan: PAGE_CAPS.jalan_daily_cap,
-    rakuten: PAGE_CAPS.rakuten_daily_cap,
-    google_hotels: PAGE_CAPS.google_hotels_daily_cap
+    booking: caps.booking_daily_cap,
+    jalan: caps.jalan_daily_cap,
+    rakuten: caps.rakuten_daily_cap,
+    google_hotels: caps.google_hotels_daily_cap
   };
   const usedBySource: Record<string, number> = { booking: 0, jalan: 0, rakuten: 0, google_hotels: 0 };
   const selected: PlannerTarget[] = [];
@@ -228,7 +249,7 @@ export function selectWithinCaps(candidates: readonly PlannerTarget[]): ScopePla
   let total = 0;
   for (const t of ranked) {
     const pages = t.estimated_page_count;
-    if (total + pages > PAGE_CAPS.total_daily_cap || usedBySource[t.source]! + pages > (perSourceCap[t.source] ?? 0)) {
+    if (total + pages > caps.total_daily_cap || usedBySource[t.source]! + pages > (perSourceCap[t.source] ?? 0)) {
       excludedByCap.push(t);
       continue;
     }
@@ -246,7 +267,7 @@ export function selectWithinCaps(candidates: readonly PlannerTarget[]): ScopePla
     estimated_total_pages: total,
     selected_pages_by_source: countPages(selected, (t) => t.source),
     selected_pages_by_bucket: countPages(selected, (t) => t.bucket),
-    page_caps: PAGE_CAPS
+    page_caps: caps
   };
 }
 
@@ -254,8 +275,9 @@ export function buildScopePlan(input: {
   runDateIso: string;
   properties: readonly PlannerProperty[];
   config: DemandConfig;
+  multiplier?: number;
 }): ScopePlan {
-  return selectWithinCaps(buildCandidateTargets(input));
+  return selectWithinCaps(buildCandidateTargets(input), scaledPageCaps(input.multiplier ?? 1));
 }
 
 function countPages(targets: readonly PlannerTarget[], key: (t: PlannerTarget) => string): Record<string, number> {
