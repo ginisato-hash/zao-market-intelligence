@@ -40,6 +40,14 @@ function defaultPlan() {
   return buildStagePlan(sourceStages, evaluateGates({}));
 }
 
+// This repository's local history is append-only and grows on the always-on Mac.
+// Tests assert minimum known baselines and invariants, not exact moving counts.
+const MIN_HISTORY_ROWS_BASELINE = 686;
+const MIN_BOOKING_ROWS_BASELINE = 255;
+const MIN_BOOKING_DIRECTIONAL_BASELINE = 251;
+const MIN_JALAN_ROWS_BASELINE = 305;
+const MIN_RAKUTEN_ROWS_BASELINE = 126;
+
 describe("AUTO-RUNNER07E - state and gates", () => {
   it("Builds current state summary", () => {
     const history = summarizeHistoryState(resolve(__dirname, "../.data/history"));
@@ -48,18 +56,25 @@ describe("AUTO-RUNNER07E - state and gates", () => {
       dbRows: summarizeDbRowsReadOnly(resolve(__dirname, "../.data/zao-market-intelligence.sqlite")),
       aiContextRows: summarizeAiContextRows(resolve(__dirname, "../.data/ai-context/latest_market_snapshot.json"))
     });
-    expect(current.history_rows).toBe(686);
+    // History is append-only and grows on the always-on Mac. Assert minimum known
+    // baselines and invariants (non-negative internals, source rows sum within total,
+    // Booking never direct), not exact moving counts.
+    expect(current.history_rows).toBeGreaterThanOrEqual(MIN_HISTORY_ROWS_BASELINE);
     expect(current.db_rows).toBeGreaterThanOrEqual(0);
     expect(current.ai_context_rows).toBeGreaterThanOrEqual(0);
-    expect(current.booking.rows).toBe(255);
-    expect(current.booking.directional).toBe(251);
-    expect(current.booking.excluded).toBe(4);
-    expect(current.booking.direct).toBe(0);
-    expect(current.jalan.rows).toBe(305);
-    expect(current.jalan.directional).toBe(129);
-    expect(current.jalan.excluded).toBe(170);
-    expect(current.jalan.direct).toBe(6);
-    expect(current.rakuten.rows).toBe(126);
+    expect(current.booking.rows).toBeGreaterThanOrEqual(MIN_BOOKING_ROWS_BASELINE);
+    expect(current.booking.directional).toBeGreaterThanOrEqual(MIN_BOOKING_DIRECTIONAL_BASELINE);
+    expect(current.booking.excluded).toBeGreaterThanOrEqual(0);
+    expect(current.booking.direct).toBe(0); // Booking is directional/audit only — never direct
+    expect(current.jalan.rows).toBeGreaterThanOrEqual(MIN_JALAN_ROWS_BASELINE);
+    expect(current.jalan.directional).toBeGreaterThanOrEqual(0);
+    expect(current.jalan.excluded).toBeGreaterThanOrEqual(0);
+    expect(current.jalan.direct).toBeGreaterThanOrEqual(0);
+    expect(current.rakuten.rows).toBeGreaterThanOrEqual(MIN_RAKUTEN_ROWS_BASELINE);
+    // consistency invariants
+    expect(current.booking.directional + current.booking.excluded + current.booking.direct).toBeLessThanOrEqual(current.booking.rows);
+    expect(current.jalan.directional + current.jalan.excluded + current.jalan.direct).toBeLessThanOrEqual(current.jalan.rows);
+    expect(current.booking.rows + current.jalan.rows + current.rakuten.rows).toBeLessThanOrEqual(current.history_rows);
   });
 
   it("Reads gate values with missing gates defaulting to disabled", () => {

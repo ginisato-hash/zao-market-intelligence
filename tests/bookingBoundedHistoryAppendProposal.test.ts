@@ -182,23 +182,21 @@ describe("BOOKING-B10X — proposal row conversion", () => {
   });
 });
 
+// Minimum known baseline for the append-only local history (last committed on the
+// implementation Mac). The always-on Mac grows beyond this; assert >= not ==.
+const MIN_HISTORY_ROWS_BASELINE = 686;
+
 describe("BOOKING-B10X — history preflight", () => {
-  it("computes current history row count", () => {
-    // 160 baseline + 25 approved Booking observations appended in Phase BOOKING-B11X = 185,
-    // + 25 approved Jalan AUTO03B rows appended in Phase JALAN-AUTO05X = 210,
-    // + 9 approved Booking preview rows appended in Phase AUTO-RUNNER08Z = 219,
-    // + 24 approved rows (9 Booking + 15 Jalan) appended in Phase AUTO-RUNNER10X-PATCH = 243,
-    // + 3 intraday Booking price-change rows appended in Phase AUTO-RUNNER11Y first live run = 246,
-    // + 24 rows (9 Booking + 15 Jalan) from first scheduled 09:00 run on 2026-06-08 = 270,
-    // + 5 intraday Booking price-change rows from 15X-B controlled planner-driven live run = 275,
-    // + 24 rows each from scheduled 09:00 runs on 2026-06-09 and 2026-06-10 = 323,
-    // + 24 rows each from scheduled 09:00 runs on 2026-06-11, 2026-06-12, 2026-06-13 = 395,
-    // + 11 rows each from the AUTO-RUNNER16X-D manual live-append pilot (x2) on 2026-06-14 = 417,
-    // + 10 rows from the AUTO-RUNNER16X-E2 rotating-live cutover kickstart = 427,
-    // + AUTO-RUNNER16X-F expanded-universe kickstarts (jalan 12, then 12 booking +
-    //   12 jalan after the source-cap fix) = 463, + ongoing 2-hourly rotating-live
-    //   scheduled runs = 596.
-    expect(actualHistorySummary().total_rows).toBe(686);
+  it("computes current history row count (append-only, grows on the always-on Mac)", () => {
+    // This repository's local history is append-only and grows on the always-on
+    // Mac via 2-hourly rotating-live scheduled runs. Tests assert a minimum known
+    // baseline and invariants, not an exact moving count.
+    const summary = actualHistorySummary();
+    expect(summary.total_rows).toBeGreaterThanOrEqual(MIN_HISTORY_ROWS_BASELINE);
+    // per-shard counts are non-negative and sum to the total (consistency invariant)
+    const shardSum = Object.values(summary.rows_by_shard).reduce((n, v) => n + v, 0);
+    expect(Object.values(summary.rows_by_shard).every((v) => v >= 0)).toBe(true);
+    expect(shardSum).toBe(summary.total_rows);
   });
 
   it("computes touched shards and expected after-append rows", () => {

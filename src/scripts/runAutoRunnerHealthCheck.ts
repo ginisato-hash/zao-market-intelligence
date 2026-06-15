@@ -122,16 +122,16 @@ function run(): AutoRunnerHealthCheckOutput {
   // universe + cap-24 cutover kickstarts appended jalan 12 then booking 12 +
   // jalan 12 (427 -> 439 -> 463), then ongoing 2-hourly rotating-live scheduled
   // runs (463 -> 596).
-  const EXPECTED_BASELINE_ROW_COUNT = 686;
+  // History is append-only and grows on the always-on Mac, so this is a minimum
+  // baseline, not an exact match. The real mutation guard is mutation_check
+  // (before-vs-after diff), not this baseline; here we require counts to be at or
+  // above the known baseline and internally aligned (history == db == ai_context).
+  const MIN_BASELINE_ROW_COUNT = 686;
   const before = currentStateBefore.current_state_summary;
   const after = currentStateAfter.current_state_summary;
-  const stateCountsMatchExpected =
-    before.history_rows === EXPECTED_BASELINE_ROW_COUNT &&
-    before.db_rows === EXPECTED_BASELINE_ROW_COUNT &&
-    before.ai_context_rows === EXPECTED_BASELINE_ROW_COUNT &&
-    after.history_rows === EXPECTED_BASELINE_ROW_COUNT &&
-    after.db_rows === EXPECTED_BASELINE_ROW_COUNT &&
-    after.ai_context_rows === EXPECTED_BASELINE_ROW_COUNT;
+  const aligned = (s: { history_rows: number; db_rows: number; ai_context_rows: number }): boolean =>
+    s.history_rows >= MIN_BASELINE_ROW_COUNT && s.history_rows === s.db_rows && s.db_rows === s.ai_context_rows;
+  const stateCountsMatchExpected = aligned(before) && aligned(after);
   const decision = decideAutoRunnerHealthCheck({
     stateCountsMatchExpected,
     gates: gateEvaluation,
