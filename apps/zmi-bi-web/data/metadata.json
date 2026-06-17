@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-06-17T23:37:17+09:00",
-  "latest_collected_at_jst": "2026-06-17T22:00:06+09:00",
-  "history_rows_total": 1931,
-  "latest_observation_rows": 1065,
-  "unified_rows": 934,
-  "unified_rows_before_retention": 934,
+  "generated_at_jst": "2026-06-18T00:16:07+09:00",
+  "latest_collected_at_jst": "2026-06-18T00:00:01+09:00",
+  "history_rows_total": 1965,
+  "latest_observation_rows": 1073,
+  "unified_rows": 942,
+  "unified_rows_before_retention": 942,
   "distinct_properties": 24,
   "distinct_checkins": 108,
   "sources_included": [
@@ -40,14 +40,14 @@
   "dropped_past_period_keys_count": 0,
   "dropped_past_rows_count": 0,
   "availability_breakdown": {
-    "total": 934,
-    "available": 817,
+    "total": 942,
+    "available": 823,
     "sold_out": 104,
     "not_found": 2,
-    "excluded": 11,
-    "ota_unavailable_rate": 0.1129,
-    "data_missing_rate": 0.0139,
-    "data_reliability_rate": 0.9861
+    "excluded": 13,
+    "ota_unavailable_rate": 0.1122,
+    "data_missing_rate": 0.0159,
+    "data_reliability_rate": 0.9841
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out"
 }
