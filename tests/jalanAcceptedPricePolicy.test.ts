@@ -56,6 +56,56 @@ describe("Jalan accepted price policy", () => {
   });
 });
 
+describe("Jalan accepted price policy — confirmed room-only (meal-basis hardening)", () => {
+  const POLICY = "cheapest_confirmed_room_only_total_tax_included_safe_plan" as const;
+
+  it("selects a safe confirmed room-only candidate", () => {
+    const sel = selectAcceptedJalanPriceCandidate([safeCandidate(30000, "【素泊まり】シンプルプラン")], POLICY);
+    expect(sel.selectedCandidate?.priceValue).toBe(30000);
+    expect(sel.reason).toBe("selected_lowest_confirmed_room_only_total_tax_included_safe_plan");
+    expect(sel.roomOnlySafeCandidateCount).toBe(1);
+  });
+
+  it("rejects a safe breakfast-included candidate", () => {
+    const sel = selectAcceptedJalanPriceCandidate([safeCandidate(30000, "【朝食付き】お得プラン")], POLICY);
+    expect(sel.selectedCandidate).toBeUndefined();
+    expect(sel.reason).toBe("no_confirmed_room_only_safe_plan_candidates");
+    expect(sel.mealExcludedCandidateCount).toBe(1);
+  });
+
+  it("rejects a safe 2-meal candidate", () => {
+    const sel = selectAcceptedJalanPriceCandidate([safeCandidate(30000, "【1泊2食付き】会席")], POLICY);
+    expect(sel.selectedCandidate).toBeUndefined();
+    expect(sel.mealExcludedCandidateCount).toBe(1);
+  });
+
+  it("picks the room-only candidate over a cheaper meal-included one", () => {
+    const sel = selectAcceptedJalanPriceCandidate(
+      [safeCandidate(20000, "【朝食付き】激安"), safeCandidate(28000, "【素泊まり】スタンダード")],
+      POLICY
+    );
+    expect(sel.selectedCandidate?.priceValue).toBe(28000);
+    expect(sel.mealExcludedCandidateCount).toBe(1);
+    expect(sel.roomOnlySafeCandidateCount).toBe(1);
+  });
+
+  it("returns no candidate when only unknown meal basis exists", () => {
+    const sel = selectAcceptedJalanPriceCandidate([safeCandidate(30000, "シンプルステイ")], POLICY);
+    expect(sel.selectedCandidate).toBeUndefined();
+    expect(sel.reason).toBe("no_confirmed_room_only_safe_plan_candidates");
+    expect(sel.unknownMealBasisCandidateCount).toBe(1);
+  });
+
+  it("cheapest of multiple room-only candidates wins", () => {
+    const sel = selectAcceptedJalanPriceCandidate(
+      [safeCandidate(31000, "【素泊まり】A"), safeCandidate(25000, "【食事なし】B")],
+      POLICY
+    );
+    expect(sel.selectedCandidate?.priceValue).toBe(25000);
+    expect(sel.roomOnlySafeCandidateCount).toBe(2);
+  });
+});
+
 function safeCandidate(priceValue: number, planName: string): JalanPlanBlockCandidate {
   return {
     blockText: `${planName} 部屋タイプ・詳細 ◆ツイン◆禁煙 大人1名(税込) 合計(税込) 1泊 大人2名 ${priceValue / 2}円 ${priceValue.toLocaleString()}円 空室わずか`,
