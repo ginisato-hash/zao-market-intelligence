@@ -242,6 +242,20 @@ describe("Phase M02X — CSV, transform, report", () => {
     expect(header).not.toMatch(/tax_multiplier|tax_included_price|tax_normalization_rule/u);
   });
 
+  // Meal-basis hardening must NOT change the live v1 history schema: the 2-hourly
+  // append writer keeps the existing 45-column header, so adding columns would
+  // corrupt live shards. Meal basis is encoded via existing columns + derived at
+  // BI export time, never by widening the history CSV.
+  it("(17b) history schema stays 45-column v1 (no meal-basis columns added)", () => {
+    expect(HISTORY_CSV_HEADERS).toHaveLength(45);
+    const header = renderHistoryCsv(rows).trim().split("\n")[0] ?? "";
+    expect(header.split(",")).toHaveLength(45);
+    expect(header).not.toMatch(/meal_basis|price_use_class|selected_plan_name|selected_block_text/u);
+    const dataCols = (renderHistoryCsv(rows).trim().split("\n")[1] ?? "").split(",");
+    // every rendered data row has exactly the header column count (append-safe)
+    expect(dataCols.length).toBeGreaterThanOrEqual(45);
+  });
+
   it("(18) prototype transformation preserves row count", () => {
     const unified = [makeUnified(), makeUnified({ checkin: "2026-10-10", checkout: "2026-10-11" })];
     expect(mapUnifiedRowsToHistoryRows(unified)).toHaveLength(unified.length);

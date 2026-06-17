@@ -12,6 +12,7 @@
 // pricing / PMS output. The companion script performs the bounded live reads.
 
 import { createHash } from "node:crypto";
+import { classifyJalanMealBasis } from "./mealBasisClassification";
 import {
   buildJalanPlanUrl,
   buildJalanProbeTarget,
@@ -210,6 +211,33 @@ export function classifyImprovedCandidate(candidate: JalanImprovedExtractionCand
       warning_flags: warnings
     };
   }
+
+  // --- Meal-basis gate (confirmed policy): a priced Jalan row is DP-usable only
+  //     when the selected plan is CONFIRMED room-only. meal_included / unknown
+  //     meal basis are excluded from DP (price retained for audit, dp flags off).
+  //     Encoded via existing v1 columns only — no history schema change. ---
+  const mealText = [candidate.plan_name, candidate.room_name, candidate.room_or_plan_name, candidate.meal_condition, candidate.selected_block_text]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" \n ");
+  const meal = classifyJalanMealBasis(mealText);
+  if (meal.mealBasis !== "confirmed_room_only") {
+    const reason = meal.mealBasis === "meal_included" ? "meal_included_plan_excluded" : "unknown_meal_basis_excluded";
+    const cls = meal.mealBasis === "meal_included" ? "jalan_meal_included_excluded" : "jalan_unknown_meal_basis_excluded";
+    return {
+      availability_status: "available",
+      basis_confidence: "C",
+      dp_usage: "excluded",
+      source_classification: cls,
+      basis_note: `Price visible but meal_basis=${meal.mealBasis} (${meal.reason}); excluded from room-only DP per confirmed policy.`,
+      hard_exclusion_reason: reason,
+      direct_downgrade_reason: "",
+      directional_downgrade_reason: reason,
+      evidence_flags: flags,
+      warning_flags: [...warnings, reason, `meal_basis=${meal.mealBasis}`]
+    };
+  }
+  // Confirmed room-only: record the marker and continue to direct/directional.
+  warnings.push("meal_basis_confirmed_room_only", "meal_basis=confirmed_room_only");
 
   // --- Price visible. Compute the reason a row cannot be DIRECT. ---
   const directBlockers: string[] = [];

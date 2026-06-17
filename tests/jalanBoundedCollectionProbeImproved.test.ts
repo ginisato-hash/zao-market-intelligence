@@ -64,10 +64,10 @@ function target(checkin = "2026-07-18"): JalanProbeTarget {
 function candidate(overrides: Partial<JalanImprovedExtractionCandidate> = {}): JalanImprovedExtractionCandidate {
   return {
     facility_name: "ホテル喜らく",
-    room_or_plan_name: "和室プラン",
+    room_or_plan_name: "和室素泊まりプラン",
     room_name: "和室",
-    plan_name: "和室プラン",
-    meal_condition: "朝食付き",
+    plan_name: "和室素泊まりプラン",
+    meal_condition: "食事なし",
     availability_status: "available",
     price_total_tax_included: 22000,
     price_per_person: null,
@@ -78,8 +78,8 @@ function candidate(overrides: Partial<JalanImprovedExtractionCandidate> = {}): J
     property_identity_confirmed: true,
     screenshot_path: "/tmp/screenshot.png",
     source_url: "https://www.jalan.net/yad325153/plan/?stayYear=2026&stayMonth=07&stayDay=18&stayCount=1&roomCrack=200000&roomCount=1",
-    selected_block_text: "和室プラン 合計(税込) 22,000円 朝食付き",
-    page_text_excerpt: "ホテル喜らく 和室プラン 合計(税込) 22,000円 朝食付き",
+    selected_block_text: "和室素泊まりプラン 合計(税込) 22,000円 素泊まり",
+    page_text_excerpt: "ホテル喜らく 和室素泊まりプラン 合計(税込) 22,000円 素泊まり",
     error_reason: null,
     extraction_confidence: "high",
     ...overrides
@@ -274,6 +274,33 @@ describe("JALAN-AUTO03B - classification policy", () => {
     expect(result).toHaveProperty("direct_downgrade_reason");
     expect(result).toHaveProperty("directional_downgrade_reason");
     expect(result.direct_downgrade_reason).toContain("extraction_confidence_not_high");
+  });
+
+  // Meal-basis hardening (confirmed-policy): priced Jalan rows are DP-usable only
+  // when the selected plan is confirmed room-only; meal-included/unknown excluded.
+  it("confirmed room-only priced row is DP directional usable", () => {
+    const result = classifyImprovedCandidate(candidate({ extraction_confidence: "medium" }));
+    expect(result.dp_usage).toBe("directional");
+    expect(result.warning_flags).toContain("meal_basis_confirmed_room_only");
+  });
+
+  it("meal-included priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ plan_name: "【朝食付き】お得プラン", room_or_plan_name: "【朝食付き】お得プラン", meal_condition: "朝食付き", selected_block_text: "【朝食付き】お得プラン 合計(税込) 22,000円 朝食付き", page_text_excerpt: "ホテル喜らく 朝食付き 22,000円" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.source_classification).toBe("jalan_meal_included_excluded");
+    expect(result.hard_exclusion_reason).toBe("meal_included_plan_excluded");
+    expect(result.warning_flags).toContain("meal_included_plan_excluded");
+  });
+
+  it("unknown meal-basis priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ plan_name: "シンプルステイ", room_or_plan_name: "シンプルステイ", meal_condition: null, selected_block_text: "シンプルステイ 合計(税込) 22,000円", page_text_excerpt: "ホテル喜らく シンプルステイ 22,000円" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.source_classification).toBe("jalan_unknown_meal_basis_excluded");
+    expect(result.hard_exclusion_reason).toBe("unknown_meal_basis_excluded");
   });
 });
 
