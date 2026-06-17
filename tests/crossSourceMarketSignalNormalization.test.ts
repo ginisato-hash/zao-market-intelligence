@@ -268,6 +268,38 @@ describe("Phase M01X — Jalan → unified", () => {
     expect(row.sourcePropertyId).toBe("");
     expect(row.sourceSlugOrCode).toBe("");
   });
+
+  it("(§6a) omitted meal basis keeps useClass behavior and records unknown", () => {
+    const row = normalizeJalanToUnified(makeJalan(), PATHS);
+    expect(row.mealBasisClass).toBe("unknown_meal_basis");
+    expect(row.isPriceUsableForDpDirect).toBe(true); // legacy aggregate behavior preserved
+  });
+
+  it("(§6b) confirmed_room_only meal basis allows DP usability", () => {
+    const row = normalizeJalanToUnified(makeJalan({ mealBasis: "confirmed_room_only" }), PATHS);
+    expect(row.mealBasisClass).toBe("confirmed_room_only");
+    expect(row.isPriceUsableForDpDirect).toBe(true);
+    expect(row.isPriceExcludedFromDp).toBe(false);
+  });
+
+  it("(§6c) meal_included meal basis forces DP off even with a clean median", () => {
+    const row = normalizeJalanToUnified(makeJalan({ mealBasis: "meal_included" }), PATHS);
+    expect(row.mealBasisClass).toBe("meal_included");
+    expect(row.isPriceUsableForDpDirect).toBe(false);
+    expect(row.isPriceUsableForDpDirectional).toBe(false);
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.dpExclusionReason).toContain("jalan_meal_basis_not_confirmed_room_only");
+  });
+
+  it("(§6d) unknown_meal_basis (explicit) forces DP off", () => {
+    const row = normalizeJalanToUnified(makeJalan({ mealBasis: "unknown_meal_basis" }), PATHS);
+    expect(row.isPriceExcludedFromDp).toBe(true);
+  });
+
+  it("(§6e) booking is assumed_room_only, rakuten is unknown_meal_basis", () => {
+    expect(normalizeBookingToUnified(makeBooking(), PATHS).mealBasisClass).toBe("assumed_room_only");
+    expect(normalizeRakutenToUnified(makeRakuten(), PATHS).mealBasisClass).toBe("unknown_meal_basis");
+  });
 });
 
 describe("Phase M01X — DP gate invariants", () => {

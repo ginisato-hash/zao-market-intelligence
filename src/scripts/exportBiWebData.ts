@@ -60,6 +60,11 @@ function readHistory(): { rows: BiHistoryRow[]; total: number } {
     const ddi = idx("is_price_usable_for_dp_directional");
     const ti = idx("collected_at_jst");
     const tieri = idx("tier");
+    // Existing v1 columns used to derive meal basis at export time.
+    const scli = idx("source_classification");
+    const wfi = idx("warning_flags");
+    const bci = idx("basis_confidence");
+    const exi = idx("is_price_excluded_from_dp");
     for (const line of lines.slice(1)) {
       const c = parseCsvLine(line);
       total += 1;
@@ -74,7 +79,11 @@ function readHistory(): { rows: BiHistoryRow[]; total: number } {
         normalized_total_price: rawPrice === "" ? null : Number(rawPrice),
         is_price_usable_for_dp_directional: ddi >= 0 ? (c[ddi] ?? "").toLowerCase() === "true" : false,
         collected_at_jst: ti >= 0 ? (c[ti] ?? "") : "",
-        tier: tieri >= 0 ? (c[tieri] ?? "") : ""
+        tier: tieri >= 0 ? (c[tieri] ?? "") : "",
+        source_classification: scli >= 0 ? (c[scli] ?? "") : "",
+        warning_flags: wfi >= 0 ? (c[wfi] ?? "") : "",
+        basis_confidence: bci >= 0 ? (c[bci] ?? "") : "",
+        is_price_excluded_from_dp: exi >= 0 ? (c[exi] ?? "").toLowerCase() === "true" : false
       });
     }
   }

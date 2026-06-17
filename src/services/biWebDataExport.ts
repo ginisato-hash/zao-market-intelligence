@@ -45,6 +45,44 @@ export interface BiHistoryRow {
   is_price_usable_for_dp_directional: boolean;
   collected_at_jst: string;
   tier: string;
+  // Existing v1 columns used to DERIVE meal basis at export time (history schema
+  // is NOT widened). Optional so older callers/tests still construct rows.
+  source_classification?: string;
+  warning_flags?: string;
+  basis_confidence?: string;
+  is_price_excluded_from_dp?: boolean;
+}
+
+export type MealBasisBi = "assumed_room_only" | "confirmed_room_only" | "meal_included" | "unknown_meal_basis";
+
+// Derive meal basis for a BI row from existing v1 columns (§5.3/§5.4):
+//  - Booking → assumed_room_only by policy.
+//  - Jalan → confirmed_room_only ONLY if the new meal gate marked it
+//    (warning_flags / source_classification); meal-included if so classified;
+//    otherwise unknown (this is how LEGACY pre-gate Jalan rows are kept OUT of
+//    room-only DP pricing — they lack the confirmed marker).
+//  - Rakuten/other → unknown.
+export function deriveBiMealBasis(row: BiHistoryRow): MealBasisBi {
+  if (row.source === "booking") return "assumed_room_only";
+  if (row.source === "jalan") {
+    const wf = row.warning_flags ?? "";
+    const sc = row.source_classification ?? "";
+    if (wf.includes("meal_basis=confirmed_room_only") || wf.includes("meal_basis_confirmed_room_only") || sc === "jalan_confirmed_room_only_total_tax_included") {
+      return "confirmed_room_only";
+    }
+    if (sc === "jalan_meal_included_excluded" || wf.includes("meal_included_plan_excluded")) return "meal_included";
+    return "unknown_meal_basis";
+  }
+  return "unknown_meal_basis";
+}
+
+// A row contributes a room-only price sample only when it is room-only eligible
+// (Booking assumed_room_only or Jalan confirmed_room_only), DP-directional usable,
+// not excluded, and carries a price.
+export function isRoomOnlyPriceSample(row: BiHistoryRow): boolean {
+  const meal = deriveBiMealBasis(row);
+  const eligible = meal === "assumed_room_only" || meal === "confirmed_room_only";
+  return eligible && row.is_price_usable_for_dp_directional && row.is_price_excluded_from_dp !== true && row.normalized_total_price !== null;
 }
 
 export interface UnifiedRow {
@@ -59,13 +97,40 @@ export interface UnifiedRow {
   no_data_source_count: number;
   median_directional_price: number | null;
   avg_directional_price: number | null;
-  price_sample_count: number;
-  price_confidence: Confidence;
+  price_sample_count: number; // room-only usable price samples (redesigned meaning)
+  price_confidence: Confidence; // overall, meal-basis aware (no longer just sampleCount)
+  price_basis_confidence: Confidence; // quality of the price reading itself
+  price_coverage_confidence: Confidence; // multi-source corroboration of room-only price
+  meal_basis_summary: string; // e.g. "assumed_room_only:1,confirmed_room_only:1,unknown:0"
+  room_only_price_sample_count: number;
+  excluded_meal_price_sample_count: number;
+  unknown_meal_basis_count: number;
   inventory_confidence: Confidence;
   latest_collected_at_jst: string;
   is_room_only_comp: boolean;
   is_own_property: boolean;
   tier: string;
+}
+
+// §7.2 price reading quality.
+export function priceBasisConfidence(input: { roomOnlySampleCount: number; strongBookingRoomOnly: boolean }): Confidence {
+  if (input.roomOnlySampleCount >= 2 || input.strongBookingRoomOnly) return "high";
+  if (input.roomOnlySampleCount === 1) return "medium";
+  return "low";
+}
+
+// §7.3 multi-source corroboration.
+export function priceCoverageConfidence(roomOnlySourceCount: number): Confidence {
+  if (roomOnlySourceCount >= 2) return "high";
+  if (roomOnlySourceCount === 1) return "medium";
+  return "low";
+}
+
+// §7.4 overall — Booking single strong room-only price can be high.
+export function overallPriceConfidence(input: { basis: Confidence; coverage: Confidence; strongBookingRoomOnly: boolean; roomOnlySampleCount: number }): Confidence {
+  if ((input.basis === "high" && input.coverage === "high") || input.strongBookingRoomOnly) return "high";
+  if (input.roomOnlySampleCount >= 1) return "medium";
+  return "low";
 }
 
 export function normalizeAvailability(status: string): UnifiedAvailability {
@@ -108,11 +173,6 @@ export function latestObservations(rows: readonly BiHistoryRow[]): BiHistoryRow[
   return [...latest.values()];
 }
 
-function priceConfidence(sampleCount: number): Confidence {
-  if (sampleCount >= 2) return "high";
-  if (sampleCount === 1) return "medium";
-  return "low";
-}
 function inventoryConfidence(sourceCount: number): Confidence {
   if (sourceCount >= 2) return "high";
   if (sourceCount === 1) return "medium";
@@ -150,12 +210,30 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
     const unified: UnifiedAvailability =
       available > 0 ? "available" : soldOut > 0 ? "sold_out" : rows.some((r) => normalizeAvailability(r.availability_status) === "not_found") ? "not_found" : "excluded";
 
-    // Directional prices only from usable rows; price only meaningful when bookable.
-    const prices = unified === "available"
-      ? rows.filter((r) => r.is_price_usable_for_dp_directional && r.normalized_total_price !== null).map((r) => r.normalized_total_price!)
-      : [];
+    // Room-only DP prices: only meal-basis-eligible (Booking assumed / Jalan
+    // confirmed) usable rows, and only when bookable. Legacy/unknown/meal-included
+    // Jalan prices are excluded here (meal-basis hardening §13.6).
+    const roomOnlyRows = unified === "available" ? rows.filter((r) => isRoomOnlyPriceSample(r)) : [];
+    const prices = roomOnlyRows.map((r) => r.normalized_total_price!);
     const med = median(prices);
     const avg = prices.length === 0 ? null : Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+
+    // Meal-basis summary across all sources for this property/checkin.
+    const mealCounts = { assumed_room_only: 0, confirmed_room_only: 0, meal_included: 0, unknown_meal_basis: 0 };
+    let excludedMealPriced = 0;
+    for (const r of rows) {
+      const mb = deriveBiMealBasis(r);
+      mealCounts[mb] += 1;
+      if (mb === "meal_included" && r.normalized_total_price !== null) excludedMealPriced += 1;
+    }
+    const roomOnlySourceCount = new Set(roomOnlyRows.map((r) => r.source)).size;
+    const strongBookingRoomOnly = roomOnlyRows.some(
+      (r) => r.source === "booking" && (r.basis_confidence === "A" || r.basis_confidence === "B" || r.basis_confidence === "directional_candidate_basis")
+    );
+    const basisConf = priceBasisConfidence({ roomOnlySampleCount: prices.length, strongBookingRoomOnly });
+    const coverageConf = priceCoverageConfidence(roomOnlySourceCount);
+    const overallConf = overallPriceConfidence({ basis: basisConf, coverage: coverageConf, strongBookingRoomOnly, roomOnlySampleCount: prices.length });
+    const mealSummary = `assumed_room_only:${mealCounts.assumed_room_only},confirmed_room_only:${mealCounts.confirmed_room_only},meal_included:${mealCounts.meal_included},unknown:${mealCounts.unknown_meal_basis}`;
 
     const latestCollected = rows.reduce((acc, r) => (r.collected_at_jst > acc ? r.collected_at_jst : acc), "");
     const sourceCount = new Set(rows.map((r) => r.source)).size;
@@ -174,7 +252,13 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
       median_directional_price: med,
       avg_directional_price: avg,
       price_sample_count: prices.length,
-      price_confidence: priceConfidence(prices.length),
+      price_confidence: overallConf,
+      price_basis_confidence: basisConf,
+      price_coverage_confidence: coverageConf,
+      meal_basis_summary: mealSummary,
+      room_only_price_sample_count: prices.length,
+      excluded_meal_price_sample_count: excludedMealPriced,
+      unknown_meal_basis_count: mealCounts.unknown_meal_basis,
       inventory_confidence: inventoryConfidence(sourceCount),
       latest_collected_at_jst: latestCollected,
       is_room_only_comp: (ROOM_ONLY_COMPS as readonly string[]).includes(first.canonical_property_name),
@@ -248,6 +332,12 @@ export const BI_CSV_HEADERS = [
   "avg_directional_price",
   "price_sample_count",
   "price_confidence",
+  "price_basis_confidence",
+  "price_coverage_confidence",
+  "meal_basis_summary",
+  "room_only_price_sample_count",
+  "excluded_meal_price_sample_count",
+  "unknown_meal_basis_count",
   "inventory_confidence",
   "latest_collected_at_jst",
   "is_room_only_comp",
@@ -275,6 +365,12 @@ export function renderUnifiedCsv(rows: readonly UnifiedRow[]): string {
       r.avg_directional_price === null ? "" : String(r.avg_directional_price),
       String(r.price_sample_count),
       r.price_confidence,
+      r.price_basis_confidence,
+      r.price_coverage_confidence,
+      r.meal_basis_summary,
+      String(r.room_only_price_sample_count),
+      String(r.excluded_meal_price_sample_count),
+      String(r.unknown_meal_basis_count),
       r.inventory_confidence,
       r.latest_collected_at_jst,
       String(r.is_room_only_comp),

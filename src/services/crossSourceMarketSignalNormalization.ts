@@ -63,6 +63,10 @@ export interface UnifiedMarketSignalRow {
   sourceComputedTotal: number | null;
   sourceTaxOrFeeClassification: string;
   sourceClassification: string;
+  // Cross-source meal basis (§6): booking=assumed_room_only by policy,
+  // rakuten=unknown, jalan=confirmed_room_only only when the upstream gate said
+  // so. A non-room-only jalan meal basis forces DP usability off here too.
+  mealBasisClass: string;
   isPriceUsableForDpDirect: boolean;
   isPriceUsableForDpDirectional: boolean;
   isPriceExcludedFromDp: boolean;
@@ -106,6 +110,7 @@ export const UNIFIED_CSV_HEADERS = [
   "source_computed_total",
   "source_tax_or_fee_classification",
   "source_classification",
+  "meal_basis_class",
   "is_price_usable_for_dp_direct",
   "is_price_usable_for_dp_directional",
   "is_price_excluded_from_dp",
@@ -199,6 +204,7 @@ export function normalizeBookingToUnified(row: BookingB04XRow, paths: SourceArti
     sourceComputedTotal: row.sourceComputedTotalWithTaxFee,
     sourceTaxOrFeeClassification: row.sourceTaxBasisClassification,
     sourceClassification: row.sourceClassification,
+    mealBasisClass: "assumed_room_only", // §0.1 Booking treated as room-only by policy
     ...flags,
     warningFlags: "",
     sourceReportPath: paths.reportPath,
@@ -300,6 +306,7 @@ export function normalizeRakutenToUnified(input: RakutenDayInput, paths: SourceA
     sourceComputedTotal: input.computed2AdultTotal,
     sourceTaxOrFeeClassification: input.sourcePriceBasis,
     sourceClassification: input.classification,
+    mealBasisClass: "unknown_meal_basis", // Rakuten meal basis is not parsed; never room-only-confirmed
     ...flags,
     warningFlags,
     sourceReportPath: paths.reportPath,
@@ -326,6 +333,12 @@ export interface JalanDpSafeInput {
   excludedQualityRowsCount: number;
   reason: string;
   warningFlags: string;
+  // §6/§0.2 optional cross-source meal basis for this Jalan signal. When set to
+  // anything other than "confirmed_room_only", DP usability is forced off. When
+  // omitted (legacy aggregate), the existing useClass-based behavior is kept and
+  // the meal basis is recorded as unknown — production property-level Jalan rows
+  // are already meal-gated upstream in jalanBoundedCollectionProbeImproved.
+  mealBasis?: string;
 }
 
 const JALAN_HARD_EXCLUDE_FLAG = /coupon|price_basis_suspicious|per_person_or_basis_mismatch/u;
@@ -335,8 +348,16 @@ export function normalizeJalanToUnified(input: JalanDpSafeInput, paths: SourceAr
   const hasMedian = input.dpSafeMedianJpy !== null;
   const couponOrSuspicious = JALAN_HARD_EXCLUDE_FLAG.test(input.warningFlags);
 
+  // §0.2: if a meal basis is supplied and it is not confirmed room-only, this
+  // Jalan signal can never be a room-only DP price — force it off regardless of
+  // useClass. Omitted meal basis (legacy aggregate) keeps prior behavior.
+  const mealBasisClass = input.mealBasis ?? "unknown_meal_basis";
+  const mealBasisBlocks = input.mealBasis !== undefined && input.mealBasis !== "confirmed_room_only";
+
   let rawFlags: { direct: boolean; directional: boolean; excluded: boolean; reason: string | null };
-  if (input.useClass === "exclude" || couponOrSuspicious || !hasMedian) {
+  if (mealBasisBlocks) {
+    rawFlags = { direct: false, directional: false, excluded: true, reason: `jalan_meal_basis_not_confirmed_room_only:${mealBasisClass}` };
+  } else if (input.useClass === "exclude" || couponOrSuspicious || !hasMedian) {
     const reason = couponOrSuspicious
       ? "coupon_or_price_basis_suspicious"
       : input.reason || "excluded_not_dp_safe";
@@ -382,6 +403,7 @@ export function normalizeJalanToUnified(input: JalanDpSafeInput, paths: SourceAr
     sourceComputedTotal: input.dpSafeMedianJpy,
     sourceTaxOrFeeClassification: "",
     sourceClassification: input.useClass,
+    mealBasisClass,
     ...flags,
     warningFlags: input.warningFlags,
     sourceReportPath: paths.reportPath,
@@ -572,6 +594,7 @@ export function renderUnifiedCsv(rows: UnifiedMarketSignalRow[]): string {
       numOrEmpty(row.sourceComputedTotal),
       row.sourceTaxOrFeeClassification,
       row.sourceClassification,
+      row.mealBasisClass,
       bool(row.isPriceUsableForDpDirect),
       bool(row.isPriceUsableForDpDirectional),
       bool(row.isPriceExcludedFromDp),

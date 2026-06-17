@@ -77,6 +77,7 @@ function makeUnified(overrides: Partial<UnifiedMarketSignalRow> = {}): UnifiedMa
     sourceComputedTotal: 60_360,
     sourceTaxOrFeeClassification: "booking_room_total_official_base_plus_tax_fee_adder",
     sourceClassification: "booking_b04a_official_base_plus_adder_numeric",
+    mealBasisClass: "assumed_room_only",
     isPriceUsableForDpDirect: false,
     isPriceUsableForDpDirectional: true,
     isPriceExcludedFromDp: false,
