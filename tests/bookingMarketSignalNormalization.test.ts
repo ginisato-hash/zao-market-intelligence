@@ -52,6 +52,9 @@ function makeB04ARow(overrides: Partial<B04ARow> = {}): B04ARow {
     soldOutTextPresent: false,
     primaryRoomName: "スタンダードツインルーム",
     primaryRateName: "食事なし",
+    primaryRoomCardText: "スタンダードツインルーム ツインベッド 人数: 2 食事なし ￥60,060",
+    primaryOccupancyHint: "人数: 2",
+    primaryBedHint: "ツインベッド",
     primaryPriceRaw: "￥60,060",
     primaryPriceNumeric: 60_060,
     officialTaxFeeTextRaw: "＋税・手数料（￥300）",
@@ -196,10 +199,31 @@ describe("Phase B04X — room-basis (two-person standard room) gate", () => {
     expect(row.isPriceUsableForDpDirect).toBe(true);
     expect(row.isPriceExcludedFromDp).toBe(false);
     expect(row.basisNote).toContain("room_basis=confirmed_two_person_standard_room");
+    expect(row.sourceClassification).toContain("booking_assumed_room_only_two_person_standard");
+  });
+
+  it("(R1b) room-card context can confirm two-person standard even when room_name is empty", () => {
+    const row = normalize({
+      basisConfidence: "A",
+      primaryRoomName: "",
+      primaryRateName: "",
+      primaryRoomCardText: "Standard Queen Room 1 queen bed Sleeps 2 ￥60,060",
+      primaryOccupancyHint: "Sleeps 2",
+      primaryBedHint: "1 queen"
+    });
+    expect(row.isPriceUsableForDpDirect).toBe(true);
+    expect(row.isPriceExcludedFromDp).toBe(false);
+    expect(row.basisNote).toContain("room_basis=confirmed_two_person_standard_room");
   });
 
   it("(R2) unknown room is excluded from DP", () => {
-    const row = normalize({ primaryRoomName: "おまかせ", primaryRateName: "" });
+    const row = normalize({
+      primaryRoomName: "おまかせ",
+      primaryRateName: "",
+      primaryRoomCardText: "おまかせ 人数: 2 ￥60,060",
+      primaryOccupancyHint: "人数: 2",
+      primaryBedHint: ""
+    });
     expect(row.isPriceExcludedFromDp).toBe(true);
     expect(row.isPriceUsableForDpDirect).toBe(false);
     expect(row.isPriceUsableForDpDirectional).toBe(false);
@@ -229,6 +253,19 @@ describe("Phase B04X — room-basis (two-person standard room) gate", () => {
     const row = normalize({ basisConfidence: "A", primaryRoomName: "スイートルーム" });
     expect(row.isPriceExcludedFromDp).toBe(true);
     expect(row.dpExclusionReason).toBe("excluded_room_type_family_or_suite");
+  });
+
+  it("(R6b) suite in room-card context wins over otherwise usable price", () => {
+    const row = normalize({
+      basisConfidence: "A",
+      primaryRoomName: "",
+      primaryRoomCardText: "Family Suite 2 beds Sleeps 2 ￥60,060",
+      primaryOccupancyHint: "Sleeps 2",
+      primaryBedHint: "2 beds"
+    });
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.dpExclusionReason).toBe("excluded_room_type_family_or_suite");
+    expect(row.sourceClassification).toBe("booking_room_type_excluded");
   });
 
   it("(R7) room gate does not override a non-priced sold_out row", () => {

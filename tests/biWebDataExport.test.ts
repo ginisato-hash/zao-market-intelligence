@@ -313,6 +313,18 @@ describe("ZMI BI export - flags, csv, metadata", () => {
     expect(BI_CSV_HEADERS.length).toBe(28);
   });
 
+  it("csv summaries do not shift numeric columns for comma-split sanity checks", () => {
+    const csv = renderUnifiedCsv(unifyByPropertyCheckin([row({ source: "booking", basis_note: BOOKING_ROOM_OK })]));
+    const [headerLine, rowLine] = csv.trim().split("\n");
+    const header = headerLine!.split(",");
+    const cells = rowLine!.split(",");
+    expect(cells[header.indexOf("meal_basis_summary")]!).toContain("assumed_room_only:1");
+    expect(cells[header.indexOf("meal_basis_summary")]!).toContain(";");
+    expect(cells[header.indexOf("room_basis_summary")]!).toContain("confirmed_two_person_standard_room:1");
+    expect(cells[header.indexOf("room_only_price_sample_count")]).toBe("1");
+    expect(cells[header.indexOf("two_person_room_price_sample_count")]).toBe("1");
+  });
+
   it("metadata contains latest_collected_at_jst and policy, no external data", () => {
     const latest = latestObservations([row({ source: "jalan", collected_at_jst: "2026-06-14T12:00:00+09:00" }), row({ source: "booking", collected_at_jst: "2026-06-14T08:00:00+09:00" })]);
     const unified = unifyByPropertyCheckin(latest);

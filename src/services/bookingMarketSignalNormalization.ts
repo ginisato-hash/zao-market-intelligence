@@ -258,7 +258,11 @@ export function normalizeBookingMarketSignalRow(
   // unavailable rows keep their existing gate, reason, and inventory signal.
   // Encoded via existing v1 columns (source_classification / dp_exclusion_reason
   // / basis_note) — no history schema change.
-  const roomBasis = classifyRoomBasisFromParts({ roomName: row.primaryRoomName, rateName: row.primaryRateName });
+  const roomBasis = classifyRoomBasisFromParts({
+    roomName: row.primaryRoomName,
+    rateName: row.primaryRateName,
+    blockText: [row.primaryRoomCardText, row.primaryOccupancyHint, row.primaryBedHint].filter(Boolean).join(" ")
+  });
   const roomGateApplies = price.normalizedTotalPrice !== null && availability.availabilityStatus === "available";
   let finalGate = gate;
   let sourceClassification: string = row.classification;
@@ -274,6 +278,7 @@ export function normalizeBookingMarketSignalRow(
     sourceClassification = "booking_room_type_excluded";
     basisNote = `${row.basisNote} | room_basis=${roomBasis.roomBasis} (${roomBasis.reason}); excluded from two-person-standard DP per confirmed policy.`;
   } else if (roomGateApplies && isTwoPersonStandardRoom(roomBasis)) {
+    sourceClassification = `${row.classification};booking_assumed_room_only_two_person_standard`;
     basisNote = `${row.basisNote} | meal_basis=assumed_room_only;room_basis=confirmed_two_person_standard_room`;
   }
 

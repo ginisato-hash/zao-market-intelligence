@@ -48,6 +48,9 @@ export interface SelectorPresence {
 export interface BookingRateCardCandidate {
   roomName: string;
   rateName: string;
+  roomCardText: string;
+  occupancyHint: string;
+  bedHint: string;
   priceRaw: string;
   priceNumeric: number;
   taxChargeText: string;
@@ -78,6 +81,9 @@ export interface BookingRateCardRow {
   soldOutTextPresent: boolean;
   primaryRoomName: string;
   primaryRateName: string;
+  primaryRoomCardText: string;
+  primaryOccupancyHint: string;
+  primaryBedHint: string;
   primaryPriceRaw: string;
   primaryPriceNumeric: number | null;
   primaryTaxChargeText: string;
@@ -119,6 +125,9 @@ export const BOOKING_RATE_CARD_CSV_HEADERS = [
   "sold_out_text_present",
   "primary_room_name",
   "primary_rate_name",
+  "primary_room_card_text",
+  "primary_occupancy_hint",
+  "primary_bed_hint",
   "primary_price_raw",
   "primary_price_numeric",
   "primary_tax_charge_text",
@@ -197,9 +206,13 @@ export function extractPrimaryRateCardCandidate(text: string): BookingRateCardCa
     candidates.find((c) => /人数:\s*2|大人\s*2|大人2名|2名/u.test(c.contextBeforeAfter)) ??
     candidates[0];
   if (!preferred) return null;
+  const roomContext = extractRoomContextAroundPrice(normalized, preferred);
   return {
-    roomName: extractRoomNameBeforePrice(normalized, preferred),
+    roomName: roomContext.roomName,
     rateName: extractRateNameAroundPrice(preferred.contextBeforeAfter),
+    roomCardText: roomContext.roomCardText,
+    occupancyHint: roomContext.occupancyHint,
+    bedHint: roomContext.bedHint,
     priceRaw: preferred.rawText,
     priceNumeric: preferred.numericValue,
     taxChargeText: extractTaxChargeText(preferred.contextBeforeAfter),
@@ -334,6 +347,9 @@ export function buildBookingRateCardRow(input: {
     soldOutTextPresent,
     primaryRoomName: candidate?.roomName ?? "",
     primaryRateName: candidate?.rateName ?? "",
+    primaryRoomCardText: candidate?.roomCardText ?? "",
+    primaryOccupancyHint: candidate?.occupancyHint ?? "",
+    primaryBedHint: candidate?.bedHint ?? "",
     primaryPriceRaw: candidate?.priceRaw ?? "",
     primaryPriceNumeric: candidate?.priceNumeric ?? null,
     primaryTaxChargeText: candidate?.taxChargeText ?? "",
@@ -386,6 +402,9 @@ export function renderBookingRateCardCsv(rows: BookingRateCardRow[]): string {
       bool(row.soldOutTextPresent),
       row.primaryRoomName,
       row.primaryRateName,
+      row.primaryRoomCardText,
+      row.primaryOccupancyHint,
+      row.primaryBedHint,
       row.primaryPriceRaw,
       row.primaryPriceNumeric === null ? "" : String(row.primaryPriceNumeric),
       row.primaryTaxChargeText,
@@ -475,13 +494,62 @@ export function totalSelectorPresence(items: SelectorPresence[]): SelectorPresen
   return out;
 }
 
+export function extractRoomContextAroundPrice(text: string, candidate: BookingPriceCandidate): {
+  roomName: string;
+  roomCardText: string;
+  occupancyHint: string;
+  bedHint: string;
+} {
+  const idx = text.indexOf(candidate.rawText);
+  const before = idx >= 0 ? text.slice(Math.max(0, idx - 700), idx) : candidate.contextBeforeAfter;
+  const after = idx >= 0 ? text.slice(idx, Math.min(text.length, idx + candidate.rawText.length + 260)) : candidate.contextBeforeAfter;
+  const roomCardText = compactRoomContext(`${before} ${after}`).slice(0, 900);
+  return {
+    roomName: extractRoomNameBeforePrice(roomCardText, candidate),
+    roomCardText,
+    occupancyHint: extractOccupancyHint(roomCardText),
+    bedHint: extractBedHint(roomCardText)
+  };
+}
+
 function extractRoomNameBeforePrice(text: string, candidate: BookingPriceCandidate): string {
   const idx = text.indexOf(candidate.rawText);
-  const before = idx >= 0 ? text.slice(Math.max(0, idx - 350), idx) : candidate.contextBeforeAfter;
+  const before = idx >= 0 ? text.slice(Math.max(0, idx - 500), idx) : text;
   const markers = before.split(/部屋タイプ\s+宿泊人数\s+本日の料金\s+(?:確認事項\s+)?(?:部屋数を選択|数を選択)|部屋数を選択\s+0\s+1\s+\([^)]+\)/u);
   const segment = markers.at(-1) ?? before;
+  const direct = extractRoomNameByToken(segment);
+  if (direct) return direct;
   const lines = segment.split(/\s{2,}|\t|\n/u).map((part) => part.trim()).filter(Boolean);
-  return lines.find((line) => !/人数:|平方メートル|エアコン|テレビ|詳細|ベッド|布団|客室/u.test(line))?.slice(0, 120) ?? "";
+  return lines.find((line) => /ツイン|ダブル|クイーン|キング|シングル|セミダブル|トリプル|ファミリー|スイート|Twin|Double|Queen|King|Single|Triple|Family|Suite/iu.test(line))?.slice(0, 160) ?? "";
+}
+
+function extractRoomNameByToken(text: string): string {
+  const jp = /([^\s]{0,24}(?:ツイン|ダブル|クイーン|キング|シングル|セミダブル|トリプル|ファミリー|スイート|ドミトリー|カプセル)[^\s]{0,32}(?:ルーム|客室|部屋)?[^\s]{0,16})/u.exec(text);
+  if (jp?.[1]) return cleanupRoomName(jp[1]);
+  const en = /([A-Za-z][A-Za-z0-9\s-]{0,48}(?:Twin|Double|Queen|King|Single|Semi-Double|Small Double|Triple|Family|Suite|Dormitory|Capsule)[A-Za-z0-9\s-]{0,36}(?:Room|Suite)?)/iu.exec(text);
+  return en?.[1] ? cleanupRoomName(en[1]) : "";
+}
+
+function extractOccupancyHint(text: string): string {
+  const match = /(人数:\s*\d+|大人\s*\d+\s*名|宿泊人数\s*\d+|定員\s*\d+\s*名|sleeps\s*\d+|guests?:\s*\d+)/iu.exec(text);
+  return match?.[0]?.slice(0, 80) ?? "";
+}
+
+function extractBedHint(text: string): string {
+  const match = /(ツインベッド|ダブルベッド|クイーンベッド|キングベッド|シングルベッド|セミダブルベッド|2\s*beds?|two\s*beds?|1\s*queen|1\s*king|twin\s*beds?|double\s*beds?|queen\s*beds?|king\s*beds?|small\s*double\s*beds?)/iu.exec(text);
+  return match?.[0]?.slice(0, 120) ?? "";
+}
+
+function cleanupRoomName(text: string): string {
+  return text
+    .replace(/^(?:部屋タイプ|客室タイプ|ルームタイプ)\s*/u, "")
+    .replace(/\s*(?:人数:\s*\d+|大人\s*\d+\s*名|宿泊人数).*$/u, "")
+    .trim()
+    .slice(0, 160);
+}
+
+function compactRoomContext(text: string): string {
+  return text.replace(/\s+/gu, " ").trim();
 }
 
 function extractRateNameAroundPrice(context: string): string {

@@ -102,6 +102,9 @@ export interface B04ARow {
   soldOutTextPresent: boolean;
   primaryRoomName: string;
   primaryRateName: string;
+  primaryRoomCardText: string;
+  primaryOccupancyHint: string;
+  primaryBedHint: string;
   primaryPriceRaw: string;
   primaryPriceNumeric: number | null;
   officialTaxFeeTextRaw: string;
@@ -149,6 +152,9 @@ export const BOOKING_B04A_CSV_HEADERS = [
   "sold_out_text_present",
   "primary_room_name",
   "primary_rate_name",
+  "primary_room_card_text",
+  "primary_occupancy_hint",
+  "primary_bed_hint",
   "primary_price_raw",
   "primary_price_numeric",
   "official_tax_fee_text_raw",
@@ -348,6 +354,9 @@ export function mapRateCardRowToB04ARow(
     soldOutTextPresent: rateCardRow.soldOutTextPresent,
     primaryRoomName: rateCardRow.primaryRoomName,
     primaryRateName: rateCardRow.primaryRateName,
+    primaryRoomCardText: rateCardRow.primaryRoomCardText,
+    primaryOccupancyHint: rateCardRow.primaryOccupancyHint,
+    primaryBedHint: rateCardRow.primaryBedHint,
     primaryPriceRaw: rateCardRow.primaryPriceRaw,
     primaryPriceNumeric: rateCardRow.primaryPriceNumeric,
     officialTaxFeeTextRaw: rateCardRow.primaryTaxChargeText,
@@ -445,6 +454,9 @@ export function renderB04ACsv(rows: B04ARow[]): string {
       bool(row.soldOutTextPresent),
       row.primaryRoomName,
       row.primaryRateName,
+      row.primaryRoomCardText,
+      row.primaryOccupancyHint,
+      row.primaryBedHint,
       row.primaryPriceRaw,
       row.primaryPriceNumeric === null ? "" : String(row.primaryPriceNumeric),
       row.officialTaxFeeTextRaw,

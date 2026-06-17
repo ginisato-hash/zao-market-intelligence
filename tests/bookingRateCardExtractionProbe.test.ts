@@ -87,11 +87,41 @@ describe("rate-card and basis extraction", () => {
     expect(candidate?.taxChargeText).toContain("税・手数料");
   });
 
+  it.each([
+    ["Standard Twin Room", "Twin"],
+    ["Double Room", "Double"],
+    ["Queen Room 1 queen bed", "Queen"],
+    ["King Room 1 king bed", "King"],
+    ["デラックス ツインルーム 禁煙", "ツイン"],
+    ["ダブルルーム", "ダブル"]
+  ])("extracts two-person standard room context: %s", (roomText, expectedToken) => {
+    const candidate = extractPrimaryRateCardCandidate(text(`${roomText} 2 beds 人数: 2 ￥61,000 ＋税・手数料（￥300）`));
+    expect(`${candidate?.roomName} ${candidate?.roomCardText} ${candidate?.bedHint}`).toContain(expectedToken);
+    expect(candidate?.occupancyHint).toMatch(/人数:\s*2|大人2名/u);
+  });
+
+  it.each([
+    "Single Room",
+    "Small Double Room",
+    "Semi-double Room",
+    "Triple Room",
+    "Family Room",
+    "Suite",
+    "Dormitory Room",
+    "Capsule Room"
+  ])("extracts excluded room context: %s", (roomText) => {
+    const candidate = extractPrimaryRateCardCandidate(text(`${roomText} 人数: 2 ￥61,000 ＋税・手数料（￥300）`));
+    expect(`${candidate?.roomName} ${candidate?.roomCardText}`).toContain(roomText.split(" ")[0]!);
+  });
+
   it("detects explicit tax-included basis with confidence A only when scope is explicit", () => {
     const basis = classifyBookingTaxBasis({
       candidate: {
         roomName: "room",
         rateName: "",
+        roomCardText: "room",
+        occupancyHint: "",
+        bedHint: "",
         priceRaw: "￥60,060",
         priceNumeric: 60060,
         taxChargeText: "税・手数料込み",
@@ -122,6 +152,9 @@ describe("rate-card and basis extraction", () => {
       candidate: {
         roomName: "room",
         rateName: "",
+        roomCardText: "room",
+        occupancyHint: "",
+        bedHint: "",
         priceRaw: "￥60,060",
         priceNumeric: 60060,
         taxChargeText: "込 消費税/VAT10 %",

@@ -439,6 +439,12 @@ function csvCell(value: string): string {
   return /[",\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
 }
 
+function csvSummaryCell(value: string): string {
+  // Keep exported BI CSV friendly to simple comma-split sanity checks while the
+  // in-memory summary strings retain comma-separated semantics for tests/code.
+  return value.replace(/,/gu, ";");
+}
+
 export function renderUnifiedCsv(rows: readonly UnifiedRow[]): string {
   const body = rows.map((r) =>
     [
@@ -457,11 +463,11 @@ export function renderUnifiedCsv(rows: readonly UnifiedRow[]): string {
       r.price_confidence,
       r.price_basis_confidence,
       r.price_coverage_confidence,
-      r.meal_basis_summary,
+      csvSummaryCell(r.meal_basis_summary),
       String(r.room_only_price_sample_count),
       String(r.excluded_meal_price_sample_count),
       String(r.unknown_meal_basis_count),
-      r.room_basis_summary,
+      csvSummaryCell(r.room_basis_summary),
       String(r.two_person_room_price_sample_count),
       String(r.excluded_room_type_price_sample_count),
       String(r.unknown_room_basis_count),
