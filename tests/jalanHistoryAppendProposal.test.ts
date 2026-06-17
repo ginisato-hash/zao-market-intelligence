@@ -51,9 +51,9 @@ function target(checkin = "2026-07-18", yad = "yad328232"): JalanProbeTarget {
 function candidate(overrides: Partial<JalanImprovedExtractionCandidate> = {}): JalanImprovedExtractionCandidate {
   return {
     facility_name: "ル・ベール蔵王",
-    room_or_plan_name: "【素泊まり】蔵王満喫プラン",
-    room_name: "和室7.5畳",
-    plan_name: "【素泊まり】蔵王満喫プラン",
+    room_or_plan_name: "【素泊まり】ツイン 蔵王満喫プラン",
+    room_name: "禁煙ツインルーム",
+    plan_name: "【素泊まり】ツイン 蔵王満喫プラン",
     meal_condition: "素泊まり",
     availability_status: "available",
     price_total_tax_included: 25000,
@@ -65,8 +65,8 @@ function candidate(overrides: Partial<JalanImprovedExtractionCandidate> = {}): J
     property_identity_confirmed: true,
     screenshot_path: "/tmp/shot.png",
     source_url: "https://www.jalan.net/yad328232/plan/",
-    selected_block_text: "【素泊まり】蔵王満喫プラン 合計(税込) 25,000円 素泊まり",
-    page_text_excerpt: "ル・ベール蔵王 【素泊まり】蔵王満喫プラン 合計(税込) 25,000円",
+    selected_block_text: "【素泊まり】ツイン 蔵王満喫プラン 合計(税込) 25,000円 素泊まり",
+    page_text_excerpt: "ル・ベール蔵王 【素泊まり】ツイン 蔵王満喫プラン 合計(税込) 25,000円",
     error_reason: null,
     extraction_confidence: "high",
     ...overrides

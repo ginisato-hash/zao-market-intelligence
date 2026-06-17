@@ -13,6 +13,7 @@
 
 import { createHash } from "node:crypto";
 import { classifyJalanMealBasis } from "./mealBasisClassification";
+import { classifyRoomBasis, roomBasisDpExclusionReason } from "./roomBasisClassification";
 import {
   buildJalanPlanUrl,
   buildJalanProbeTarget,
@@ -238,6 +239,34 @@ export function classifyImprovedCandidate(candidate: JalanImprovedExtractionCand
   }
   // Confirmed room-only: record the marker and continue to direct/directional.
   warnings.push("meal_basis_confirmed_room_only", "meal_basis=confirmed_room_only");
+
+  // --- Room-basis gate (two-person standard room policy): a priced confirmed
+  //     room-only Jalan row is DP-usable only when the selected room is a
+  //     two-person standard room (twin/double/queen/king/2-beds). Single,
+  //     semi-double, triple/large, family/suite, and unknown room types are
+  //     excluded from DP (price retained for audit, dp flags off). Encoded via
+  //     existing v1 columns only — no history schema change. ---
+  const roomText = [candidate.room_name, candidate.plan_name, candidate.room_or_plan_name, candidate.selected_block_text]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" \n ");
+  const room = classifyRoomBasis(roomText);
+  if (room.roomBasis !== "confirmed_two_person_standard_room") {
+    const reason = roomBasisDpExclusionReason(room.roomBasis) ?? "unknown_room_basis_excluded";
+    return {
+      availability_status: "available",
+      basis_confidence: "C",
+      dp_usage: "excluded",
+      source_classification: "jalan_room_type_excluded",
+      basis_note: `Price visible, meal_basis=confirmed_room_only, but room_basis=${room.roomBasis} (${room.reason}); excluded from two-person-standard DP per confirmed policy.`,
+      hard_exclusion_reason: reason,
+      direct_downgrade_reason: "",
+      directional_downgrade_reason: reason,
+      evidence_flags: flags,
+      warning_flags: [...warnings, reason, `room_basis=${room.roomBasis}`]
+    };
+  }
+  // Confirmed two-person standard room: record the marker and continue.
+  warnings.push("room_basis_confirmed_two_person_standard", "room_basis=confirmed_two_person_standard_room");
 
   // --- Price visible. Compute the reason a row cannot be DIRECT. ---
   const directBlockers: string[] = [];

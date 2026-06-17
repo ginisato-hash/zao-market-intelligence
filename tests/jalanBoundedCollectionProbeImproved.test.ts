@@ -64,9 +64,9 @@ function target(checkin = "2026-07-18"): JalanProbeTarget {
 function candidate(overrides: Partial<JalanImprovedExtractionCandidate> = {}): JalanImprovedExtractionCandidate {
   return {
     facility_name: "ホテル喜らく",
-    room_or_plan_name: "和室素泊まりプラン",
-    room_name: "和室",
-    plan_name: "和室素泊まりプラン",
+    room_or_plan_name: "【素泊まり】ツインルーム",
+    room_name: "禁煙ツインルーム",
+    plan_name: "【素泊まり】ツインルーム",
     meal_condition: "食事なし",
     availability_status: "available",
     price_total_tax_included: 22000,
@@ -78,8 +78,8 @@ function candidate(overrides: Partial<JalanImprovedExtractionCandidate> = {}): J
     property_identity_confirmed: true,
     screenshot_path: "/tmp/screenshot.png",
     source_url: "https://www.jalan.net/yad325153/plan/?stayYear=2026&stayMonth=07&stayDay=18&stayCount=1&roomCrack=200000&roomCount=1",
-    selected_block_text: "和室素泊まりプラン 合計(税込) 22,000円 素泊まり",
-    page_text_excerpt: "ホテル喜らく 和室素泊まりプラン 合計(税込) 22,000円 素泊まり",
+    selected_block_text: "【素泊まり】ツインルーム 合計(税込) 22,000円 素泊まり",
+    page_text_excerpt: "ホテル喜らく 【素泊まり】ツインルーム 合計(税込) 22,000円 素泊まり",
     error_reason: null,
     extraction_confidence: "high",
     ...overrides
@@ -301,6 +301,59 @@ describe("JALAN-AUTO03B - classification policy", () => {
     expect(result.dp_usage).toBe("excluded");
     expect(result.source_classification).toBe("jalan_unknown_meal_basis_excluded");
     expect(result.hard_exclusion_reason).toBe("unknown_meal_basis_excluded");
+  });
+
+  // Room-basis hardening (two-person standard room policy): confirmed room-only
+  // priced rows are DP-usable only when the selected room is a two-person
+  // standard room; single/semi-double/large/family/suite/unknown are excluded.
+  it("confirmed room-only + twin priced row is DP usable and marks room basis", () => {
+    const result = classifyImprovedCandidate(candidate());
+    expect(result.dp_usage).toBe("direct");
+    expect(result.warning_flags).toContain("room_basis_confirmed_two_person_standard");
+    expect(result.warning_flags).toContain("room_basis=confirmed_two_person_standard_room");
+  });
+
+  it("room-only + single room priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ room_name: "シングルルーム", room_or_plan_name: "【素泊まり】シングル", plan_name: "【素泊まり】シングル", selected_block_text: "【素泊まり】シングル 合計(税込) 18,000円 素泊まり", page_text_excerpt: "ホテル喜らく シングル 18,000円 素泊まり" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.source_classification).toBe("jalan_room_type_excluded");
+    expect(result.hard_exclusion_reason).toBe("excluded_room_type_single");
+    expect(result.warning_flags).toContain("room_basis=excluded_single_room");
+  });
+
+  it("room-only + semi-double priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ room_name: "セミダブル", room_or_plan_name: "【素泊まり】セミダブル", plan_name: "【素泊まり】セミダブル", selected_block_text: "【素泊まり】セミダブル 合計(税込) 19,000円 素泊まり", page_text_excerpt: "ホテル喜らく セミダブル 19,000円 素泊まり" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.hard_exclusion_reason).toBe("excluded_room_type_semi_double");
+  });
+
+  it("room-only + triple priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ room_name: "トリプルルーム", room_or_plan_name: "【素泊まり】トリプル", plan_name: "【素泊まり】トリプル", selected_block_text: "【素泊まり】トリプル 合計(税込) 33,000円 素泊まり", page_text_excerpt: "ホテル喜らく トリプル 33,000円 素泊まり" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.hard_exclusion_reason).toBe("excluded_room_type_large");
+  });
+
+  it("room-only + family/suite priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ room_name: "スイートルーム", room_or_plan_name: "【素泊まり】スイート", plan_name: "【素泊まり】スイート", selected_block_text: "【素泊まり】スイート 合計(税込) 45,000円 素泊まり", page_text_excerpt: "ホテル喜らく スイート 45,000円 素泊まり" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.hard_exclusion_reason).toBe("excluded_room_type_family_or_suite");
+  });
+
+  it("room-only + unknown room basis priced row is excluded from DP", () => {
+    const result = classifyImprovedCandidate(
+      candidate({ room_name: "おまかせ", room_or_plan_name: "【素泊まり】おまかせ", plan_name: "【素泊まり】おまかせ", selected_block_text: "【素泊まり】おまかせ 合計(税込) 22,000円 素泊まり", page_text_excerpt: "ホテル喜らく おまかせ 22,000円 素泊まり" })
+    );
+    expect(result.dp_usage).toBe("excluded");
+    expect(result.source_classification).toBe("jalan_room_type_excluded");
+    expect(result.hard_exclusion_reason).toBe("unknown_room_basis_excluded");
   });
 });
 

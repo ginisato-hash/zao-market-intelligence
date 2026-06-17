@@ -247,11 +247,13 @@ describe("Phase M02X — CSV, transform, report", () => {
   // append writer keeps the existing 45-column header, so adding columns would
   // corrupt live shards. Meal basis is encoded via existing columns + derived at
   // BI export time, never by widening the history CSV.
-  it("(17b) history schema stays 45-column v1 (no meal-basis columns added)", () => {
+  it("(17b) history schema stays 45-column v1 (no meal-basis/room-basis columns added)", () => {
     expect(HISTORY_CSV_HEADERS).toHaveLength(45);
     const header = renderHistoryCsv(rows).trim().split("\n")[0] ?? "";
     expect(header.split(",")).toHaveLength(45);
     expect(header).not.toMatch(/meal_basis|price_use_class|selected_plan_name|selected_block_text/u);
+    // room-basis hardening must NOT widen the live v1 shard schema either.
+    expect(header).not.toMatch(/room_basis|two_person_room|room_type_excluded|room_basis_summary/u);
     const dataCols = (renderHistoryCsv(rows).trim().split("\n")[1] ?? "").split(",");
     // every rendered data row has exactly the header column count (append-safe)
     expect(dataCols.length).toBeGreaterThanOrEqual(45);

@@ -50,7 +50,7 @@ function makeB04ARow(overrides: Partial<B04ARow> = {}): B04ARow {
     hprtTablePresent: true,
     availabilityAlertPresent: false,
     soldOutTextPresent: false,
-    primaryRoomName: "",
+    primaryRoomName: "スタンダードツインルーム",
     primaryRateName: "食事なし",
     primaryPriceRaw: "￥60,060",
     primaryPriceNumeric: 60_060,
@@ -187,6 +187,61 @@ describe("Phase B04X — DP usage gate", () => {
     expect(row.isPriceExcludedFromDp).toBe(true);
     expect(row.isPriceUsableForDpDirectional).toBe(false);
     expect(row.isPriceUsableForDpDirect).toBe(false);
+  });
+});
+
+describe("Phase B04X — room-basis (two-person standard room) gate", () => {
+  it("(R1) twin/double + strong A price stays DP usable", () => {
+    const row = normalize({ basisConfidence: "A", primaryRoomName: "禁煙ダブルルーム" });
+    expect(row.isPriceUsableForDpDirect).toBe(true);
+    expect(row.isPriceExcludedFromDp).toBe(false);
+    expect(row.basisNote).toContain("room_basis=confirmed_two_person_standard_room");
+  });
+
+  it("(R2) unknown room is excluded from DP", () => {
+    const row = normalize({ primaryRoomName: "おまかせ", primaryRateName: "" });
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.isPriceUsableForDpDirect).toBe(false);
+    expect(row.isPriceUsableForDpDirectional).toBe(false);
+    expect(row.dpExclusionReason).toBe("unknown_room_basis_excluded");
+    expect(row.sourceClassification).toBe("booking_room_type_excluded");
+  });
+
+  it("(R3) single room is excluded from DP", () => {
+    const row = normalize({ basisConfidence: "A", primaryRoomName: "シングルルーム" });
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.dpExclusionReason).toBe("excluded_room_type_single");
+  });
+
+  it("(R4) semi-double room is excluded from DP", () => {
+    const row = normalize({ basisConfidence: "A", primaryRoomName: "セミダブル" });
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.dpExclusionReason).toBe("excluded_room_type_semi_double");
+  });
+
+  it("(R5) triple room is excluded from DP", () => {
+    const row = normalize({ basisConfidence: "A", primaryRoomName: "トリプルルーム" });
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.dpExclusionReason).toBe("excluded_room_type_large");
+  });
+
+  it("(R6) family/suite room is excluded from DP", () => {
+    const row = normalize({ basisConfidence: "A", primaryRoomName: "スイートルーム" });
+    expect(row.isPriceExcludedFromDp).toBe(true);
+    expect(row.dpExclusionReason).toBe("excluded_room_type_family_or_suite");
+  });
+
+  it("(R7) room gate does not override a non-priced sold_out row", () => {
+    const row = normalize({
+      classification: "booking_b04a_sold_out",
+      primaryPriceNumeric: null,
+      computedTotalWithTaxFee: null,
+      soldOutTextPresent: true,
+      primaryRoomName: "シングルルーム"
+    });
+    expect(row.availabilityStatus).toBe("sold_out");
+    expect(row.sourceClassification).toBe("booking_b04a_sold_out");
+    expect(row.dpExclusionReason).not.toBe("excluded_room_type_single");
   });
 });
 

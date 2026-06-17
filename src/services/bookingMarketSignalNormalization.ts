@@ -11,6 +11,7 @@
 // No synthetic 1.1 multiplier. No estimation of missing official adders.
 
 import { BOOKING_PRICE_POLICY_VERSION, type B04ARow } from "./bookingOfficialTaxFeeTotalHardening";
+import { classifyRoomBasisFromParts, isTwoPersonStandardRoom, roomBasisDpExclusionReason } from "./roomBasisClassification";
 
 export const BOOKING_SOURCE_PHASE = "B04A";
 export const BOOKING_COLLECTOR_STAGE = "local_normalization_only";
@@ -251,6 +252,31 @@ export function normalizeBookingMarketSignalRow(
     availabilityStatus: availability.availabilityStatus
   });
 
+  // Room-basis (two-person standard room) gate. Booking is assumed_room_only by
+  // policy, but its price is DP-usable only when the room is a two-person
+  // standard room. Applied only to priced, available rows so non-priced /
+  // unavailable rows keep their existing gate, reason, and inventory signal.
+  // Encoded via existing v1 columns (source_classification / dp_exclusion_reason
+  // / basis_note) — no history schema change.
+  const roomBasis = classifyRoomBasisFromParts({ roomName: row.primaryRoomName, rateName: row.primaryRateName });
+  const roomGateApplies = price.normalizedTotalPrice !== null && availability.availabilityStatus === "available";
+  let finalGate = gate;
+  let sourceClassification: string = row.classification;
+  let basisNote = row.basisNote;
+  if (roomGateApplies && !isTwoPersonStandardRoom(roomBasis)) {
+    const reason = roomBasisDpExclusionReason(roomBasis.roomBasis) ?? "unknown_room_basis_excluded";
+    finalGate = {
+      isPriceUsableForDpDirect: false,
+      isPriceUsableForDpDirectional: false,
+      isPriceExcludedFromDp: true,
+      dpExclusionReason: reason
+    };
+    sourceClassification = "booking_room_type_excluded";
+    basisNote = `${row.basisNote} | room_basis=${roomBasis.roomBasis} (${roomBasis.reason}); excluded from two-person-standard DP per confirmed policy.`;
+  } else if (roomGateApplies && isTwoPersonStandardRoom(roomBasis)) {
+    basisNote = `${row.basisNote} | meal_basis=assumed_room_only;room_basis=confirmed_two_person_standard_room`;
+  }
+
   return {
     runId: row.runId,
     normalizedAtJst: context.normalizedAtJst,
@@ -279,16 +305,16 @@ export function normalizeBookingMarketSignalRow(
     normalizedTotalPriceConfidence: price.normalizedTotalPriceConfidence,
     normalizedTotalPriceBasis: price.normalizedTotalPriceBasis,
     basisConfidence: price.basisConfidence,
-    basisNote: row.basisNote,
+    basisNote,
     sourcePrimaryPrice: row.primaryPriceNumeric,
     sourceOfficialTaxFeeAdder: row.officialTaxFeeAdderNumeric,
     sourceComputedTotalWithTaxFee: row.computedTotalWithTaxFee,
     sourceTaxBasisClassification: row.taxBasisClassification,
-    sourceClassification: row.classification,
-    isPriceUsableForDpDirect: gate.isPriceUsableForDpDirect,
-    isPriceUsableForDpDirectional: gate.isPriceUsableForDpDirectional,
-    isPriceExcludedFromDp: gate.isPriceExcludedFromDp,
-    dpExclusionReason: gate.dpExclusionReason,
+    sourceClassification,
+    isPriceUsableForDpDirect: finalGate.isPriceUsableForDpDirect,
+    isPriceUsableForDpDirectional: finalGate.isPriceUsableForDpDirectional,
+    isPriceExcludedFromDp: finalGate.isPriceExcludedFromDp,
+    dpExclusionReason: finalGate.dpExclusionReason,
     debugArtifactPath: row.debugArtifactPath ?? "",
     sourceReportPath: context.sourceReportPath,
     sourceCsvPath: context.sourceCsvPath
