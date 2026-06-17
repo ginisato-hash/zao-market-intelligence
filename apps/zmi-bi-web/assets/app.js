@@ -91,7 +91,7 @@ function aggregateByProperty(rows) {
   const m = new Map();
   rows.forEach((r) => {
     const name = r.canonical_property_name || "不明";
-    const e = m.get(name) || { name, tier: r.tier || "", prices: [], statuses: [], latest: "", srcMax: 0, priceConf: "low", basisConf: "low", coverageConf: "low", invConf: "low", roomOnlySamples: 0, excludedMealSamples: 0, unknownMealCount: 0, own: isTrue(r.is_own_property), comp: isTrue(r.is_room_only_comp), days: 0, soldDays: 0, availableDays: 0, nodataDays: 0 };
+    const e = m.get(name) || { name, tier: r.tier || "", prices: [], statuses: [], latest: "", srcMax: 0, priceConf: "low", basisConf: "low", coverageConf: "low", invConf: "low", roomOnlySamples: 0, excludedMealSamples: 0, unknownMealCount: 0, twoPersonSamples: 0, excludedRoomTypeSamples: 0, unknownRoomCount: 0, own: isTrue(r.is_own_property), comp: isTrue(r.is_room_only_comp), days: 0, soldDays: 0, availableDays: 0, nodataDays: 0 };
     const price = num(r.median_directional_price);
     if (price != null && price > 0) e.prices.push(price);
     const st = r.unified_availability_status || "no_data";
@@ -104,6 +104,9 @@ function aggregateByProperty(rows) {
     e.roomOnlySamples += num(r.room_only_price_sample_count) || 0;
     e.excludedMealSamples += num(r.excluded_meal_price_sample_count) || 0;
     e.unknownMealCount += num(r.unknown_meal_basis_count) || 0;
+    e.twoPersonSamples += num(r.two_person_room_price_sample_count) || 0;
+    e.excludedRoomTypeSamples += num(r.excluded_room_type_price_sample_count) || 0;
+    e.unknownRoomCount += num(r.unknown_room_basis_count) || 0;
     if ((r.latest_collected_at_jst || "") > e.latest) e.latest = r.latest_collected_at_jst || "";
     if (rankConf(r.price_confidence) > rankConf(e.priceConf)) e.priceConf = r.price_confidence || "low";
     if (rankConf(r.price_basis_confidence) > rankConf(e.basisConf)) e.basisConf = r.price_basis_confidence || "low";
@@ -275,10 +278,10 @@ function renderFacilities() {
   const cards = props.map((p) => facilityCard(p, prevMap.get(p.name))).join("");
   return `<section class="panel">
     <h2>施設別サマリー</h2>
-    <p class="chart-desc">選択期間における施設別のOTA表示価格・販売可否の集計。価格は各施設の素泊まり相当（Booking=室料想定 / じゃらん=素泊まり確定のみ）のOTA表示価格中央値（円）。「前期間比」は中央値の増減率（%）。価格信頼度は読取品質（basis）×多ソース照合（coverage）の総合。</p>
+    <p class="chart-desc">選択期間における施設別のOTA表示価格・販売可否の集計。価格は各施設の素泊まり相当かつ2人用標準部屋（Booking=室料想定 / じゃらん=素泊まり確定 ＋ ツイン/ダブル等）のOTA表示価格中央値（円）。「前期間比」は中央値の増減率（%）。価格信頼度は読取品質（basis）×多ソース照合（coverage）の総合。</p>
     <table class="desktop-table">
-      ${tableCaption("施設別サマリー", "施設別のOTA表示価格中央値（素泊まり相当）・OTA販売可否・観測ソース数・価格信頼度（総合/読取/カバレッジ）・食事基準内訳", props.length)}
-      <thead><tr><th>施設名</th><th>OTA販売可否</th><th>表示価格中央値（円）</th><th>前期間比（%）</th><th>観測ソース数（件）</th><th>価格信頼度（総合/読取/ｶﾊﾞﾚｯｼﾞ）</th><th>素泊まり価格件数</th><th>食事込み除外/不明（件）</th><th>在庫信頼度</th><th>最終観測（JST）</th><th>価格推移</th></tr></thead>
+      ${tableCaption("施設別サマリー", "施設別のOTA表示価格中央値（素泊まり・2人用標準部屋）・OTA販売可否・観測ソース数・価格信頼度（総合/読取/カバレッジ）・食事/部屋タイプ内訳", props.length)}
+      <thead><tr><th>施設名</th><th>OTA販売可否</th><th>表示価格中央値（円）</th><th>前期間比（%）</th><th>観測ソース数（件）</th><th>価格信頼度（総合/読取/ｶﾊﾞﾚｯｼﾞ）</th><th>素泊まり価格件数</th><th>2人用部屋価格件数</th><th>食事込み除外/不明（件）</th><th>部屋タイプ除外/不明（件）</th><th>在庫信頼度</th><th>最終観測（JST）</th><th>価格推移</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="mobile-cards">${cards}</div>
@@ -292,18 +295,18 @@ function deltaText(p, prev) {
 function sparkVals(name) { return state.rows.filter((r) => r.canonical_property_name === name).sort((a, b) => a.checkin.localeCompare(b.checkin)).map((r) => num(r.median_directional_price)); }
 function facilityRow(p, prev) {
   const d = deltaText(p, prev); const labels = `${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}`;
-  return `<tr><td><div class="rowname">${esc(p.name)}</div><div class="chips">${labels}<span class="chip">${esc(p.tier || "tier不明")}</span></div></td><td>${statusPill(p.status)}</td><td><strong>${yen(p.medianPrice)}</strong></td><td class="${d.cls}" style="font-weight:900">${d.text}</td><td>${p.srcMax}</td><td>${confPill(p.priceConf)} / ${confPill(p.basisConf)} / ${confPill(p.coverageConf)}</td><td>${p.roomOnlySamples}</td><td>${p.excludedMealSamples} / ${p.unknownMealCount}</td><td>${confPill(p.invConf)}</td><td>${shortTs(p.latest)}</td><td>${spark(sparkVals(p.name))}</td></tr>`;
+  return `<tr><td><div class="rowname">${esc(p.name)}</div><div class="chips">${labels}<span class="chip">${esc(p.tier || "tier不明")}</span></div></td><td>${statusPill(p.status)}</td><td><strong>${yen(p.medianPrice)}</strong></td><td class="${d.cls}" style="font-weight:900">${d.text}</td><td>${p.srcMax}</td><td>${confPill(p.priceConf)} / ${confPill(p.basisConf)} / ${confPill(p.coverageConf)}</td><td>${p.roomOnlySamples}</td><td>${p.twoPersonSamples}</td><td>${p.excludedMealSamples} / ${p.unknownMealCount}</td><td>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</td><td>${confPill(p.invConf)}</td><td>${shortTs(p.latest)}</td><td>${spark(sparkVals(p.name))}</td></tr>`;
 }
 function facilityCard(p, prev) {
   const d = deltaText(p, prev);
-  return `<details class="facility-card"><summary><div class="fc-top"><div><div class="fc-name">${esc(p.name)}</div><div class="chips">${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}</div></div>${statusPill(p.status)}</div><div class="fc-grid"><div><div class="k">価格中央値（素泊まり相当）</div><strong>${yen(p.medianPrice)}</strong></div><div><div class="k">前期間比</div><strong class="${d.cls}">${d.text}</strong></div><div><div class="k">source</div>${p.srcMax}</div><div><div class="k">価格信頼度(総合)</div>${confPill(p.priceConf)}</div></div></summary><div class="fc-grid"><div><div class="k">読取/ｶﾊﾞﾚｯｼﾞ</div>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</div><div><div class="k">素泊まり価格件数</div>${p.roomOnlySamples}</div><div><div class="k">食事込み除外/不明</div>${p.excludedMealSamples} / ${p.unknownMealCount}</div><div><div class="k">在庫信頼度</div>${confPill(p.invConf)}</div><div><div class="k">観測日数</div>${p.days}</div><div><div class="k">sold_out日数</div>${p.soldDays}</div><div><div class="k">available日数</div>${p.availableDays}</div><div><div class="k">取得</div>${shortTs(p.latest)}</div></div></details>`;
+  return `<details class="facility-card"><summary><div class="fc-top"><div><div class="fc-name">${esc(p.name)}</div><div class="chips">${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}</div></div>${statusPill(p.status)}</div><div class="fc-grid"><div><div class="k">価格中央値（素泊まり相当）</div><strong>${yen(p.medianPrice)}</strong></div><div><div class="k">前期間比</div><strong class="${d.cls}">${d.text}</strong></div><div><div class="k">source</div>${p.srcMax}</div><div><div class="k">価格信頼度(総合)</div>${confPill(p.priceConf)}</div></div></summary><div class="fc-grid"><div><div class="k">読取/ｶﾊﾞﾚｯｼﾞ</div>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</div><div><div class="k">素泊まり価格件数</div>${p.roomOnlySamples}</div><div><div class="k">2人用部屋価格件数</div>${p.twoPersonSamples}</div><div><div class="k">食事込み除外/不明</div>${p.excludedMealSamples} / ${p.unknownMealCount}</div><div><div class="k">部屋タイプ除外/不明</div>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</div><div><div class="k">在庫信頼度</div>${confPill(p.invConf)}</div><div><div class="k">観測日数</div>${p.days}</div><div><div class="k">sold_out日数</div>${p.soldDays}</div><div><div class="k">available日数</div>${p.availableDays}</div><div><div class="k">取得</div>${shortTs(p.latest)}</div></div></details>`;
 }
 function renderCompetitors() {
   const props = aggregateByProperty(baseRows().filter((r) => isTrue(r.is_room_only_comp)));
   const cards = ROOM_ONLY_COMPS.map((name) => {
     const p = props.find((x) => x.name === name);
     if (!p) return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="empty">観測なし</div></article>`;
-    return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="comp-row"><span>OTA販売可否</span>${statusPill(p.status)}</div><div class="comp-row"><span>価格中央値</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>source</span><strong>${p.srcMax}</strong></div><div class="comp-row"><span>信頼度</span><span>${confPill(p.priceConf)} ${confPill(p.invConf)}</span></div><div class="comp-row"><span>sold_out日数</span><strong>${p.soldDays}/${p.days}</strong></div></article>`;
+    return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="comp-row"><span>OTA販売可否</span>${statusPill(p.status)}</div><div class="comp-row"><span>価格中央値</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>source</span><strong>${p.srcMax}</strong></div><div class="comp-row"><span>信頼度</span><span>${confPill(p.priceConf)} ${confPill(p.invConf)}</span></div><div class="comp-row"><span>読取/ｶﾊﾞﾚｯｼﾞ</span><span>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</span></div><div class="comp-row"><span>2人用価格件数</span><strong>${p.twoPersonSamples}</strong></div><div class="comp-row"><span>部屋除外/不明</span><strong>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</strong></div><div class="comp-row"><span>sold_out日数</span><strong>${p.soldDays}/${p.days}</strong></div></article>`;
   }).join("");
   return `<section class="panel">
     <h2>重点競合（HAMMOND / OAKHILL / 吉田屋）</h2>

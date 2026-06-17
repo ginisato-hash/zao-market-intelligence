@@ -94,22 +94,28 @@ describe("ZMI BI export - latest observation", () => {
   });
 });
 
+// Room/meal basis markers used to mark a row as a DP-usable two-person standard
+// room sample (Jalan carries it in warning_flags; Booking in basis_note).
+const JALAN_OK = "meal_basis=confirmed_room_only;room_basis=confirmed_two_person_standard_room";
+const BOOKING_ROOM_OK = "room_basis=confirmed_two_person_standard_room";
+
 describe("ZMI BI export - price aggregation & confidence", () => {
-  it("median/avg from room-only-eligible prices only (Booking + confirmed-room-only Jalan)", () => {
+  it("median/avg from room+meal-eligible two-person prices only (Booking + Jalan)", () => {
     const u = unifyByPropertyCheckin([
-      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true }),
-      row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: "meal_basis=confirmed_room_only" }),
+      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_note: BOOKING_ROOM_OK }),
+      row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: JALAN_OK }),
       row({ source: "rakuten", normalized_total_price: 99999, is_price_usable_for_dp_directional: false })
     ]);
     expect(u[0]!.price_sample_count).toBe(2);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(2);
     expect(u[0]!.median_directional_price).toBe(25000);
     expect(u[0]!.avg_directional_price).toBe(25000);
     expect(u[0]!.price_confidence).toBe("high"); // 2 sources => coverage high
     expect(u[0]!.price_coverage_confidence).toBe("high");
   });
 
-  it("one confirmed-room-only Jalan sample => medium (single source); none => low", () => {
-    const one = unifyByPropertyCheckin([row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: "meal_basis=confirmed_room_only" })]);
+  it("one confirmed two-person Jalan sample => medium (single source); none => low", () => {
+    const one = unifyByPropertyCheckin([row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: JALAN_OK })]);
     expect(one[0]!.price_confidence).toBe("medium");
     expect(one[0]!.price_coverage_confidence).toBe("medium");
     const none = unifyByPropertyCheckin([row({ availability_status: "sold_out", normalized_total_price: null, is_price_usable_for_dp_directional: false })]);
@@ -123,8 +129,8 @@ describe("ZMI BI export - price aggregation & confidence", () => {
     expect(u[0]!.unknown_meal_basis_count).toBe(1);
   });
 
-  it("Booking single strong room-only price => high even single-source", () => {
-    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A" })]);
+  it("Booking single strong two-person price => high even single-source", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A", basis_note: BOOKING_ROOM_OK })]);
     expect(u[0]!.price_basis_confidence).toBe("high");
     expect(u[0]!.price_confidence).toBe("high");
   });
@@ -138,13 +144,13 @@ describe("ZMI BI export - price aggregation & confidence", () => {
     expect(u[0]!.price_confidence).toBe("low");
   });
 
-  it("price_coverage_confidence high only when >=2 room-only sources", () => {
+  it("price_coverage_confidence high only when >=2 two-person sources", () => {
     const two = unifyByPropertyCheckin([
-      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true }),
-      row({ source: "jalan", normalized_total_price: 28000, is_price_usable_for_dp_directional: true, warning_flags: "meal_basis=confirmed_room_only" })
+      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_note: BOOKING_ROOM_OK }),
+      row({ source: "jalan", normalized_total_price: 28000, is_price_usable_for_dp_directional: true, warning_flags: JALAN_OK })
     ]);
     expect(two[0]!.price_coverage_confidence).toBe("high");
-    const one = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true })]);
+    const one = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_note: BOOKING_ROOM_OK })]);
     expect(one[0]!.price_coverage_confidence).toBe("medium");
   });
 
@@ -164,6 +170,62 @@ describe("ZMI BI export - price aggregation & confidence", () => {
     expect(two[0]!.inventory_confidence).toBe("high");
     const one = unifyByPropertyCheckin([row({ source: "jalan" })]);
     expect(one[0]!.inventory_confidence).toBe("medium");
+  });
+
+  // Room-basis hardening (§12/§13).
+  it("room-only but UNKNOWN room basis => no usable two-person price sample", () => {
+    const u = unifyByPropertyCheckin([row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: "meal_basis=confirmed_room_only" })]);
+    expect(u[0]!.room_only_price_sample_count).toBe(1); // meal-eligible
+    expect(u[0]!.two_person_room_price_sample_count).toBe(0); // but not two-person standard
+    expect(u[0]!.unknown_room_basis_count).toBe(1);
+    expect(u[0]!.price_confidence).toBe("low");
+  });
+
+  it("room-only + confirmed two-person standard room => usable price sample", () => {
+    const u = unifyByPropertyCheckin([row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: JALAN_OK })]);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.room_basis_summary).toContain("confirmed_two_person_standard_room:1");
+  });
+
+  it("Booking strong price but UNKNOWN room basis => price_confidence NOT high", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A" })]);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.price_confidence).not.toBe("high");
+    expect(u[0]!.unknown_room_basis_count).toBe(1);
+  });
+
+  it("Booking strong price + confirmed two-person room => high", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A", basis_note: BOOKING_ROOM_OK })]);
+    expect(u[0]!.price_confidence).toBe("high");
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1);
+  });
+
+  it("room_basis_summary counts each room basis", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_note: BOOKING_ROOM_OK }),
+      row({ source: "jalan", normalized_total_price: 18000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, source_classification: "jalan_room_type_excluded", dp_exclusion_reason: "excluded_room_type_single" }),
+      row({ source: "rakuten", normalized_total_price: null, is_price_usable_for_dp_directional: false })
+    ]);
+    expect(u[0]!.room_basis_summary).toContain("confirmed_two_person_standard_room:1");
+    expect(u[0]!.room_basis_summary).toContain("excluded_single_room:1");
+    expect(u[0]!.room_basis_summary).toContain("unknown:1");
+  });
+
+  it("excluded_room_type_price_sample_count counts priced room-type exclusions", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_note: BOOKING_ROOM_OK }),
+      row({ source: "jalan", normalized_total_price: 18000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, source_classification: "jalan_room_type_excluded", dp_exclusion_reason: "excluded_room_type_family_or_suite" })
+    ]);
+    expect(u[0]!.excluded_room_type_price_sample_count).toBe(1);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1);
+  });
+
+  it("unknown_room_basis_count counts unknown-room rows (incl. legacy)", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true, warning_flags: "meal_basis=confirmed_room_only" }),
+      row({ source: "rakuten", normalized_total_price: null, is_price_usable_for_dp_directional: false })
+    ]);
+    expect(u[0]!.unknown_room_basis_count).toBe(2);
   });
 
   it("no price when not available (sold_out) even if a stale price exists", () => {
@@ -207,8 +269,8 @@ describe("ZMI BI export - flags, csv, metadata", () => {
   it("csv header matches the required schema exactly", () => {
     const csv = renderUnifiedCsv(unifyByPropertyCheckin([row({})]));
     const header = csv.split("\n")[0];
-    expect(header).toBe("period_key,period_label,checkin,canonical_property_name,unified_availability_status,source_count,available_source_count,sold_out_source_count,no_data_source_count,median_directional_price,avg_directional_price,price_sample_count,price_confidence,price_basis_confidence,price_coverage_confidence,meal_basis_summary,room_only_price_sample_count,excluded_meal_price_sample_count,unknown_meal_basis_count,inventory_confidence,latest_collected_at_jst,is_room_only_comp,is_own_property,tier");
-    expect(BI_CSV_HEADERS.length).toBe(24);
+    expect(header).toBe("period_key,period_label,checkin,canonical_property_name,unified_availability_status,source_count,available_source_count,sold_out_source_count,no_data_source_count,median_directional_price,avg_directional_price,price_sample_count,price_confidence,price_basis_confidence,price_coverage_confidence,meal_basis_summary,room_only_price_sample_count,excluded_meal_price_sample_count,unknown_meal_basis_count,room_basis_summary,two_person_room_price_sample_count,excluded_room_type_price_sample_count,unknown_room_basis_count,inventory_confidence,latest_collected_at_jst,is_room_only_comp,is_own_property,tier");
+    expect(BI_CSV_HEADERS.length).toBe(28);
   });
 
   it("metadata contains latest_collected_at_jst and policy, no external data", () => {
@@ -260,6 +322,8 @@ describe("ZMI BI export - period retention", () => {
       price_basis_confidence: "medium", price_coverage_confidence: "medium",
       meal_basis_summary: "assumed_room_only:1,confirmed_room_only:0,meal_included:0,unknown:0",
       room_only_price_sample_count: 1, excluded_meal_price_sample_count: 0, unknown_meal_basis_count: 0,
+      room_basis_summary: "confirmed_two_person_standard_room:1,excluded_single_room:0,excluded_semi_double_room:0,excluded_large_room:0,excluded_family_or_suite_room:0,unknown:0",
+      two_person_room_price_sample_count: 1, excluded_room_type_price_sample_count: 0, unknown_room_basis_count: 0,
       inventory_confidence: "medium", latest_collected_at_jst: "2026-06-14T12:00:00+09:00",
       is_room_only_comp: false, is_own_property: false, tier: "tier_budget_small"
     };
@@ -341,6 +405,13 @@ describe("ZMI BI web - HTML static checks (no source selector)", () => {
     expect(APP_JS).toContain("room_only_price_sample_count");
     expect(APP_JS).toContain("excluded_meal_price_sample_count");
     expect(APP_JS).toContain("unknown_meal_basis_count");
+  });
+  it("app.js surfaces the room-basis columns (§14)", () => {
+    expect(APP_JS).toContain("two_person_room_price_sample_count");
+    expect(APP_JS).toContain("excluded_room_type_price_sample_count");
+    expect(APP_JS).toContain("unknown_room_basis_count");
+    expect(APP_JS).toContain("2人用部屋価格件数");
+    expect(APP_JS).toContain("部屋タイプ除外/不明");
   });
   it("package wires bi:web scripts", () => {
     expect(PACKAGE_JSON).toContain('"bi:web:export"');

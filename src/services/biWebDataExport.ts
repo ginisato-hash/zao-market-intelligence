@@ -45,12 +45,14 @@ export interface BiHistoryRow {
   is_price_usable_for_dp_directional: boolean;
   collected_at_jst: string;
   tier: string;
-  // Existing v1 columns used to DERIVE meal basis at export time (history schema
-  // is NOT widened). Optional so older callers/tests still construct rows.
+  // Existing v1 columns used to DERIVE meal/room basis at export time (history
+  // schema is NOT widened). Optional so older callers/tests still construct rows.
   source_classification?: string;
   warning_flags?: string;
   basis_confidence?: string;
   is_price_excluded_from_dp?: boolean;
+  dp_exclusion_reason?: string;
+  basis_note?: string;
 }
 
 export type MealBasisBi = "assumed_room_only" | "confirmed_room_only" | "meal_included" | "unknown_meal_basis";
@@ -85,6 +87,61 @@ export function isRoomOnlyPriceSample(row: BiHistoryRow): boolean {
   return eligible && row.is_price_usable_for_dp_directional && row.is_price_excluded_from_dp !== true && row.normalized_total_price !== null;
 }
 
+export type RoomBasisBi =
+  | "confirmed_two_person_standard_room"
+  | "excluded_single_room"
+  | "excluded_semi_double_room"
+  | "excluded_large_room"
+  | "excluded_family_or_suite_room"
+  | "unknown_room_basis";
+
+// Derive room basis for a BI row from existing v1 columns (§5.3-style):
+//  - dp_exclusion_reason carries the room-type exclusion when a collector gated
+//    the row (excluded_room_type_* / unknown_room_basis_excluded /
+//    no_confirmed_two_person_room_only_safe_plan_candidates).
+//  - a positive confirmation marker lives in warning_flags (Jalan) or basis_note
+//    (Booking): "room_basis=confirmed_two_person_standard_room".
+//  - everything else (incl. LEGACY rows written before this gate) is unknown —
+//    this keeps legacy rows OUT of two-person-standard DP pricing.
+export function deriveBiRoomBasis(row: BiHistoryRow): RoomBasisBi {
+  const reason = row.dp_exclusion_reason ?? "";
+  if (reason === "excluded_room_type_single") return "excluded_single_room";
+  if (reason === "excluded_room_type_semi_double") return "excluded_semi_double_room";
+  if (reason === "excluded_room_type_large") return "excluded_large_room";
+  if (reason === "excluded_room_type_family_or_suite") return "excluded_family_or_suite_room";
+  if (reason === "unknown_room_basis_excluded" || reason === "no_confirmed_two_person_room_only_safe_plan_candidates") {
+    return "unknown_room_basis";
+  }
+  const wf = row.warning_flags ?? "";
+  const bn = row.basis_note ?? "";
+  const sc = row.source_classification ?? "";
+  if (
+    wf.includes("room_basis=confirmed_two_person_standard_room") ||
+    wf.includes("room_basis_confirmed_two_person_standard") ||
+    bn.includes("room_basis=confirmed_two_person_standard_room") ||
+    sc.includes("two_person_standard")
+  ) {
+    return "confirmed_two_person_standard_room";
+  }
+  return "unknown_room_basis";
+}
+
+// A row is a DP price sample under the room-basis-hardened policy only when it is
+// a room-only eligible price sample AND a confirmed two-person standard room.
+export function isTwoPersonStandardRoomPriceSample(row: BiHistoryRow): boolean {
+  return isRoomOnlyPriceSample(row) && deriveBiRoomBasis(row) === "confirmed_two_person_standard_room";
+}
+
+// A priced row excluded specifically for room type (or unknown room basis).
+export function isExcludedRoomTypePriceSample(row: BiHistoryRow): boolean {
+  const reason = row.dp_exclusion_reason ?? "";
+  return (
+    reason.startsWith("excluded_room_type_") ||
+    reason === "unknown_room_basis_excluded" ||
+    reason === "no_confirmed_two_person_room_only_safe_plan_candidates"
+  );
+}
+
 export interface UnifiedRow {
   period_key: string;
   period_label: string;
@@ -105,6 +162,10 @@ export interface UnifiedRow {
   room_only_price_sample_count: number;
   excluded_meal_price_sample_count: number;
   unknown_meal_basis_count: number;
+  room_basis_summary: string; // e.g. "confirmed_two_person_standard_room:1,excluded_single_room:0,...,unknown:2"
+  two_person_room_price_sample_count: number;
+  excluded_room_type_price_sample_count: number;
+  unknown_room_basis_count: number;
   inventory_confidence: Confidence;
   latest_collected_at_jst: string;
   is_room_only_comp: boolean;
@@ -210,30 +271,45 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
     const unified: UnifiedAvailability =
       available > 0 ? "available" : soldOut > 0 ? "sold_out" : rows.some((r) => normalizeAvailability(r.availability_status) === "not_found") ? "not_found" : "excluded";
 
-    // Room-only DP prices: only meal-basis-eligible (Booking assumed / Jalan
-    // confirmed) usable rows, and only when bookable. Legacy/unknown/meal-included
-    // Jalan prices are excluded here (meal-basis hardening §13.6).
+    // DP prices (room-basis hardened §13): only meal-basis-eligible AND confirmed
+    // two-person standard room rows, and only when bookable. Legacy/unknown/
+    // meal-included/wrong-room-type rows are excluded here. room_only counts the
+    // broader meal-eligible pool; two_person is the DP-usable subset.
     const roomOnlyRows = unified === "available" ? rows.filter((r) => isRoomOnlyPriceSample(r)) : [];
-    const prices = roomOnlyRows.map((r) => r.normalized_total_price!);
+    const twoPersonRows = unified === "available" ? rows.filter((r) => isTwoPersonStandardRoomPriceSample(r)) : [];
+    const prices = twoPersonRows.map((r) => r.normalized_total_price!);
     const med = median(prices);
     const avg = prices.length === 0 ? null : Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
 
-    // Meal-basis summary across all sources for this property/checkin.
+    // Meal-basis + room-basis summaries across all sources for this property/checkin.
     const mealCounts = { assumed_room_only: 0, confirmed_room_only: 0, meal_included: 0, unknown_meal_basis: 0 };
+    const roomCounts = {
+      confirmed_two_person_standard_room: 0,
+      excluded_single_room: 0,
+      excluded_semi_double_room: 0,
+      excluded_large_room: 0,
+      excluded_family_or_suite_room: 0,
+      unknown_room_basis: 0
+    };
     let excludedMealPriced = 0;
+    let excludedRoomTypePriced = 0;
     for (const r of rows) {
       const mb = deriveBiMealBasis(r);
       mealCounts[mb] += 1;
       if (mb === "meal_included" && r.normalized_total_price !== null) excludedMealPriced += 1;
+      const rb = deriveBiRoomBasis(r);
+      roomCounts[rb] += 1;
+      if (isExcludedRoomTypePriceSample(r) && r.normalized_total_price !== null) excludedRoomTypePriced += 1;
     }
-    const roomOnlySourceCount = new Set(roomOnlyRows.map((r) => r.source)).size;
-    const strongBookingRoomOnly = roomOnlyRows.some(
+    const twoPersonSourceCount = new Set(twoPersonRows.map((r) => r.source)).size;
+    const strongBookingRoomOnly = twoPersonRows.some(
       (r) => r.source === "booking" && (r.basis_confidence === "A" || r.basis_confidence === "B" || r.basis_confidence === "directional_candidate_basis")
     );
     const basisConf = priceBasisConfidence({ roomOnlySampleCount: prices.length, strongBookingRoomOnly });
-    const coverageConf = priceCoverageConfidence(roomOnlySourceCount);
+    const coverageConf = priceCoverageConfidence(twoPersonSourceCount);
     const overallConf = overallPriceConfidence({ basis: basisConf, coverage: coverageConf, strongBookingRoomOnly, roomOnlySampleCount: prices.length });
     const mealSummary = `assumed_room_only:${mealCounts.assumed_room_only},confirmed_room_only:${mealCounts.confirmed_room_only},meal_included:${mealCounts.meal_included},unknown:${mealCounts.unknown_meal_basis}`;
+    const roomSummary = `confirmed_two_person_standard_room:${roomCounts.confirmed_two_person_standard_room},excluded_single_room:${roomCounts.excluded_single_room},excluded_semi_double_room:${roomCounts.excluded_semi_double_room},excluded_large_room:${roomCounts.excluded_large_room},excluded_family_or_suite_room:${roomCounts.excluded_family_or_suite_room},unknown:${roomCounts.unknown_room_basis}`;
 
     const latestCollected = rows.reduce((acc, r) => (r.collected_at_jst > acc ? r.collected_at_jst : acc), "");
     const sourceCount = new Set(rows.map((r) => r.source)).size;
@@ -256,9 +332,13 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
       price_basis_confidence: basisConf,
       price_coverage_confidence: coverageConf,
       meal_basis_summary: mealSummary,
-      room_only_price_sample_count: prices.length,
+      room_only_price_sample_count: roomOnlyRows.length,
       excluded_meal_price_sample_count: excludedMealPriced,
       unknown_meal_basis_count: mealCounts.unknown_meal_basis,
+      room_basis_summary: roomSummary,
+      two_person_room_price_sample_count: prices.length,
+      excluded_room_type_price_sample_count: excludedRoomTypePriced,
+      unknown_room_basis_count: roomCounts.unknown_room_basis,
       inventory_confidence: inventoryConfidence(sourceCount),
       latest_collected_at_jst: latestCollected,
       is_room_only_comp: (ROOM_ONLY_COMPS as readonly string[]).includes(first.canonical_property_name),
@@ -338,6 +418,10 @@ export const BI_CSV_HEADERS = [
   "room_only_price_sample_count",
   "excluded_meal_price_sample_count",
   "unknown_meal_basis_count",
+  "room_basis_summary",
+  "two_person_room_price_sample_count",
+  "excluded_room_type_price_sample_count",
+  "unknown_room_basis_count",
   "inventory_confidence",
   "latest_collected_at_jst",
   "is_room_only_comp",
@@ -371,6 +455,10 @@ export function renderUnifiedCsv(rows: readonly UnifiedRow[]): string {
       String(r.room_only_price_sample_count),
       String(r.excluded_meal_price_sample_count),
       String(r.unknown_meal_basis_count),
+      r.room_basis_summary,
+      String(r.two_person_room_price_sample_count),
+      String(r.excluded_room_type_price_sample_count),
+      String(r.unknown_room_basis_count),
       r.inventory_confidence,
       r.latest_collected_at_jst,
       String(r.is_room_only_comp),
