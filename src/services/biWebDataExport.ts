@@ -271,13 +271,14 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
     const unified: UnifiedAvailability =
       available > 0 ? "available" : soldOut > 0 ? "sold_out" : rows.some((r) => normalizeAvailability(r.availability_status) === "not_found") ? "not_found" : "excluded";
 
-    // DP prices (room-basis hardened §13): only meal-basis-eligible AND confirmed
-    // two-person standard room rows, and only when bookable. Legacy/unknown/
-    // meal-included/wrong-room-type rows are excluded here. room_only counts the
-    // broader meal-eligible pool; two_person is the DP-usable subset.
+    // BI display price stays room-only / meal-basis-hardened so legacy rows
+    // (which lack room-basis hints and derive as unknown_room_basis) still show
+    // a price. Room-basis is reported separately and used only to CAP confidence
+    // — it must not blank the display price. two_person is the confirmed subset.
     const roomOnlyRows = unified === "available" ? rows.filter((r) => isRoomOnlyPriceSample(r)) : [];
     const twoPersonRows = unified === "available" ? rows.filter((r) => isTwoPersonStandardRoomPriceSample(r)) : [];
-    const prices = twoPersonRows.map((r) => r.normalized_total_price!);
+    const displayPriceRows = roomOnlyRows;
+    const prices = displayPriceRows.map((r) => r.normalized_total_price!);
     const med = median(prices);
     const avg = prices.length === 0 ? null : Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
 
@@ -301,13 +302,18 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
       roomCounts[rb] += 1;
       if (isExcludedRoomTypePriceSample(r) && r.normalized_total_price !== null) excludedRoomTypePriced += 1;
     }
-    const twoPersonSourceCount = new Set(twoPersonRows.map((r) => r.source)).size;
-    const strongBookingRoomOnly = twoPersonRows.some(
+    // Basis/coverage reflect the reading quality + source coverage of the
+    // (room-only) display prices. Overall confidence is then CAPPED to low while
+    // no confirmed two-person standard room sample exists — display prices are
+    // shown but flagged as not-yet-room-confirmed.
+    const roomOnlySourceCount = new Set(roomOnlyRows.map((r) => r.source)).size;
+    const strongBookingRoomOnly = roomOnlyRows.some(
       (r) => r.source === "booking" && (r.basis_confidence === "A" || r.basis_confidence === "B" || r.basis_confidence === "directional_candidate_basis")
     );
     const basisConf = priceBasisConfidence({ roomOnlySampleCount: prices.length, strongBookingRoomOnly });
-    const coverageConf = priceCoverageConfidence(twoPersonSourceCount);
-    const overallConf = overallPriceConfidence({ basis: basisConf, coverage: coverageConf, strongBookingRoomOnly, roomOnlySampleCount: prices.length });
+    const coverageConf = priceCoverageConfidence(roomOnlySourceCount);
+    const baseOverallConf = overallPriceConfidence({ basis: basisConf, coverage: coverageConf, strongBookingRoomOnly, roomOnlySampleCount: prices.length });
+    const overallConf: Confidence = prices.length === 0 ? "low" : twoPersonRows.length === 0 ? "low" : baseOverallConf;
     const mealSummary = `assumed_room_only:${mealCounts.assumed_room_only},confirmed_room_only:${mealCounts.confirmed_room_only},meal_included:${mealCounts.meal_included},unknown:${mealCounts.unknown_meal_basis}`;
     const roomSummary = `confirmed_two_person_standard_room:${roomCounts.confirmed_two_person_standard_room},excluded_single_room:${roomCounts.excluded_single_room},excluded_semi_double_room:${roomCounts.excluded_semi_double_room},excluded_large_room:${roomCounts.excluded_large_room},excluded_family_or_suite_room:${roomCounts.excluded_family_or_suite_room},unknown:${roomCounts.unknown_room_basis}`;
 
@@ -336,7 +342,7 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
       excluded_meal_price_sample_count: excludedMealPriced,
       unknown_meal_basis_count: mealCounts.unknown_meal_basis,
       room_basis_summary: roomSummary,
-      two_person_room_price_sample_count: prices.length,
+      two_person_room_price_sample_count: twoPersonRows.length,
       excluded_room_type_price_sample_count: excludedRoomTypePriced,
       unknown_room_basis_count: roomCounts.unknown_room_basis,
       inventory_confidence: inventoryConfidence(sourceCount),

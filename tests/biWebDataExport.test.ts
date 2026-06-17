@@ -228,6 +228,46 @@ describe("ZMI BI export - price aggregation & confidence", () => {
     expect(u[0]!.unknown_room_basis_count).toBe(2);
   });
 
+  // HOTFIX: room-basis must not blank BI display prices; it only caps confidence.
+  it("(hotfix-1) legacy Booking room-only with UNKNOWN room basis still shows a display price, capped low", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A" })]);
+    expect(u[0]!.median_directional_price).toBe(30000); // display price preserved
+    expect(u[0]!.room_only_price_sample_count).toBe(1);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.unknown_room_basis_count).toBeGreaterThanOrEqual(1);
+    expect(u[0]!.price_confidence).toBe("low"); // capped: no confirmed two-person sample
+    expect(u[0]!.price_basis_confidence).toBe("high"); // reading quality may still be high
+  });
+
+  it("(hotfix-2) confirmed two-person standard room shows price and is not capped", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A", basis_note: BOOKING_ROOM_OK })]);
+    expect(u[0]!.median_directional_price).toBe(30000);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.price_confidence).toBe("high");
+  });
+
+  it("(hotfix-3) meal-included/unknown-meal Jalan stays excluded from display price (null when no other sample)", () => {
+    const mealIncluded = unifyByPropertyCheckin([
+      row({ source: "jalan", normalized_total_price: 18000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, source_classification: "jalan_meal_included_excluded" })
+    ]);
+    expect(mealIncluded[0]!.median_directional_price).toBeNull();
+    const unknownMeal = unifyByPropertyCheckin([
+      row({ source: "jalan", normalized_total_price: 20000, is_price_usable_for_dp_directional: true }) // unmarked => unknown meal
+    ]);
+    expect(unknownMeal[0]!.median_directional_price).toBeNull();
+  });
+
+  it("(hotfix-4) room-type-excluded row does not blank a valid room-only display price", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A" }), // room-only display, unknown room
+      row({ source: "jalan", normalized_total_price: 18000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, source_classification: "jalan_room_type_excluded", dp_exclusion_reason: "excluded_room_type_family_or_suite" })
+    ]);
+    expect(u[0]!.median_directional_price).toBe(30000); // booking room-only price still displays
+    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.excluded_room_type_price_sample_count).toBe(1);
+    expect(u[0]!.price_confidence).toBe("low");
+  });
+
   it("no price when not available (sold_out) even if a stale price exists", () => {
     const u = unifyByPropertyCheckin([
       row({ source: "booking", availability_status: "sold_out", normalized_total_price: 30000, is_price_usable_for_dp_directional: true }),
