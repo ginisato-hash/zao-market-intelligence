@@ -145,8 +145,48 @@ function aggregateDaily(rows) {
 function avgPrice(rows) { const ps = rows.map((r) => num(r.median_directional_price)).filter((p) => p != null && p > 0); return ps.length ? Math.round(ps.reduce((a, b) => a + b, 0) / ps.length) : null; }
 function soldRate(rows) { let a = 0; let s = 0; rows.forEach((r) => { if (r.unified_availability_status === "available") a++; else if (r.unified_availability_status === "sold_out") s++; }); return (a + s) === 0 ? null : s / (a + s); }
 
-function statusPill(s) { const label = s === "available" ? "OTA販売可" : s === "sold_out" ? "OTA販売不可" : s === "not_found" ? "not_found" : "観測なし"; return `<span class="status-pill status-${esc(s)}">${label}</span>`; }
-function confPill(c) { const v = c || "low"; return `<span class="confidence-pill confidence-${esc(v)}">${esc(v)}</span>`; }
+// --- business-readable display vocabulary (internal codes -> 経営者向け日本語) ---
+function statusLabel(s) {
+  if (s === "available") return "販売中";
+  if (s === "sold_out") return "販売不可";
+  if (s === "not_found") return "掲載なし";
+  return "未観測"; // excluded / no_data / unknown
+}
+function confidenceLabel(c) { return c === "high" ? "高" : c === "medium" ? "中" : "低"; }
+function confidenceHelp(c) { return c === "high" ? "価格判断に使いやすい" : c === "medium" ? "参考にできる" : "注意して見る"; }
+// Relative price feel within the current view (rough — Zao market is small).
+function priceBandLabel(price, ref) {
+  if (price == null || price <= 0) return "価格なし";
+  if (ref == null || ref <= 0) return "—";
+  const r = price / ref;
+  if (r < 0.85) return "安め";
+  if (r < 1.15) return "標準";
+  if (r < 1.35) return "高め";
+  return "かなり高め";
+}
+function priceBandClass(label) {
+  return { "安め": "band-low", "標準": "band-mid", "高め": "band-high", "かなり高め": "band-vhigh", "価格なし": "band-none", "—": "band-none" }[label] || "band-none";
+}
+// Market congestion from OTA sold-out share + observation count (not PMS).
+function marketPressureLabel(rate, observed) {
+  if (observed == null || observed < 2 || rate == null) return "要再確認";
+  if (rate >= 0.4) return "高";
+  if (rate >= 0.2) return "中";
+  return "低";
+}
+function pressureClass(label) {
+  return { "高": "pressure-high", "中": "pressure-mid", "低": "pressure-low", "要再確認": "pressure-recheck" }[label] || "pressure-recheck";
+}
+function statusPill(s) { return `<span class="status-pill status-${esc(s)}">${statusLabel(s)}</span>`; }
+// Confidence pill: 日本語 main label, English code kept only in class/title for internal use.
+function confPill(c) { const v = c || "low"; return `<span class="confidence-pill confidence-${esc(v)}" title="${esc(confidenceHelp(v))}">${confidenceLabel(v)}</span>`; }
+function bandPill(label) { return `<span class="band-pill ${priceBandClass(label)}">${esc(label)}</span>`; }
+function pressurePill(label) { return `<span class="pressure-pill ${pressureClass(label)}">${esc(label)}</span>`; }
+// Reference (period median of per-property comparison prices) for the price band.
+function refMedian(props) {
+  const vals = props.map((p) => p.medianPrice).filter((v) => v != null && v > 0).sort((a, b) => a - b);
+  return vals.length ? vals[Math.floor(vals.length / 2)] : null;
+}
 function spark(vals) {
   const v = vals.filter((x) => x != null);
   if (v.length < 2) return `<span class="flat">—</span>`;
@@ -220,7 +260,7 @@ function renderHeader() {
   if (state.meta?.retention_previous_periods != null) $("#periodPolicyBadge").textContent = `当期間 + 過去${state.meta.retention_previous_periods}期`;
   $("#refreshBtn").disabled = state.loading;
   $("#refreshBtn").textContent = state.loading ? "再読込中…" : "最新データを再読込";
-  $("#footer").textContent = `ZMI history only / unified_rows: ${state.meta?.unified_rows ?? state.rows.length} / default_period: ${state.meta?.default_period_key || state.period || "—"}`;
+  $("#footer").textContent = `ZMI市場BI：Booking / Jalan / Rakuten の観測データを統合。価格・販売状況はOTA表示ベースです。内部の行数や保持方針は「データの見方」タブで確認できます。`;
 }
 function kpi(label, big, delta = "") { return `<article class="kpi-card"><div class="label">${esc(label)}</div><div class="big">${big}</div><div class="delta flat">${esc(delta)}</div></article>`; }
 function renderOverview() {
@@ -232,56 +272,59 @@ function renderOverview() {
   const compObserved = ROOM_ONLY_COMPS.filter((n) => compProps.find((p) => p.name === n && ["available", "sold_out"].includes(p.status))).length;
   const compSold = ROOM_ONLY_COMPS.filter((n) => compProps.find((p) => p.name === n && p.status === "sold_out")).length;
   const daily = aggregateDaily(rows);
-  const own = props.filter((p) => p.own).map((p) => `<article class="comp-card"><b>${esc(p.name)}</b><div class="comp-row"><span>OTA販売可否</span>${statusPill(p.status)}</div><div class="comp-row"><span>価格中央値</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>信頼度</span><span>${confPill(p.priceConf)} ${confPill(p.invConf)}</span></div></article>`).join("") || `<div class="empty">自社施設データなし</div>`;
-  const level = (sr != null && sr >= 0.4) || compSold >= 2 ? "strong" : (sr != null && sr >= 0.2) || compSold === 1 ? "medium" : "weak";
+  const ref = refMedian(props);
+  const observed = props.filter((p) => p.status === "available" || p.status === "sold_out").length;
+  const pressure = marketPressureLabel(sr, observed);
+  const own = props.filter((p) => p.own).map((p) => `<article class="comp-card"><b>${esc(p.name)}</b><div class="comp-row"><span>販売状況</span>${statusPill(p.status)}</div><div class="comp-row"><span>比較用価格</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>価格帯</span>${bandPill(priceBandLabel(p.medianPrice, ref))}</div><div class="comp-row"><span>価格信頼度</span><span>${confPill(p.priceConf)}</span></div><div class="comp-row"><span>空き状況信頼度</span><span>${confPill(p.invConf)}</span></div></article>`).join("") || `<div class="empty">自社施設データなし</div>`;
   return `
     <section class="kpi-grid">
-      ${kpi("エリア価格平均", yen(avg), prevAvg ? `前期 ${yen(prevAvg)}` : "前期間データ不足")}
-      ${kpi("OTA販売不可日率", pct(sr), prevSr != null ? `前期 ${pct(prevSr)}` : "観測日付ベース")}
-      ${kpi("追跡施設数", String(props.length), "表示条件適用後")}
-      ${kpi("価格上昇施設数", String(rising), "前期間比")}
-      ${kpi("重点競合カバレッジ", `${compObserved}/${ROOM_ONLY_COMPS.length}`, `sold_out ${compSold}`)}
-      ${kpi("最終データ取得", shortTs(state.meta?.latest_collected_at_jst), "JST")}
+      ${kpi("平均表示価格", yen(avg), prevAvg ? `前回 ${yen(prevAvg)}` : "前期間データ不足")}
+      ${kpi("市場の詰まり具合", pressurePill(pressure), `観測できた宿 ${observed}件`)}
+      ${kpi("観測できた宿数", String(props.length), "表示条件適用後")}
+      ${kpi("前回より高い宿", String(rising), "前回比")}
+      ${kpi("重点競合の確認状況", `${compObserved}/${ROOM_ONLY_COMPS.length}`, `販売不可 ${compSold}件`)}
+      ${kpi("最終確認", shortTs(state.meta?.latest_collected_at_jst), "JST")}
     </section>
-    <section class="signal"><b>判断シグナル:</b> 在庫KPI → 価格KPIの順で判断。選択期間のOTA販売不可日率 ${pct(sr)}、重点競合 sold_out ${compSold}/${compObserved} → 在庫圧 ${level}。喜らく/三浦屋はPMS実在庫ではなくOTA販売可否との比較で見る。</section>
+    <section class="signal"><b>この期間の見方:</b> この期間は、市場の詰まり具合と価格の動きを先に確認してください。販売不可の宿が増え、価格も上がっている場合は、値下げよりも強気維持を検討します。ただし、この画面はOTA上の販売状況であり、PMS実在庫ではありません。<br><span class="metric-sub">市場の詰まり具合: ${pressure}（観測できた宿 ${observed}件）／ 重点競合の販売不可 ${compSold}/${compObserved}件 ／ 平均表示価格 ${yen(avg)}。喜らく/三浦屋（ZAO SPA HOTEL Kiraku を同一施設に統合）も同じOTA表示ベースで見ています。</span></section>
     <section class="panel-grid">
       ${chartPanel({
         title: "エリア価格推移",
-        description: "選択期間における蔵王温泉エリアのOTA表示価格の推移（各施設のOTA表示価格中央値を、チェックイン日ごとに平均した値）。",
-        metric: "OTA表示価格中央値の日次平均",
+        description: "選択期間における蔵王温泉エリアの表示価格の推移（各宿の比較用価格を、チェックイン日ごとに平均した値）。",
+        metric: "比較用価格の日次平均",
         xLabel: "チェックイン日",
         yLabel: "表示価格（円）",
         unit: "円",
         granularity: "チェックイン日（日次）",
-        legend: `<div class="legend"><span><i class="dot" style="background:var(--blue)"></i>OTA表示価格（円）</span></div>`,
+        legend: `<div class="legend"><span><i class="dot" style="background:var(--blue)"></i>表示価格（円）</span></div>`,
         svg: lineChart(daily.map((d) => ({ x: d.checkin, y: d.avg })))
       })}
       ${chartPanel({
-        title: "OTA販売可否構成の推移",
-        description: "選択期間のチェックイン日ごとに、観測施設のOTA販売可否（available / sold_out / 観測なし）の構成を積み上げ表示。PMS実在庫ではなくOTA上の販売可否です。",
-        metric: "OTA販売可否の施設数構成",
+        title: "販売状況の推移",
+        description: "選択期間のチェックイン日ごとに、観測した宿の販売状況（販売中 / 販売不可 / 未観測）の構成を積み上げ表示。PMS実在庫ではなくOTA表示から見た販売状況です。",
+        metric: "販売状況の宿数構成",
         xLabel: "チェックイン日",
-        yLabel: "観測施設数（件）",
+        yLabel: "観測した宿数（件）",
         unit: "件",
         granularity: "チェックイン日（日次）",
-        legend: `<div class="legend"><span><i class="dot" style="background:var(--green)"></i>販売可（available）</span><span><i class="dot" style="background:var(--red)"></i>販売不可（sold_out）</span><span><i class="dot" style="background:#cbd5e1"></i>観測なし</span></div>`,
+        legend: `<div class="legend"><span><i class="dot" style="background:var(--green)"></i>販売中</span><span><i class="dot" style="background:var(--red)"></i>販売不可</span><span><i class="dot" style="background:#cbd5e1"></i>未観測</span></div>`,
         svg: stackChart(daily)
       })}
     </section>
-    <section class="panel"><h2>自社施設ショートカード</h2><p class="chart-desc">自社施設（三浦屋 / 喜らく）の選択期間サマリー。喜らくは全OTA（じゃらん 喜らく / Booking ZAO SPA HOTEL Kiraku）を同一施設に統合済み。</p><div class="comp-grid">${own}</div></section>`;
+    <section class="panel"><h2>自社の宿ショートカード</h2><p class="chart-desc">自社の宿（三浦屋 / 喜らく）の選択期間サマリー。喜らくは全OTA（じゃらん 喜らく / Booking ZAO SPA HOTEL Kiraku）を同一施設に統合済み。</p><div class="comp-grid">${own}</div></section>`;
 }
 function renderFacilities() {
   const props = aggregateByProperty(filteredRows()).sort((a, b) => (b.medianPrice || 0) - (a.medianPrice || 0));
   const prevMap = new Map(aggregateByProperty(prevPeriod(state.period) ? filteredRows(prevPeriod(state.period)) : []).map((p) => [p.name, p]));
-  if (!props.length) return `<section class="panel"><div class="empty">条件に一致する施設がありません</div></section>`;
-  const rows = props.map((p) => facilityRow(p, prevMap.get(p.name))).join("");
-  const cards = props.map((p) => facilityCard(p, prevMap.get(p.name))).join("");
+  if (!props.length) return `<section class="panel"><div class="empty">条件に一致する宿がありません</div></section>`;
+  const ref = refMedian(props);
+  const rows = props.map((p) => facilityRow(p, prevMap.get(p.name), ref)).join("");
+  const cards = props.map((p) => facilityCard(p, prevMap.get(p.name), ref)).join("");
   return `<section class="panel">
-    <h2>施設別サマリー</h2>
-    <p class="chart-desc">選択期間における施設別のOTA表示価格・販売可否の集計。価格は各施設の素泊まり相当かつ2人用標準部屋（Booking=室料想定 / じゃらん=素泊まり確定 ＋ ツイン/ダブル等）のOTA表示価格中央値（円）。「前期間比」は中央値の増減率（%）。価格信頼度は読取品質（basis）×多ソース照合（coverage）の総合。</p>
+    <h2>宿ごとの状況</h2>
+    <p class="chart-desc">選択期間における宿ごとの表示価格・販売状況。<b>比較用価格</b>は、食事条件と部屋条件をなるべく揃えた（素泊まり・2人用標準部屋）価格比較用の表示価格です。条件が揃わない場合は価格信頼度を下げています。<b>価格帯</b>はこの期間の宿全体の中でのざっくりした相対感です。詳しい内訳（食事・部屋タイプの件数など）は各行の「詳細」から確認できます。</p>
     <table class="desktop-table">
-      ${tableCaption("施設別サマリー", "施設別のOTA表示価格中央値（素泊まり・2人用標準部屋）・OTA販売可否・観測ソース数・価格信頼度（総合/読取/カバレッジ）・食事/部屋タイプ内訳", props.length)}
-      <thead><tr><th>施設名</th><th>OTA販売可否</th><th>表示価格中央値（円）</th><th>前期間比（%）</th><th>観測ソース数（件）</th><th>価格信頼度（総合/読取/ｶﾊﾞﾚｯｼﾞ）</th><th>素泊まり価格件数</th><th>2人用部屋価格件数</th><th>食事込み除外/不明（件）</th><th>部屋タイプ除外/不明（件）</th><th>在庫信頼度</th><th>最終観測（JST）</th><th>価格推移</th></tr></thead>
+      ${tableCaption("宿ごとの状況", "宿ごとの比較用価格・販売状況・価格帯・前回比・価格信頼度・空き状況信頼度・観測サイト数。価格判断に使える数字かは信頼度で判断してください。", props.length)}
+      <thead><tr><th>宿名</th><th>販売状況</th><th>比較用価格</th><th>価格帯</th><th>前回比</th><th>価格信頼度</th><th>空き状況信頼度</th><th>観測サイト数</th><th>最終確認</th><th>詳細</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="mobile-cards">${cards}</div>
@@ -293,48 +336,79 @@ function deltaText(p, prev) {
   return { text: `${d >= 0 ? "▲" : "▼"} ${(Math.abs(d) * 100).toFixed(1)}%`, cls: d > 0 ? "up" : d < 0 ? "down" : "flat" };
 }
 function sparkVals(name) { return state.rows.filter((r) => r.canonical_property_name === name).sort((a, b) => a.checkin.localeCompare(b.checkin)).map((r) => num(r.median_directional_price)); }
-function facilityRow(p, prev) {
-  const d = deltaText(p, prev); const labels = `${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}`;
-  return `<tr><td><div class="rowname">${esc(p.name)}</div><div class="chips">${labels}<span class="chip">${esc(p.tier || "tier不明")}</span></div></td><td>${statusPill(p.status)}</td><td><strong>${yen(p.medianPrice)}</strong></td><td class="${d.cls}" style="font-weight:900">${d.text}</td><td>${p.srcMax}</td><td>${confPill(p.priceConf)} / ${confPill(p.basisConf)} / ${confPill(p.coverageConf)}</td><td>${p.roomOnlySamples}</td><td>${p.twoPersonSamples}</td><td>${p.excludedMealSamples} / ${p.unknownMealCount}</td><td>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</td><td>${confPill(p.invConf)}</td><td>${shortTs(p.latest)}</td><td>${spark(sparkVals(p.name))}</td></tr>`;
+// Shared detail (moved off the main table): read/coverage confidence + meal/room
+// basis sample counts. Kept available, just not in the primary columns.
+function facilityDetailGrid(p) {
+  return `<div class="fc-grid detail-note">
+    <div><div class="k">読取/カバレッジ信頼度</div>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</div>
+    <div><div class="k">素泊まり価格件数</div>${p.roomOnlySamples}</div>
+    <div><div class="k">2人用部屋価格件数</div>${p.twoPersonSamples}</div>
+    <div><div class="k">食事込み除外/不明</div>${p.excludedMealSamples} / ${p.unknownMealCount}</div>
+    <div><div class="k">部屋タイプ除外/不明</div>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</div>
+    <div><div class="k">販売中/販売不可 日数</div>${p.availableDays} / ${p.soldDays}</div>
+    <div><div class="k">価格推移</div>${spark(sparkVals(p.name))}</div>
+  </div>`;
 }
-function facilityCard(p, prev) {
+function facilityRow(p, prev, ref) {
+  const d = deltaText(p, prev); const labels = `${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}`;
+  const band = priceBandLabel(p.medianPrice, ref);
+  return `<tr><td><div class="rowname">${esc(p.name)}</div><div class="chips">${labels}<span class="chip">${esc(p.tier || "区分不明")}</span></div></td><td>${statusPill(p.status)}</td><td><strong>${yen(p.medianPrice)}</strong></td><td>${bandPill(band)}</td><td class="${d.cls}" style="font-weight:900">${d.text}</td><td>${confPill(p.priceConf)}</td><td>${confPill(p.invConf)}</td><td>${p.srcMax}</td><td>${shortTs(p.latest)}</td><td><details class="row-detail"><summary>詳細</summary>${facilityDetailGrid(p)}</details></td></tr>`;
+}
+function facilityCard(p, prev, ref) {
   const d = deltaText(p, prev);
-  return `<details class="facility-card"><summary><div class="fc-top"><div><div class="fc-name">${esc(p.name)}</div><div class="chips">${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}</div></div>${statusPill(p.status)}</div><div class="fc-grid"><div><div class="k">価格中央値（素泊まり相当）</div><strong>${yen(p.medianPrice)}</strong></div><div><div class="k">前期間比</div><strong class="${d.cls}">${d.text}</strong></div><div><div class="k">source</div>${p.srcMax}</div><div><div class="k">価格信頼度(総合)</div>${confPill(p.priceConf)}</div></div></summary><div class="fc-grid"><div><div class="k">読取/ｶﾊﾞﾚｯｼﾞ</div>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</div><div><div class="k">素泊まり価格件数</div>${p.roomOnlySamples}</div><div><div class="k">2人用部屋価格件数</div>${p.twoPersonSamples}</div><div><div class="k">食事込み除外/不明</div>${p.excludedMealSamples} / ${p.unknownMealCount}</div><div><div class="k">部屋タイプ除外/不明</div>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</div><div><div class="k">在庫信頼度</div>${confPill(p.invConf)}</div><div><div class="k">観測日数</div>${p.days}</div><div><div class="k">sold_out日数</div>${p.soldDays}</div><div><div class="k">available日数</div>${p.availableDays}</div><div><div class="k">取得</div>${shortTs(p.latest)}</div></div></details>`;
+  const band = priceBandLabel(p.medianPrice, ref);
+  return `<details class="facility-card"><summary><div class="fc-top"><div><div class="fc-name">${esc(p.name)}</div><div class="chips">${p.own ? `<span class="badge badge-blue">自社</span>` : ""}${p.comp ? `<span class="badge badge-purple">重点</span>` : ""}</div></div>${statusPill(p.status)}</div><div class="fc-grid"><div><div class="k">比較用価格</div><strong>${yen(p.medianPrice)}</strong></div><div><div class="k">価格帯</div>${bandPill(band)}</div><div><div class="k">前回比</div><strong class="${d.cls}">${d.text}</strong></div><div><div class="k">観測サイト数</div>${p.srcMax}</div><div><div class="k">価格信頼度</div>${confPill(p.priceConf)}</div><div><div class="k">空き状況信頼度</div>${confPill(p.invConf)}</div></div></summary>${facilityDetailGrid(p)}<div class="metric-sub">最終確認: ${shortTs(p.latest)}</div></details>`;
 }
 function renderCompetitors() {
   const props = aggregateByProperty(baseRows().filter((r) => isTrue(r.is_room_only_comp)));
+  const ref = refMedian(props);
   const cards = ROOM_ONLY_COMPS.map((name) => {
     const p = props.find((x) => x.name === name);
-    if (!p) return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="empty">観測なし</div></article>`;
-    return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="comp-row"><span>OTA販売可否</span>${statusPill(p.status)}</div><div class="comp-row"><span>価格中央値</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>source</span><strong>${p.srcMax}</strong></div><div class="comp-row"><span>信頼度</span><span>${confPill(p.priceConf)} ${confPill(p.invConf)}</span></div><div class="comp-row"><span>読取/ｶﾊﾞﾚｯｼﾞ</span><span>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</span></div><div class="comp-row"><span>2人用価格件数</span><strong>${p.twoPersonSamples}</strong></div><div class="comp-row"><span>部屋除外/不明</span><strong>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</strong></div><div class="comp-row"><span>sold_out日数</span><strong>${p.soldDays}/${p.days}</strong></div></article>`;
+    if (!p) return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="empty">未観測</div></article>`;
+    return `<article class="comp-card"><b>${COMP_LABEL[name]}</b><div class="comp-row"><span>販売状況</span>${statusPill(p.status)}</div><div class="comp-row"><span>比較用価格</span><strong>${yen(p.medianPrice)}</strong></div><div class="comp-row"><span>価格帯</span>${bandPill(priceBandLabel(p.medianPrice, ref))}</div><div class="comp-row"><span>価格信頼度</span><span>${confPill(p.priceConf)}</span></div><div class="comp-row"><span>空き状況信頼度</span><span>${confPill(p.invConf)}</span></div><div class="comp-row"><span>観測サイト数</span><strong>${p.srcMax}</strong></div><div class="comp-row"><span>期間中の販売不可</span><strong>${p.soldDays}/${p.days}日</strong></div><details class="row-detail"><summary>詳細</summary><div class="fc-grid detail-note"><div><div class="k">2名部屋価格の確認数</div>${p.twoPersonSamples}</div><div><div class="k">部屋条件不明数</div>${p.unknownRoomCount}</div><div><div class="k">食事条件不明数</div>${p.unknownMealCount}</div></div></details></article>`;
   }).join("");
   return `<section class="panel">
     <h2>重点競合（HAMMOND / OAKHILL / 吉田屋）</h2>
-    <p class="chart-desc">素泊まり競合のOTA販売可否・OTA表示価格中央値（円）・期間内 sold_out 日数。PMS実在庫ではなくOTA観測です。対象期間: ${esc(periodText())} ／ source: ${esc(srcLabel())}</p>
+    <p class="chart-desc">素泊まり競合の販売状況・比較用価格・期間中の販売不可日数。PMS実在庫ではなくOTA表示から見た状況です。対象期間: ${esc(periodText())} ／ 観測サイト: ${esc(srcLabel())}</p>
     <div class="comp-grid">${cards}</div>
   </section>`;
 }
 function renderDaily() {
   const daily = aggregateDaily(filteredRows());
-  const cells = daily.map((d) => `<div class="heat-cell" style="background:${heatColor(d.rate)}">${esc(d.checkin.slice(5))}<small>${pct(d.rate)}</small><small>A:${d.avail} S:${d.sold} N:${d.nodata}</small></div>`).join("");
-  const tableRows = daily.map((d) => `<tr><td>${esc(d.checkin)}</td><td>${pct(d.rate)}</td><td>${d.avail}</td><td>${d.sold}</td><td>${d.nodata}</td><td>${yen(d.avg)}</td></tr>`).join("");
+  const pres = (d) => marketPressureLabel(d.rate, d.avail + d.sold);
+  const cells = daily.map((d) => `<div class="heat-cell" style="background:${heatColor(d.rate)}"><b>${esc(d.checkin.slice(5))}</b><small>${pres(d)}</small><small>販売中${d.avail} 販売不可${d.sold} 未観測${d.nodata}</small></div>`).join("");
+  const tableRows = daily.map((d) => `<tr><td>${esc(d.checkin)}</td><td>${pressurePill(pres(d))}</td><td>${d.avail}</td><td>${d.sold}</td><td>${d.nodata}</td><td>${yen(d.avg)}</td></tr>`).join("");
   return `<section class="panel">
-    <h2>日別観測データ</h2>
-    <p class="chart-desc">チェックイン日ごとのOTA販売不可日率（%）と販売可否の観測施設数（件）、OTA表示価格中央値の日次平均（円）。「OTA販売不可日率」= sold_out /(available + sold_out)。色が濃い（赤寄り）ほど販売不可が多い。</p>
-    ${axisBlock("チェックイン日", "OTA販売不可日率（%）")}
-    <div class="heat" aria-label="日別 OTA販売不可日率ヒートマップ">${cells || `<div class="empty">日別データなし</div>`}</div>
-    <p class="chart-cap">凡例: 各セル＝チェックイン日 ／ %＝OTA販売不可日率 ／ A=販売可 S=販売不可 N=観測なし（件） ／ 集計粒度: 日次 ／ 対象期間: ${esc(periodText())} ／ source: ${esc(srcLabel())}</p>
+    <h2>日別カレンダー</h2>
+    <p class="chart-desc">チェックイン日ごとの<b>市場の詰まり具合</b>と、販売中／販売不可／未観測の宿数、比較用価格の日次平均。赤に近いほど、OTA上で販売不可の宿が多い日です。これはPMS実在庫ではなく、OTA表示から見た市場の詰まり具合です。</p>
+    ${axisBlock("チェックイン日", "市場の詰まり具合")}
+    <div class="heat" aria-label="日別 市場の詰まり具合ヒートマップ">${cells || `<div class="empty">日別データなし</div>`}</div>
+    <p class="chart-cap">凡例: 各セル＝チェックイン日 ／ 市場の詰まり具合（低/中/高/要再確認） ／ 販売中・販売不可・未観測＝宿数（件） ／ 集計粒度: 日次 ／ 対象期間: ${esc(periodText())} ／ 観測サイト: ${esc(srcLabel())}</p>
     <table class="desktop-table">
-      ${tableCaption("日別観測明細", "チェックイン日別のOTA販売不可日率・販売可否件数・表示価格中央値の日次平均", daily.length)}
-      <thead><tr><th>チェックイン日</th><th>OTA販売不可日率（%）</th><th>販売可（件）</th><th>販売不可（件）</th><th>観測なし（件）</th><th>表示価格（円）</th></tr></thead>
+      ${tableCaption("日別明細", "チェックイン日別の市場の詰まり具合・販売状況の宿数・比較用価格の日次平均", daily.length)}
+      <thead><tr><th>チェックイン日</th><th>市場の詰まり具合</th><th>販売中（件）</th><th>販売不可（件）</th><th>未観測（件）</th><th>比較用価格（円）</th></tr></thead>
       <tbody>${tableRows || ""}</tbody>
     </table>
-    <div class="mobile-cards">${daily.map((d) => `<div class="facility-card"><div class="fc-top"><div class="fc-name">${esc(d.checkin)}</div><span class="status-pill ${d.rate != null && d.rate >= 0.4 ? "status-sold_out" : "status-available"}">${pct(d.rate)}</span></div><div class="fc-grid"><div><div class="k">販売可（件）</div>${d.avail}</div><div><div class="k">販売不可（件）</div>${d.sold}</div><div><div class="k">観測なし（件）</div>${d.nodata}</div><div><div class="k">表示価格（円）</div>${yen(d.avg)}</div></div></div>`).join("") || `<div class="empty">日別データなし</div>`}</div>
+    <div class="mobile-cards">${daily.map((d) => `<div class="facility-card"><div class="fc-top"><div class="fc-name">${esc(d.checkin)}</div>${pressurePill(pres(d))}</div><div class="fc-grid"><div><div class="k">販売中（件）</div>${d.avail}</div><div><div class="k">販売不可（件）</div>${d.sold}</div><div><div class="k">未観測（件）</div>${d.nodata}</div><div><div class="k">比較用価格（円）</div>${yen(d.avg)}</div></div></div>`).join("") || `<div class="empty">日別データなし</div>`}</div>
   </section>`;
 }
 function renderDataStatus() {
   const meta = state.meta || {}; const keys = ["generated_at_jst", "latest_collected_at_jst", "history_rows_total", "latest_observation_rows", "unified_rows", "unified_rows_before_retention", "distinct_properties", "distinct_checkins", "sources_included", "data_policy", "period_retention_policy", "current_period_key_jst", "default_period_key", "retention_previous_periods", "retained_period_keys", "dropped_past_period_keys_count", "dropped_past_rows_count"];
-  return `<section class="panel"><h2>データ状態</h2><p class="chart-desc">公開データ（metadata.json）の内容。対象期間の保持方針・行数・統合ソース等。喜らくは全OTAを同一施設に統合済み。</p><dl class="kv">${keys.map((k) => `<dt>${esc(k)}</dt><dd>${esc(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k] ?? "—")}</dd>`).join("")}</dl></section>`;
+  return `<section class="panel">
+    <h2>データの見方</h2>
+    <ul class="data-guide">
+      <li>このBIは Booking / Jalan / Rakuten の表示価格・販売可否を統合した市場観測です。</li>
+      <li>PMS実在庫、実予約数、実稼働率ではありません。</li>
+      <li>価格（比較用価格）は、食事条件と部屋条件をなるべく揃えた比較用の表示価格です。</li>
+      <li>信頼度が低い価格は、価格判断では参考扱いにしてください（高: 価格判断に使いやすい／中: 参考にできる／低: 注意して見る）。</li>
+      <li>「市場の詰まり具合」は、OTA上で販売不可と見えた宿の割合を参考にしています。PMS実在庫ではありません。</li>
+      <li>喜らくは全OTA（じゃらん 喜らく / Booking ZAO SPA HOTEL Kiraku）を同一施設に統合して表示しています。</li>
+    </ul>
+    <p class="metric-sub">観測した宿数: ${esc(String(meta.distinct_properties ?? "—"))} ／ 統合行数: ${esc(String(meta.unified_rows ?? state.rows.length))} ／ 最終確認: ${esc(meta.latest_collected_at_jst || "—")}</p>
+    <details class="row-detail"><summary>内部データ詳細を見る</summary>
+      <dl class="kv">${keys.map((k) => `<dt>${esc(k)}</dt><dd>${esc(Array.isArray(meta[k]) ? meta[k].join(", ") : meta[k] ?? "—")}</dd>`).join("")}</dl>
+    </details>
+  </section>`;
 }
 
 function syncControls() {

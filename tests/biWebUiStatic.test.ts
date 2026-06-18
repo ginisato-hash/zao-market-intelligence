@@ -50,17 +50,79 @@ describe("ZMI BI UI v3 - functional controls present", () => {
 });
 
 describe("ZMI BI UI v3 - terminology (OTA, not PMS)", () => {
-  it("shows the PMS disclaimer and OTA wording", () => {
+  it("shows the PMS disclaimer", () => {
     expect(HTML).toContain("PMS実在庫");
-    expect(HTML).toContain("OTA販売不可日率");
     // The only occurrence of 稼働率 must be inside the negating disclaimer.
     expect(HTML).toContain("実稼働率ではありません");
+  });
+  it("uses 市場の詰まり具合 instead of raw OTA販売不可日率 in the notice", () => {
+    expect(HTML).toContain("市場の詰まり具合");
+    expect(HTML).not.toContain("OTA販売不可日率");
   });
   it("does not present occupancy/booking-rate as a metric label", () => {
     // forbidden as standalone metric labels (not the negated disclaimer)
     expect(HTML).not.toContain("在庫率");
     expect(HTML).not.toContain("予約率");
     expect(HTML).not.toContain(">稼働率<");
+  });
+  it("confidence filter options are Japanese (not highのみ/medium以上/lowのみ)", () => {
+    expect(HTML).toContain("高のみ");
+    expect(HTML).toContain("中以上");
+    expect(HTML).toContain("低のみ");
+    expect(HTML).not.toContain("highのみ");
+    expect(HTML).not.toContain("medium以上");
+    expect(HTML).not.toContain("lowのみ");
+  });
+});
+
+describe("ZMI BI UI - business-readable labels (BI-UX-REFINE01)", () => {
+  it("tab labels are business-readable", () => {
+    for (const label of ["市場サマリー", "宿ごとの状況", "重点競合", "日別カレンダー", "データの見方"]) {
+      expect(HTML, label).toContain(label);
+    }
+  });
+  it("status labels are Japanese in the UI", () => {
+    for (const label of ["販売中", "販売不可", "掲載なし", "未観測"]) {
+      expect(JS, label).toContain(label);
+    }
+    // statusLabel helper exists; raw not_found is never rendered as a main label
+    expect(JS).toContain("statusLabel");
+  });
+  it("confidence is shown as 高/中/低 with help text, not raw high/medium/low labels", () => {
+    expect(JS).toContain("confidenceLabel");
+    expect(JS).toContain("confidenceHelp");
+    expect(JS).toContain("価格判断に使いやすい");
+    expect(JS).toContain("参考にできる");
+    expect(JS).toContain("注意して見る");
+  });
+  it("market summary KPIs use business wording", () => {
+    for (const k of ["平均表示価格", "市場の詰まり具合", "観測できた宿数", "前回より高い宿", "重点競合の確認状況", "最終確認"]) {
+      expect(JS, k).toContain(k);
+    }
+  });
+  it("facilities table uses 比較用価格 / 価格帯 / 価格信頼度 / 空き状況信頼度 / 観測サイト数", () => {
+    for (const k of ["比較用価格", "価格帯", "価格信頼度", "空き状況信頼度", "観測サイト数"]) {
+      expect(JS, k).toContain(k);
+    }
+  });
+  it("price band + market pressure helpers exist", () => {
+    expect(JS).toContain("priceBandLabel");
+    expect(JS).toContain("marketPressureLabel");
+    for (const band of ["安め", "標準", "高め", "かなり高め", "価格なし"]) {
+      expect(JS, band).toContain(band);
+    }
+    for (const p of ["要再確認"]) {
+      expect(JS, p).toContain(p);
+    }
+  });
+  it("data-view tab explains the data before raw metadata (collapsible)", () => {
+    expect(JS).toContain("データの見方");
+    expect(JS).toContain("内部データ詳細を見る");
+    expect(JS).toContain("PMS実在庫、実予約数、実稼働率ではありません");
+  });
+  it("does not main-display source/sold_out_ratio raw wording", () => {
+    expect(JS).not.toContain("OTA販売不可日率");
+    expect(JS).not.toContain("OTA販売可否");
   });
 });
 
@@ -118,12 +180,12 @@ describe("ZMI BI UI - axis labels & captions on every chart/table", () => {
     expect(JS).toContain("チェックイン日");
     expect(JS).toContain("表示価格（円）");
   });
-  it("daily uses OTA販売不可日率（%） axis", () => {
-    expect(JS).toContain("OTA販売不可日率（%）");
+  it("daily uses 市場の詰まり具合 axis", () => {
+    expect(JS).toContain("市場の詰まり具合");
   });
   it("tables have captions/titles", () => {
     expect(JS).toContain("tableCaption");
-    expect(JS).toContain("施設別サマリー");
+    expect(JS).toContain("宿ごとの状況");
     expect(JS).toContain("<caption");
   });
   it("every chartPanel supplies title/description/axis labels/unit", () => {
@@ -138,12 +200,9 @@ describe("ZMI BI UI - axis labels & captions on every chart/table", () => {
       expect(JS, bad).not.toContain(bad);
       expect(HTML, bad).not.toContain(bad);
     }
-    expect(JS).not.toContain("稼働率");
-    expect(HTML.replace(/PMS実在庫・実稼働率ではありません/g, "")).not.toContain("稼働率");
-  });
-  it("uses OTA wording instead", () => {
-    expect(JS).toContain("OTA販売不可日率");
-    expect(JS).toContain("OTA販売可否");
+    // 稼働率 only inside the negating disclaimer (JS data-view copy + HTML notice).
+    expect(JS.replace(/実稼働率ではありません/g, "")).not.toContain("稼働率");
+    expect(HTML.replace(/実稼働率ではありません/g, "")).not.toContain("稼働率");
   });
 });
 

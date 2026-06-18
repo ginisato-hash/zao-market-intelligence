@@ -26,7 +26,7 @@
     </header>
 
     <section class="notice" role="note">
-      ZMIはOTA上の販売可否を観測しています。PMS実在庫・実稼働率ではありません。「OTA販売不可日率」は観測日付ベースの sold_out 比率です。
+      この画面は、OTA上に表示されている価格と販売状況を見た市場ボードです。PMS実在庫・実稼働率ではありません。「市場の詰まり具合」は、OTA上で販売不可と見えた宿の割合を参考にしています。
     </section>
 
     <section class="controls" aria-label="表示条件">
@@ -47,10 +47,11 @@
       <label class="control">信頼度
         <select id="confSelect">
           <option value="all">すべて</option>
-          <option value="high">highのみ</option>
-          <option value="medium_or_high">medium以上</option>
-          <option value="low">lowのみ</option>
+          <option value="high">高のみ</option>
+          <option value="medium_or_high">中以上</option>
+          <option value="low">低のみ</option>
         </select>
+        <small>高: 価格判断に使いやすい／中: 参考にできる／低: 注意して見る</small>
       </label>
       <label class="control">施設検索
         <input id="searchInput" type="search" inputmode="search" placeholder="例: 喜らく / OAKHILL" />
@@ -63,16 +64,16 @@
     </section>
 
     <nav class="tabs" aria-label="BI sections">
-      <button type="button" class="tab active" data-tab="overview">市場概要</button>
-      <button type="button" class="tab" data-tab="facilities">施設別</button>
+      <button type="button" class="tab active" data-tab="overview">市場サマリー</button>
+      <button type="button" class="tab" data-tab="facilities">宿ごとの状況</button>
       <button type="button" class="tab" data-tab="competitors">重点競合</button>
-      <button type="button" class="tab" data-tab="daily">日別</button>
-      <button type="button" class="tab" data-tab="data">データ状態</button>
+      <button type="button" class="tab" data-tab="daily">日別カレンダー</button>
+      <button type="button" class="tab" data-tab="data">データの見方</button>
     </nav>
 
     <div id="errorBanner" class="error-banner" hidden></div>
     <main id="main" class="main"></main>
-    <footer class="footer" id="footer">ZMI history only. All sources unified. No external data.</footer>
+    <footer class="footer" id="footer">ZMI市場BI：Booking / Jalan / Rakuten の観測データを統合。価格・販売状況はOTA表示ベースです。</footer>
   </div>
   <div id="toast" class="toast" hidden></div>
   <script src="assets/app.js"></script>
