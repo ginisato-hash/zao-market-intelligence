@@ -21,6 +21,8 @@ import {
   shardMonthFromCheckin
 } from "../src/services/localHistorySchemaDesign";
 import { type PreviewRow } from "../src/services/autoRunnerBookingPreview";
+import { extractBookingRoomContextAroundPrice } from "../src/services/bookingRoomContextExtraction";
+import { classifyRoomBasisFromParts } from "../src/services/roomBasisClassification";
 
 const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/bookingPreviewAppendProposal.ts"), "utf8");
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/buildBookingPreviewAppendProposal.ts"), "utf8");
@@ -276,6 +278,25 @@ describe("ROOM-LIVE - room-basis markers in the history row", () => {
     expect(h.isPriceUsableForDpDirectional).toBe(true);
     expect(h.isPriceExcludedFromDp).toBe(false);
     expect(h.dpExclusionReason).toBeNull();
+  });
+
+  it("A3-real — preview-example row (ツインルーム + シングルベッド2台) ends up confirmed two-person standard", () => {
+    // Reproduce the misclassified Booking preview row end-to-end: extract the
+    // room context the same way the DOM probe does, classify, then build the
+    // proposed history row. This must NOT become a single/semi-double exclusion.
+    const body = "蔵王国際ホテル スタンダードツインルーム 禁煙 シングルベッド2台 大人2名 ￥30,000 税込 残り2部屋";
+    const ctx = extractBookingRoomContextAroundPrice({ bodyText: body, priceValue: 30000, priceRawText: "￥30,000" });
+    const cls = classifyRoomBasisFromParts({ roomName: ctx.primaryRoomName, blockText: ctx.primaryRoomCardText, bedHint: ctx.primaryBedHint });
+    expect(cls.roomBasis).toBe("confirmed_two_person_standard_room");
+    const h = build({
+      room_basis: cls.roomBasis,
+      primary_room_name: ctx.primaryRoomName,
+      primary_room_card_text: ctx.primaryRoomCardText,
+      primary_bed_hint: ctx.primaryBedHint
+    });
+    expect(h.basisNote).toContain("room_basis=confirmed_two_person_standard_room");
+    expect(h.warningFlags).toContain("room_basis=confirmed_two_person_standard_room");
+    expect(h.isPriceExcludedFromDp).toBe(false);
   });
 
   it("B1 — single room is excluded from two-person DP", () => {

@@ -93,6 +93,40 @@ describe("room-basis classification — helpers", () => {
       .toBe("excluded_single_room");
     expect(classifyRoomBasisFromParts({}).roomBasis).toBe("unknown_room_basis");
   });
+});
+
+describe("room-basis classification — twin room with two single beds (HOTFIX)", () => {
+  it("ツインルーム + bedHint シングルベッド2台 => confirmed_two_person_standard_room", () => {
+    expect(classifyRoomBasisFromParts({ roomName: "ツインルーム", bedHint: "シングルベッド2台" }).roomBasis)
+      .toBe("confirmed_two_person_standard_room");
+  });
+
+  it("Twin Room + bedHint '2 single beds' => confirmed_two_person_standard_room", () => {
+    expect(classifyRoomBasisFromParts({ roomName: "Twin Room", bedHint: "2 single beds" }).roomBasis)
+      .toBe("confirmed_two_person_standard_room");
+  });
+
+  it("two single beds is a positive twin signal even without a room name", () => {
+    expect(classifyRoomBasis("シングルベッド2台").roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("two single beds").roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("シングルベッド×2").roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+
+  it("シングルルーム + bedHint シングルベッド1台 => excluded_single_room (one bed stays single)", () => {
+    expect(classifyRoomBasisFromParts({ roomName: "シングルルーム", bedHint: "シングルベッド1台" }).roomBasis)
+      .toBe("excluded_single_room");
+  });
+
+  it("セミダブルルーム => excluded_semi_double_room (real room type still excluded)", () => {
+    expect(classifyRoomBasisFromParts({ roomName: "セミダブルルーム" }).roomBasis).toBe("excluded_semi_double_room");
+    expect(classifyRoomBasis("セミダブルルーム").roomBasis).toBe("excluded_semi_double_room");
+  });
+
+  it("positive room name wins over a negative bed hint", () => {
+    // even a lone 'シングルベッド' hint must not demote an explicit twin room name
+    expect(classifyRoomBasisFromParts({ roomName: "禁煙ツインルーム", bedHint: "シングルベッド" }).roomBasis)
+      .toBe("confirmed_two_person_standard_room");
+  });
 
   it("roomBasisDpExclusionReason maps each excluded basis", () => {
     expect(roomBasisDpExclusionReason("confirmed_two_person_standard_room")).toBeNull();

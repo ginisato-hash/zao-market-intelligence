@@ -64,6 +64,19 @@ function containsAny(haystack: string, tokens: readonly string[]): boolean {
   return tokens.some((tok) => haystack.includes(normalizeRoomText(tok)));
 }
 
+// "シングルベッド2台" / "2 single beds" / "two single beds" / "single beds 2" /
+// "シングルベッド×2" describe a TWIN (two single beds = two-person standard) room.
+// The substring "シングル"/"single" would otherwise trip the single-room
+// exclusion, so scrub these phrases to a positive " twin " token BEFORE any
+// token matching. Single-bed counts other than two (e.g. "シングルベッド1台")
+// are left untouched and keep classifying as single.
+const TWO_SINGLE_BEDS_RE =
+  /シングルベッド\s*2\s*台|シングル\s*ベッド\s*2\s*台|シングルベッド\s*[×x]\s*2|2\s*single\s*beds?|two\s*single\s*beds?|single\s*beds?\s*2|single\s*beds?\s*two/gu;
+
+function scrubTwoSingleBeds(text: string): string {
+  return text.replace(TWO_SINGLE_BEDS_RE, " twin ");
+}
+
 // Per-head price labels ("大人1名(税込)", "大人2名", "1名あたり") appear in almost
 // every Jalan/Booking price block and are NOT room-occupancy signals. Strip them
 // before token matching so they never false-trigger the "1名"/"N名" single/large
@@ -87,7 +100,7 @@ export function classifyRoomBasis(text: string): RoomBasisClassification {
   if (raw === "") {
     return { roomBasis: "unknown_room_basis", roomBasisConfidence: "low", reason: "room_basis_text_empty" };
   }
-  const norm = stripPerHeadPriceLabels(raw);
+  const norm = stripPerHeadPriceLabels(scrubTwoSingleBeds(raw));
 
   const hasFamilyOrSuite = containsAny(norm, FAMILY_OR_SUITE_ROOM_TOKENS);
   const hasLarge = containsAny(norm, LARGE_ROOM_TOKENS);
@@ -121,12 +134,26 @@ export interface RoomBasisInput {
   blockText?: string | undefined;
   priceText?: string | undefined;
   rateName?: string | undefined;
+  bedHint?: string | undefined;
 }
 
-// Join the available room/plan/rate texts and classify. Used by the Booking and
-// Jalan gates so the same evidence is considered everywhere.
+// Join the available room/plan/rate/bed texts and classify. Used by the Booking
+// and Jalan gates so the same evidence is considered everywhere.
+//
+// Positive room-NAME evidence wins over negative bed-hint tokens (req. §3): if
+// the room name alone is unambiguously a two-person standard room (e.g. "ツイン
+// ルーム"), a "シングルベッド…" bed hint must not demote it to single/semi-double.
+// A room name that is itself an excluded type (セミダブル / シングルルーム / suite
+// / triple) is NOT confirmed, so those keep excluding as before.
 export function classifyRoomBasisFromParts(input: RoomBasisInput): RoomBasisClassification {
-  const combined = [input.roomName, input.planName, input.rateName, input.blockText, input.priceText]
+  const name = (input.roomName ?? "").trim();
+  if (name !== "") {
+    const nameClass = classifyRoomBasis(name);
+    if (nameClass.roomBasis === "confirmed_two_person_standard_room") {
+      return { ...nameClass, reason: "two_person_standard_room_name_evidence" };
+    }
+  }
+  const combined = [input.roomName, input.planName, input.rateName, input.blockText, input.priceText, input.bedHint]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join(" \n ");
   return classifyRoomBasis(combined);

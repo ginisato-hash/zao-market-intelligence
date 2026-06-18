@@ -26,7 +26,10 @@ const EMPTY: BookingRoomContext = {
 };
 
 // Two single beds / a pair of beds = a twin (two-person standard) room.
-const TWO_BED_RE = /シングルベッド\s*[2２]\s*台|ベッド\s*[2２]\s*台|ベッド\s*[×xX]\s*[2２]|ツインベッド|[2２]\s*beds|two\s+beds|twin\s+beds/u;
+// Includes the "single beds" phrasings (シングルベッド2台 / 2 single beds / two
+// single beds / single beds 2 / シングルベッド×2) whose "シングル"/"single"
+// substring would otherwise trip the single-room exclusion downstream.
+const TWO_BED_RE = /シングルベッド\s*[2２]\s*台|シングルベッド\s*[×xX]\s*[2２]|ベッド\s*[2２]\s*台|ベッド\s*[×xX]\s*[2２]|ツインベッド|[2２]\s*single\s+beds?|two\s+single\s+beds?|single\s+beds?\s*[2２]|[2２]\s*beds|two\s+beds|twin\s+beds/u;
 const DOUBLE_BED_RE = /ダブルベッド|ダブルサイズベッド|double\s+bed|queen\s+bed|king\s+bed/u;
 const OCCUPANCY_RE = /大人\s*[2２]\s*名|[2２]\s*名様|2\s*adults|two\s+adults/u;
 // A room-name-like phrase ending in a room keyword (bounded length).
