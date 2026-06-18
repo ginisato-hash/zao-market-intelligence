@@ -250,3 +250,59 @@ describe("AUTO-RUNNER08Y - safety and outputs", () => {
     );
   });
 });
+
+describe("ROOM-LIVE - room-basis markers in the history row", () => {
+  function build(over: Partial<PreviewRow>) {
+    return buildProposedHistoryRow({ row: previewRow(over), sourceReportPath: "r.md", sourceCsvPath: "r.csv" });
+  }
+
+  it("legacy preview row (no room context) keeps directional behavior unchanged", () => {
+    const h = build({});
+    expect(h.sourceClassification).toBe("booking_directional_visible_price_only");
+    expect(h.isPriceUsableForDpDirectional).toBe(true);
+    expect(h.isPriceExcludedFromDp).toBe(false);
+    expect(h.dpExclusionReason).toBeNull();
+  });
+
+  it("A3 — confirmed two-person standard room writes the positive marker", () => {
+    const h = build({
+      room_basis: "confirmed_two_person_standard_room",
+      primary_room_card_text: "スタンダードツインルーム two beds twin",
+      primary_bed_hint: "シングルベッド2台"
+    });
+    expect(h.basisNote).toContain("room_basis=confirmed_two_person_standard_room");
+    expect(h.sourceClassification).toContain("two_person_standard");
+    expect(h.warningFlags).toContain("room_basis_confirmed_two_person_standard");
+    expect(h.isPriceUsableForDpDirectional).toBe(true);
+    expect(h.isPriceExcludedFromDp).toBe(false);
+    expect(h.dpExclusionReason).toBeNull();
+  });
+
+  it("B1 — single room is excluded from two-person DP", () => {
+    const h = build({ room_basis: "excluded_single_room", primary_room_card_text: "シングルルーム" });
+    expect(h.sourceClassification).toBe("booking_room_type_excluded");
+    expect(h.isPriceUsableForDpDirectional).toBe(false);
+    expect(h.isPriceExcludedFromDp).toBe(true);
+    expect(h.dpExclusionReason).toBe("excluded_room_type_single");
+    expect(h.basisNote).toContain("room_basis=excluded_single_room");
+  });
+
+  it("B2 — unknown room basis is excluded, never high confidence", () => {
+    const h = build({ room_basis: "unknown_room_basis" });
+    expect(h.sourceClassification).toBe("booking_room_type_excluded");
+    expect(h.isPriceUsableForDpDirectional).toBe(false);
+    expect(h.isPriceExcludedFromDp).toBe(true);
+    expect(h.dpExclusionReason).toBe("unknown_room_basis_excluded");
+    expect(h.warningFlags).toContain("room_basis_unknown_or_excluded");
+  });
+});
+
+describe("ROOM-LIVE - B11X is artifact append only, NOT the live room-basis path", () => {
+  const B11X_SERVICE = readFileSync(resolve(__dirname, "../src/services/bookingBoundedAppendWithIdentityRealRun.ts"), "utf8");
+  it("reconstructs old rows from B10Z/B09X artifacts and runs no live browser", () => {
+    expect(B11X_SERVICE).toMatch(/reconstructHistoryRow/u);
+    expect(B11X_SERVICE).toMatch(/B10Z|B09X/u);
+    // No live Booking request — cannot exercise live room-name extraction.
+    expect(B11X_SERVICE).not.toMatch(/chromium|playwright|page\.goto|newPage/u);
+  });
+});

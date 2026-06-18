@@ -59,6 +59,10 @@ function domRow(overrides: {
       captchaOrSecurityDetected: false,
       loginRequiredDetected: false,
       notFoundDetected: false,
+      primaryRoomName: "",
+      primaryRoomCardText: "",
+      primaryOccupancyHint: "",
+      primaryBedHint: "",
       error: ""
     },
     debugArtifactPath: "/tmp/x"
@@ -342,5 +346,25 @@ describe("AUTO-RUNNER16X - crawl volume multiplier (booking)", () => {
     const matrix = buildTargetMatrix(VERIFIED_BOOKING_TARGETS, dates, 3);
     expect(new Set(matrix.map((c) => c.property_slug)).size).toBe(3);
     expect(matrix.every((c) => c.source === "booking")).toBe(true);
+  });
+});
+
+describe("ROOM-LIVE - toPreviewRow carries room context (A2)", () => {
+  it("preserves room name / card text / bed hint / room basis from the DOM row", () => {
+    const base = domRow({});
+    const withRoom: BookingRenderedDomRow = {
+      ...base,
+      primaryRoomName: "スタンダードツインルーム",
+      primaryRoomCardText: "スタンダードツインルーム two beds twin 大人2名",
+      primaryOccupancyHint: "大人2名",
+      primaryBedHint: "シングルベッド2台",
+      roomBasis: "confirmed_two_person_standard_room",
+      roomBasisReason: "two_person_standard_room_token_detected"
+    };
+    const preview = previewFrom(withRoom);
+    expect(preview.primary_room_name).toBe("スタンダードツインルーム");
+    expect(preview.primary_room_card_text).toContain("twin");
+    expect(preview.primary_bed_hint).toBe("シングルベッド2台");
+    expect(preview.room_basis).toBe("confirmed_two_person_standard_room");
   });
 });

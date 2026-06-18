@@ -19,6 +19,7 @@ import {
   type BookingRenderedDomTarget
 } from "./bookingRenderedDomProbe";
 import { datesPerProperty, expandedSaturdayCount, scaleCap } from "./crawlVolumeConfig";
+import { type RoomBasis } from "./roomBasisClassification";
 
 export const SOURCE_PHASE = "AUTO-RUNNER08X";
 export const STAY_SCOPE = "2_adults_1_room_1_night";
@@ -165,6 +166,14 @@ export interface PreviewRow {
   warning_flags: string[];
   collected_at_jst: string;
   source_phase: string;
+  // Room context + room-basis (carried from the rendered-DOM row). Optional so
+  // legacy/test PreviewRow literals (no room context) keep their behavior.
+  primary_room_name?: string;
+  primary_room_card_text?: string;
+  primary_occupancy_hint?: string;
+  primary_bed_hint?: string;
+  room_basis?: RoomBasis;
+  room_basis_reason?: string;
 }
 
 // Maps a proven Booking rendered-DOM row into a preview row under existing
@@ -205,7 +214,13 @@ export function toPreviewRow(
     debug_path: opts.debugPath,
     warning_flags: warning,
     collected_at_jst: opts.collectedAtJst,
-    source_phase: SOURCE_PHASE
+    source_phase: SOURCE_PHASE,
+    primary_room_name: domRow.primaryRoomName,
+    primary_room_card_text: domRow.primaryRoomCardText,
+    primary_occupancy_hint: domRow.primaryOccupancyHint,
+    primary_bed_hint: domRow.primaryBedHint,
+    room_basis: domRow.roomBasis,
+    room_basis_reason: domRow.roomBasisReason
   };
 }
 
@@ -295,7 +310,11 @@ export const PREVIEW_CSV_HEADERS = [
   "classification",
   "warning_flags",
   "collected_at_jst",
-  "source_phase"
+  "source_phase",
+  "primary_room_name",
+  "primary_bed_hint",
+  "room_basis",
+  "room_basis_reason"
 ] as const;
 
 export function renderPreviewCsv(rows: readonly PreviewRow[]): string {
@@ -316,7 +335,11 @@ export function renderPreviewCsv(rows: readonly PreviewRow[]): string {
       r.classification,
       r.warning_flags.join("; "),
       r.collected_at_jst,
-      r.source_phase
+      r.source_phase,
+      r.primary_room_name ?? "",
+      r.primary_bed_hint ?? "",
+      r.room_basis ?? "",
+      r.room_basis_reason ?? ""
     ]
       .map(csvCell)
       .join(",")

@@ -13,6 +13,7 @@ import {
   type HistoryRow
 } from "./localHistorySchemaDesign";
 import { type PreviewRow } from "./autoRunnerBookingPreview";
+import { roomBasisDpExclusionReason } from "./roomBasisClassification";
 
 export type BookingPreviewAppendDecision =
   | "booking_preview_append_proposal_ready"
@@ -161,6 +162,59 @@ export function isDirectionalAppendable(row: PreviewRow): boolean {
   );
 }
 
+interface RoomBasisMarker {
+  sourceClassification: string;
+  basisNote: string;
+  warningFlags: string;
+  isPriceUsableForDpDirectional: boolean;
+  isPriceExcludedFromDp: boolean;
+  dpExclusionReason: string | null;
+}
+
+// Encode room basis into existing v1 columns (no schema widening).
+//  - No room context (legacy/proposal replay) → unchanged directional behavior.
+//  - confirmed_two_person_standard_room → directional + positive markers (BI
+//    counts it as a two-person standard sample).
+//  - any excluded/unknown room basis → DP-excluded audit row (kept for
+//    availability, never a two-person DP sample).
+function deriveRoomBasisMarker(row: PreviewRow): RoomBasisMarker {
+  const existingFlags = row.warning_flags.join(";");
+  const roomBasis = row.room_basis;
+  if (roomBasis === undefined) {
+    return {
+      sourceClassification: "booking_directional_visible_price_only",
+      basisNote: "directional visible price signal; not all-in official total",
+      warningFlags: existingFlags,
+      isPriceUsableForDpDirectional: true,
+      isPriceExcludedFromDp: false,
+      dpExclusionReason: null
+    };
+  }
+  if (roomBasis === "confirmed_two_person_standard_room") {
+    return {
+      sourceClassification: "booking_assumed_room_only_two_person_standard",
+      basisNote: "meal_basis=assumed_room_only;room_basis=confirmed_two_person_standard_room;directional visible price signal",
+      warningFlags: [existingFlags, "room_basis_confirmed_two_person_standard", "room_basis=confirmed_two_person_standard_room"]
+        .filter((f) => f.length > 0)
+        .join(";"),
+      isPriceUsableForDpDirectional: true,
+      isPriceExcludedFromDp: false,
+      dpExclusionReason: null
+    };
+  }
+  // Wrong or unknown room type: excluded audit row.
+  return {
+    sourceClassification: "booking_room_type_excluded",
+    basisNote: `room_basis=${roomBasis};booking_room_type_excluded_from_two_person_dp`,
+    warningFlags: [existingFlags, `room_basis=${roomBasis}`, "room_basis_unknown_or_excluded"]
+      .filter((f) => f.length > 0)
+      .join(";"),
+    isPriceUsableForDpDirectional: false,
+    isPriceExcludedFromDp: true,
+    dpExclusionReason: roomBasisDpExclusionReason(roomBasis)
+  };
+}
+
 export function buildProposedHistoryRow(input: {
   row: PreviewRow;
   sourceReportPath: string;
@@ -170,7 +224,12 @@ export function buildProposedHistoryRow(input: {
   const collectedDateJst = collectedAtJst.slice(0, 10);
   const shardMonth = shardMonthFromCheckin(input.row.checkin);
   const normalizedTotalPrice = input.row.primary_price_numeric;
-  const sourceClassification = "booking_directional_visible_price_only";
+  // Room-basis markers (Phase ROOM-LIVE): when the live preview carried room
+  // context, encode the room basis into the existing v1 columns so BI can count
+  // confirmed two-person standard rooms and exclude wrong/unknown room types.
+  // Rows WITHOUT room context (legacy/proposal replays) keep the old behavior.
+  const marker = deriveRoomBasisMarker(input.row);
+  const sourceClassification = marker.sourceClassification;
   const rowId = buildRowId({
     collectedDateJst,
     source: "booking",
@@ -198,8 +257,8 @@ export function buildProposedHistoryRow(input: {
     basisConfidence: "B",
     sourceClassification,
     isPriceUsableForDpDirect: false,
-    isPriceUsableForDpDirectional: true,
-    isPriceExcludedFromDp: false
+    isPriceUsableForDpDirectional: marker.isPriceUsableForDpDirectional,
+    isPriceExcludedFromDp: marker.isPriceExcludedFromDp
   };
   const rowHash = buildRowHash(hashInput);
   return {
@@ -233,17 +292,17 @@ export function buildProposedHistoryRow(input: {
     normalizedTotalPriceBasis: "visible_booking_price_directional_only",
     normalizedTotalPriceConfidence: "B",
     basisConfidence: "B",
-    basisNote: "directional visible price signal; not all-in official total",
+    basisNote: marker.basisNote,
     sourcePrimaryPrice: input.row.primary_price_numeric,
     sourceSecondaryPriceOrAdder: input.row.official_tax_fee_adder_numeric,
     sourceComputedTotal: input.row.computed_total_with_tax_fee,
     sourceTaxOrFeeClassification: "official_visible_adder_not_available",
     sourceClassification,
     isPriceUsableForDpDirect: false,
-    isPriceUsableForDpDirectional: true,
-    isPriceExcludedFromDp: false,
-    dpExclusionReason: null,
-    warningFlags: input.row.warning_flags.join(";"),
+    isPriceUsableForDpDirectional: marker.isPriceUsableForDpDirectional,
+    isPriceExcludedFromDp: marker.isPriceExcludedFromDp,
+    dpExclusionReason: marker.dpExclusionReason,
+    warningFlags: marker.warningFlags,
     sourceReportPath: input.sourceReportPath,
     sourceCsvPath: input.sourceCsvPath,
     debugArtifactPath: input.row.debug_path,

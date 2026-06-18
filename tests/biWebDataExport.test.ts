@@ -473,6 +473,32 @@ describe("ZMI BI web - HTML static checks (no source selector)", () => {
   });
 });
 
+describe("ROOM-LIVE - BI counts a confirmed Booking two-person row (A4)", () => {
+  it("a Booking row carrying the confirmed marker increments two_person_room_price_sample_count", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_note: BOOKING_ROOM_OK })
+    ]);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.room_basis_summary).toContain("confirmed_two_person_standard_room:1");
+    expect(u[0]!.price_confidence).not.toBe("low");
+  });
+
+  it("a Booking row gated as excluded_single_room is NOT a two-person sample", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", normalized_total_price: 12000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, dp_exclusion_reason: "excluded_room_type_single", source_classification: "booking_room_type_excluded" })
+    ]);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
+  });
+
+  it("a Booking row with unknown room basis is NOT high confidence and not a two-person sample", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", normalized_total_price: 20000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, dp_exclusion_reason: "unknown_room_basis_excluded", source_classification: "booking_room_type_excluded" })
+    ]);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.price_confidence).toBe("low");
+  });
+});
+
 describe("AUTO-RUNNER17X - availability rate separation (§8.5)", () => {
   // One unified row per status (distinct checkin per status).
   const unified = unifyByPropertyCheckin([

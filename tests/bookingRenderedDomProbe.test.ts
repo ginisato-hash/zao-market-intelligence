@@ -182,3 +182,37 @@ describe("renderers and script safety", () => {
     expect(source).not.toMatch(/INSERT\s+INTO\s+collector_runs/iu);
   });
 });
+
+describe("ROOM-LIVE - rendered DOM row extracts room context (A1)", () => {
+  function rowFor(bodyText: string) {
+    return buildBookingRenderedDomRow({
+      target,
+      checkin: "2026-08-10",
+      checkout: "2026-08-11",
+      probeUrl: "https://www.booking.com/hotel/jp/zao-kokusai.ja.html",
+      signals: signals(bodyText),
+      debugArtifactPath: "/tmp/x"
+    });
+  }
+
+  it("twin room with two single beds classifies as confirmed two-person standard", () => {
+    const body = [
+      "蔵王国際ホテル", "2026年8月10日", "2026年8月11日", "1泊", "大人2名", "1室",
+      "スタンダードツインルーム", "シングルベッド2台", "税・手数料込み", "￥24,000",
+      "宿泊施設の説明 ".repeat(30)
+    ].join(" ");
+    const row = rowFor(body);
+    expect(`${row.primaryRoomName} ${row.primaryRoomCardText} ${row.primaryBedHint}`).toMatch(/twin|ツイン|two beds|ベッド2台/u);
+    expect(row.roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+
+  it("single room classifies as excluded_single_room", () => {
+    const body = ["蔵王国際ホテル", "2026年8月10日", "2026年8月11日", "1泊", "大人2名", "1室", "シングルルーム", "税・手数料込み", "￥12,000", "x ".repeat(200)].join(" ");
+    expect(rowFor(body).roomBasis).toBe("excluded_single_room");
+  });
+
+  it("price with no room-type context is unknown_room_basis", () => {
+    const row = rowFor(visibleText()); // no room-type token present
+    expect(row.roomBasis).toBe("unknown_room_basis");
+  });
+});

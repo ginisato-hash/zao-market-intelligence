@@ -1,3 +1,6 @@
+import { extractBookingRoomContextAroundPrice } from "./bookingRoomContextExtraction";
+import { classifyRoomBasisFromParts, type RoomBasis } from "./roomBasisClassification";
+
 export type BookingRenderedDomClassification =
   | "booking_rendered_price_basis_candidate_found"
   | "booking_rendered_sold_out_or_unavailable"
@@ -49,6 +52,11 @@ export interface BookingRenderedDomSignals {
   captchaOrSecurityDetected: boolean;
   loginRequiredDetected: boolean;
   notFoundDetected: boolean;
+  // Room context extracted around the first price candidate (room-basis input).
+  primaryRoomName: string;
+  primaryRoomCardText: string;
+  primaryOccupancyHint: string;
+  primaryBedHint: string;
   error: string;
 }
 
@@ -73,6 +81,13 @@ export interface BookingRenderedDomRow {
   priceCandidateCount: number;
   firstPriceCandidateValue: number | null;
   soldOutOrUnavailableDetected: boolean;
+  // Room context + room-basis classification (room-only two-person standard gate).
+  primaryRoomName: string;
+  primaryRoomCardText: string;
+  primaryOccupancyHint: string;
+  primaryBedHint: string;
+  roomBasis: RoomBasis;
+  roomBasisReason: string;
   classification: BookingRenderedDomClassification;
   riskNote: string;
   debugArtifactPath: string;
@@ -99,6 +114,12 @@ export const BOOKING_RENDERED_DOM_CSV_HEADERS = [
   "price_candidate_count",
   "first_price_candidate_value",
   "sold_out_or_unavailable_detected",
+  "primary_room_name",
+  "primary_room_card_text",
+  "primary_occupancy_hint",
+  "primary_bed_hint",
+  "room_basis",
+  "room_basis_reason",
   "classification",
   "risk_note",
   "debug_artifact_path"
@@ -172,6 +193,13 @@ export function analyzeBookingRenderedDomSignals(input: {
   error?: string;
 }): BookingRenderedDomSignals {
   const text = normalizeText(input.bodyText);
+  const priceCandidates = extractBookingPriceCandidates(text);
+  const roomContext = extractBookingRoomContextAroundPrice({
+    bodyText: text,
+    priceValue: priceCandidates[0]?.numericValue ?? null,
+    priceRawText: priceCandidates[0]?.rawText,
+    contextBeforeAfter: priceCandidates[0]?.contextBeforeAfter
+  });
   return {
     loaded: input.loaded,
     httpStatus: input.httpStatus,
@@ -189,11 +217,15 @@ export function analyzeBookingRenderedDomSignals(input: {
     roomCountDetected: /1\s*室|１\s*室|1\s*部屋|１\s*部屋|no_rooms=1/iu.test(text),
     nightCountDetected: /1\s*泊|１\s*泊|1\s*泊分|１\s*泊分/iu.test(text),
     jpyCurrencyDetected: /￥|¥|JPY|円/u.test(text),
-    priceCandidates: extractBookingPriceCandidates(text),
+    priceCandidates,
     soldOutOrUnavailableDetected: /(売り切れ|満室|空室なし|予約できません|ご利用いただけません|not available|sold out)/iu.test(text),
     captchaOrSecurityDetected: /(captcha|recaptcha|are you a robot|ロボットではありません|セキュリティチェック)/iu.test(text),
     loginRequiredDetected: /(ログイン|サインイン|sign in|log in)/iu.test(text),
     notFoundDetected: /(page not found|ページが見つかりません|お探しのページ)/iu.test(text),
+    primaryRoomName: roomContext.primaryRoomName,
+    primaryRoomCardText: roomContext.primaryRoomCardText,
+    primaryOccupancyHint: roomContext.primaryOccupancyHint,
+    primaryBedHint: roomContext.primaryBedHint,
     error: input.error ?? ""
   };
 }
@@ -231,6 +263,12 @@ export function buildBookingRenderedDomRow(input: {
   debugArtifactPath: string;
 }): BookingRenderedDomRow {
   const classification = classifyBookingRenderedDom(input.signals);
+  // Classify room basis from the extracted room context (card text is already
+  // sanitized so "シングルベッド2台" reads as a twin, not a single room).
+  const roomBasis = classifyRoomBasisFromParts({
+    roomName: input.signals.primaryRoomName,
+    blockText: input.signals.primaryRoomCardText
+  });
   return {
     canonicalPropertyName: input.target.canonicalPropertyName,
     slug: input.target.slug,
@@ -252,6 +290,12 @@ export function buildBookingRenderedDomRow(input: {
     priceCandidateCount: input.signals.priceCandidates.length,
     firstPriceCandidateValue: input.signals.priceCandidates[0]?.numericValue ?? null,
     soldOutOrUnavailableDetected: input.signals.soldOutOrUnavailableDetected,
+    primaryRoomName: input.signals.primaryRoomName,
+    primaryRoomCardText: input.signals.primaryRoomCardText,
+    primaryOccupancyHint: input.signals.primaryOccupancyHint,
+    primaryBedHint: input.signals.primaryBedHint,
+    roomBasis: roomBasis.roomBasis,
+    roomBasisReason: roomBasis.reason,
     classification,
     riskNote: riskNoteForBooking(signalsForRisk(input.signals), classification),
     debugArtifactPath: input.debugArtifactPath
@@ -291,6 +335,12 @@ export function renderBookingRenderedDomCsv(rows: BookingRenderedDomRow[]): stri
       String(row.priceCandidateCount),
       row.firstPriceCandidateValue === null ? "" : String(row.firstPriceCandidateValue),
       bool(row.soldOutOrUnavailableDetected),
+      row.primaryRoomName,
+      row.primaryRoomCardText,
+      row.primaryOccupancyHint,
+      row.primaryBedHint,
+      row.roomBasis,
+      row.roomBasisReason,
       row.classification,
       row.riskNote,
       row.debugArtifactPath
