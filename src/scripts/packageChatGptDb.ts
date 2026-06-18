@@ -25,6 +25,8 @@ import {
   parseHistoryCsvStats,
   renderManifestMd,
   sha256,
+  type CrawlPriorityBundleInfo,
+  type MarketCurveBundleInfo,
   type PriceHistoryBundleInfo,
   type SqliteStats
 } from "../services/chatGptUploadBundle";
@@ -34,6 +36,14 @@ import {
   renderCompetitorPriceChangesCsv,
   renderMarketDailySignalsCsv
 } from "../services/priceHistorySignals";
+import {
+  buildCrawlPriority,
+  buildCrawlPriorityValidation,
+  buildMarketBookingCurve,
+  buildMarketCurveValidation,
+  renderCrawlPriorityCsv,
+  renderMarketCurveCsv
+} from "../services/marketIntelligenceSignals";
 
 const REPO_DIR = resolve(".");
 const HISTORY_DIR = join(REPO_DIR, ".data/history");
@@ -139,6 +149,30 @@ function run(): void {
     decision: ph.validation.decision
   };
 
+  // 1c. Market booking curve + adaptive crawl priority (reuse ph.changes).
+  const curve = buildMarketBookingCurve(phParsed.rows, ph.changes);
+  const curveValidation = buildMarketCurveValidation({ runAt: genAt, inputHistoryRows: phParsed.totalRawRows, curve });
+  const todayJst = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const priority = buildCrawlPriority({ rows: phParsed.rows, curve, changes: ph.changes, runDateIso: todayJst });
+  const priorityValidation = buildCrawlPriorityValidation({ runAt: genAt, rows: priority, inputHistoryRows: phParsed.totalRawRows });
+  const marketCurveInfo: MarketCurveBundleInfo = {
+    included: true,
+    directory: "market-curve/",
+    files: ["market-curve/market_booking_curve.csv", "market-curve/market_booking_curve_validation.json"],
+    purpose: ["market availability/sold-out booking curve by checkin date", "lead-time market movement tracking"],
+    booking_curve_rows: curve.length,
+    decision: curveValidation.decision
+  };
+  const crawlPriorityInfo: CrawlPriorityBundleInfo = {
+    included: true,
+    directory: "crawl-priority/",
+    files: ["crawl-priority/crawl_priority_targets.csv", "crawl-priority/crawl_priority_validation.json"],
+    purpose: ["next-crawl checkin-date prioritization", "rule-based fetch ordering by movement and lead time"],
+    crawl_priority_rows: priority.length,
+    high_priority_count: priorityValidation.high_priority_count,
+    decision: priorityValidation.decision
+  };
+
   // 2. Build manifest data.
   const manifestData = buildManifestData({
     generated_at_jst: genAt,
@@ -150,7 +184,9 @@ function run(): void {
     history: historyStats,
     sqlite: sqliteStats,
     warnings,
-    price_history: priceHistoryInfo
+    price_history: priceHistoryInfo,
+    market_booking_curve: marketCurveInfo,
+    crawl_priority: crawlPriorityInfo
   });
 
   // Check for mismatch and add to warnings if not already there.
@@ -179,6 +215,14 @@ function run(): void {
   writeFileSync(join(bundleDir, "price-history", "competitor_price_changes.csv"), renderCompetitorPriceChangesCsv(ph.changes), "utf8");
   writeFileSync(join(bundleDir, "price-history", "market_daily_price_change_signals.csv"), renderMarketDailySignalsCsv(ph.dailySignals), "utf8");
   writeFileSync(join(bundleDir, "price-history", "price_history_validation.json"), `${JSON.stringify(ph.validation, null, 2)}\n`, "utf8");
+
+  // 5c. Write market booking curve + crawl priority artifacts into the bundle.
+  mkdirSync(join(bundleDir, "market-curve"), { recursive: true });
+  writeFileSync(join(bundleDir, "market-curve", "market_booking_curve.csv"), renderMarketCurveCsv(curve), "utf8");
+  writeFileSync(join(bundleDir, "market-curve", "market_booking_curve_validation.json"), `${JSON.stringify(curveValidation, null, 2)}\n`, "utf8");
+  mkdirSync(join(bundleDir, "crawl-priority"), { recursive: true });
+  writeFileSync(join(bundleDir, "crawl-priority", "crawl_priority_targets.csv"), renderCrawlPriorityCsv(priority), "utf8");
+  writeFileSync(join(bundleDir, "crawl-priority", "crawl_priority_validation.json"), `${JSON.stringify(priorityValidation, null, 2)}\n`, "utf8");
 
   // 6. Copy SQLite (if present).
   if (sqliteStats !== null) {
@@ -241,6 +285,8 @@ function run(): void {
   console.log(`price_history_included=${manifestData.price_history_signals.included}`);
   console.log(`price_history_decision=${manifestData.price_history_signals.decision}`);
   console.log(`price_history_comparison_pairs=${manifestData.price_history_signals.comparison_pair_count}`);
+  console.log(`market_booking_curve_rows=${manifestData.market_booking_curve.booking_curve_rows}`);
+  console.log(`crawl_priority_rows=${manifestData.crawl_priority_signals.crawl_priority_rows}`);
   if (manifestData.warnings.length > 0) {
     for (const w of manifestData.warnings) console.log(`warning=${w}`);
   }

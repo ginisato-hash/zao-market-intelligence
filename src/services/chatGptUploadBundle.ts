@@ -47,6 +47,25 @@ export interface PriceHistoryBundleInfo {
   decision: string;
 }
 
+export interface MarketCurveBundleInfo {
+  included: boolean;
+  directory: string;
+  files: string[];
+  purpose: string[];
+  booking_curve_rows: number;
+  decision: string;
+}
+
+export interface CrawlPriorityBundleInfo {
+  included: boolean;
+  directory: string;
+  files: string[];
+  purpose: string[];
+  crawl_priority_rows: number;
+  high_priority_count: number;
+  decision: string;
+}
+
 export interface BundleManifestInput {
   generated_at_jst: string;
   git_head: string;
@@ -58,6 +77,8 @@ export interface BundleManifestInput {
   sqlite: SqliteStats | null;
   warnings: string[];
   price_history?: PriceHistoryBundleInfo | null;
+  market_booking_curve?: MarketCurveBundleInfo | null;
+  crawl_priority?: CrawlPriorityBundleInfo | null;
 }
 
 export interface ManifestData {
@@ -73,6 +94,8 @@ export interface ManifestData {
   counts: { by_source: Record<string, number>; duplicate_row_id: number };
   latest: { latest_collected_date: string | null; latest_stay_date: string | null };
   price_history_signals: PriceHistoryBundleInfo;
+  market_booking_curve: MarketCurveBundleInfo;
+  crawl_priority_signals: CrawlPriorityBundleInfo;
   source_of_truth: SourceOfTruth;
   warnings: string[];
 }
@@ -85,6 +108,14 @@ const PRICE_HISTORY_NOT_INCLUDED: PriceHistoryBundleInfo = {
   comparison_pair_count: 0,
   daily_signal_rows: 0,
   decision: "not_included"
+};
+
+const MARKET_CURVE_NOT_INCLUDED: MarketCurveBundleInfo = {
+  included: false, directory: "", files: [], purpose: [], booking_curve_rows: 0, decision: "not_included"
+};
+
+const CRAWL_PRIORITY_NOT_INCLUDED: CrawlPriorityBundleInfo = {
+  included: false, directory: "", files: [], purpose: [], crawl_priority_rows: 0, high_priority_count: 0, decision: "not_included"
 };
 
 export function sha256(data: Buffer): string {
@@ -125,6 +156,8 @@ export function buildManifestData(input: BundleManifestInput): ManifestData {
     counts: { by_source: input.history.by_source, duplicate_row_id: input.history.duplicate_row_id_count },
     latest: { latest_collected_date: input.history.latest_collected_date, latest_stay_date: input.history.latest_stay_date },
     price_history_signals: input.price_history ?? PRICE_HISTORY_NOT_INCLUDED,
+    market_booking_curve: input.market_booking_curve ?? MARKET_CURVE_NOT_INCLUDED,
+    crawl_priority_signals: input.crawl_priority ?? CRAWL_PRIORITY_NOT_INCLUDED,
     source_of_truth: computeSourceOfTruth({ sqlitePresent: input.sqlite !== null, sqliteRowCount, historyRowCount: input.history.row_count }),
     warnings
   };
@@ -180,6 +213,29 @@ ${data.price_history_signals.purpose.map((p) => `  - ${p}`).join("\n") || "  - (
 - comparison_pair_count: ${data.price_history_signals.comparison_pair_count}
 - daily_signal_rows: ${data.price_history_signals.daily_signal_rows}
 - decision: ${data.price_history_signals.decision}
+
+## 3c. market_booking_curve
+
+- included: ${String(data.market_booking_curve.included)}
+- directory: ${data.market_booking_curve.directory || "(none)"}
+- files:
+${data.market_booking_curve.files.map((f) => `  - ${f}`).join("\n") || "  - (none)"}
+- purpose:
+${data.market_booking_curve.purpose.map((p) => `  - ${p}`).join("\n") || "  - (none)"}
+- booking_curve_rows: ${data.market_booking_curve.booking_curve_rows}
+- decision: ${data.market_booking_curve.decision}
+
+## 3d. crawl_priority_signals
+
+- included: ${String(data.crawl_priority_signals.included)}
+- directory: ${data.crawl_priority_signals.directory || "(none)"}
+- files:
+${data.crawl_priority_signals.files.map((f) => `  - ${f}`).join("\n") || "  - (none)"}
+- purpose:
+${data.crawl_priority_signals.purpose.map((p) => `  - ${p}`).join("\n") || "  - (none)"}
+- crawl_priority_rows: ${data.crawl_priority_signals.crawl_priority_rows}
+- high_priority_count: ${data.crawl_priority_signals.high_priority_count}
+- decision: ${data.crawl_priority_signals.decision}
 
 ## 4. How ChatGPT should use this bundle
 
