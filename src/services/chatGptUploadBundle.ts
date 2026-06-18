@@ -37,6 +37,16 @@ export interface SqliteStats {
   sha256: string;
 }
 
+export interface PriceHistoryBundleInfo {
+  included: boolean;
+  directory: string;
+  files: string[];
+  purpose: string[];
+  comparison_pair_count: number;
+  daily_signal_rows: number;
+  decision: string;
+}
+
 export interface BundleManifestInput {
   generated_at_jst: string;
   git_head: string;
@@ -47,6 +57,7 @@ export interface BundleManifestInput {
   history: HistoryStats;
   sqlite: SqliteStats | null;
   warnings: string[];
+  price_history?: PriceHistoryBundleInfo | null;
 }
 
 export interface ManifestData {
@@ -61,9 +72,20 @@ export interface ManifestData {
   history: { included: boolean; directory: string; file_count: number; row_count: number; sha256_by_file: Record<string, string> };
   counts: { by_source: Record<string, number>; duplicate_row_id: number };
   latest: { latest_collected_date: string | null; latest_stay_date: string | null };
+  price_history_signals: PriceHistoryBundleInfo;
   source_of_truth: SourceOfTruth;
   warnings: string[];
 }
+
+const PRICE_HISTORY_NOT_INCLUDED: PriceHistoryBundleInfo = {
+  included: false,
+  directory: "",
+  files: [],
+  purpose: [],
+  comparison_pair_count: 0,
+  daily_signal_rows: 0,
+  decision: "not_included"
+};
 
 export function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -102,6 +124,7 @@ export function buildManifestData(input: BundleManifestInput): ManifestData {
     history: { included: true, directory: "history/", file_count: input.history.file_count, row_count: input.history.row_count, sha256_by_file: input.history.sha256_by_file },
     counts: { by_source: input.history.by_source, duplicate_row_id: input.history.duplicate_row_id_count },
     latest: { latest_collected_date: input.history.latest_collected_date, latest_stay_date: input.history.latest_stay_date },
+    price_history_signals: input.price_history ?? PRICE_HISTORY_NOT_INCLUDED,
     source_of_truth: computeSourceOfTruth({ sqlitePresent: input.sqlite !== null, sqliteRowCount, historyRowCount: input.history.row_count }),
     warnings
   };
@@ -145,6 +168,18 @@ ${bySrc}
 - latest_stay_date: ${data.latest.latest_stay_date ?? "unknown"}
 - source_of_truth: ${data.source_of_truth}
 ${data.warnings.length > 0 ? `\n**Warnings:**\n${data.warnings.map((w) => `- ${w}`).join("\n")}` : ""}
+
+## 3b. price_history_signals
+
+- included: ${String(data.price_history_signals.included)}
+- directory: ${data.price_history_signals.directory || "(none)"}
+- files:
+${data.price_history_signals.files.map((f) => `  - ${f}`).join("\n") || "  - (none)"}
+- purpose:
+${data.price_history_signals.purpose.map((p) => `  - ${p}`).join("\n") || "  - (none)"}
+- comparison_pair_count: ${data.price_history_signals.comparison_pair_count}
+- daily_signal_rows: ${data.price_history_signals.daily_signal_rows}
+- decision: ${data.price_history_signals.decision}
 
 ## 4. How ChatGPT should use this bundle
 

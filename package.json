@@ -180,6 +180,8 @@
     "bi:web:publish": "node --import tsx src/scripts/publishBiWeb.ts",
     "bi:web:serve": "python3 -m http.server 8787 --directory apps/zmi-bi-web",
     "bi:web:check": "node --import tsx src/scripts/exportBiWebData.ts --check",
+    "build:price-history-signals": "node --import tsx src/scripts/runPriceHistorySignals.ts",
+    "validate:price-history-signals": "node --import tsx src/scripts/runPriceHistorySignals.ts --check",
     "verify:source-mappings": "node --import tsx src/scripts/runSourceMappingVerification.ts",
     "discover:source-mappings": "node --import tsx src/scripts/runSourceMappingDiscovery.ts",
     "auto-runner:16x-b:manual-live-pilot": "node --import tsx src/scripts/runAutoRunner16xBManualLivePilot.ts",

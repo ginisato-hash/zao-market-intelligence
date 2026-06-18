@@ -25,8 +25,15 @@ import {
   parseHistoryCsvStats,
   renderManifestMd,
   sha256,
+  type PriceHistoryBundleInfo,
   type SqliteStats
 } from "../services/chatGptUploadBundle";
+import {
+  buildPriceHistorySignals,
+  parseHistoryForPriceHistory,
+  renderCompetitorPriceChangesCsv,
+  renderMarketDailySignalsCsv
+} from "../services/priceHistorySignals";
 
 const REPO_DIR = resolve(".");
 const HISTORY_DIR = join(REPO_DIR, ".data/history");
@@ -109,6 +116,29 @@ function run(): void {
   }
   const sqliteStats = readSqliteStats(warnings);
 
+  // 1b. Generate price-history signals fresh from the same history CSVs.
+  const phParsed = parseHistoryForPriceHistory(historyFiles);
+  const ph = buildPriceHistorySignals(phParsed.rows, {
+    runAt: genAt,
+    inputSources: historyFiles.map((f) => `history/${f.filename}`),
+    totalRawRows: phParsed.totalRawRows,
+    observedAtColumnUsed: phParsed.observedAtColumnUsed,
+    observedAtConfidence: phParsed.observedAtConfidence
+  });
+  const priceHistoryInfo: PriceHistoryBundleInfo = {
+    included: true,
+    directory: "price-history/",
+    files: [
+      "price-history/competitor_price_changes.csv",
+      "price-history/market_daily_price_change_signals.csv",
+      "price-history/price_history_validation.json"
+    ],
+    purpose: ["competitor price change tracking", "sold out transition tracking", "daily market pressure scoring"],
+    comparison_pair_count: ph.validation.comparison_pair_count,
+    daily_signal_rows: ph.dailySignals.length,
+    decision: ph.validation.decision
+  };
+
   // 2. Build manifest data.
   const manifestData = buildManifestData({
     generated_at_jst: genAt,
@@ -119,7 +149,8 @@ function run(): void {
     upload_folder_path: uploadDir,
     history: historyStats,
     sqlite: sqliteStats,
-    warnings
+    warnings,
+    price_history: priceHistoryInfo
   });
 
   // Check for mismatch and add to warnings if not already there.
@@ -142,6 +173,12 @@ function run(): void {
   for (const { filename, content } of historyFiles) {
     writeFileSync(join(bundleDir, "history", filename), content, "utf8");
   }
+
+  // 5b. Write price-history signal artifacts into the bundle.
+  mkdirSync(join(bundleDir, "price-history"), { recursive: true });
+  writeFileSync(join(bundleDir, "price-history", "competitor_price_changes.csv"), renderCompetitorPriceChangesCsv(ph.changes), "utf8");
+  writeFileSync(join(bundleDir, "price-history", "market_daily_price_change_signals.csv"), renderMarketDailySignalsCsv(ph.dailySignals), "utf8");
+  writeFileSync(join(bundleDir, "price-history", "price_history_validation.json"), `${JSON.stringify(ph.validation, null, 2)}\n`, "utf8");
 
   // 6. Copy SQLite (if present).
   if (sqliteStats !== null) {
@@ -201,6 +238,9 @@ function run(): void {
   console.log(`sqlite_rows=${sqliteStats?.row_count ?? "missing"}`);
   console.log(`duplicate_row_id=${historyStats.duplicate_row_id_count}`);
   console.log(`source_of_truth=${manifestData.source_of_truth}`);
+  console.log(`price_history_included=${manifestData.price_history_signals.included}`);
+  console.log(`price_history_decision=${manifestData.price_history_signals.decision}`);
+  console.log(`price_history_comparison_pairs=${manifestData.price_history_signals.comparison_pair_count}`);
   if (manifestData.warnings.length > 0) {
     for (const w of manifestData.warnings) console.log(`warning=${w}`);
   }
