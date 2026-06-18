@@ -10,6 +10,7 @@ import {
   parseHistoryCsvStats,
   renderManifestMd,
   sha256,
+  splitCsvRecords,
   type BundleManifestInput
 } from "../src/services/chatGptUploadBundle";
 
@@ -56,6 +57,24 @@ describe("CHATGPT-UPLOAD01 - history CSV parsing", () => {
   it("detects duplicate row_ids", () => {
     const stats = parseHistoryCsvStats([{ filename: "f.csv", content: FIXTURE_CSV }]);
     expect(stats.duplicate_row_id_count).toBe(1);
+  });
+
+  // Quoted fields may contain embedded newlines; those must count as ONE logical
+  // row, not as separate rows (otherwise history_rows over-counts vs the SQLite
+  // mirror and raises a false sqlite_history_row_count_mismatch).
+  it("counts a quoted multi-line field as a single logical row", () => {
+    const csv = `row_id,source,basis_note\nr1,booking,"line one\nline two\nline three"\nr2,jalan,plain`;
+    const stats = parseHistoryCsvStats([{ filename: "f.csv", content: csv }]);
+    expect(stats.row_count).toBe(2); // NOT 4 (raw lines)
+    expect(stats.by_source["booking"]).toBe(1);
+    expect(stats.by_source["jalan"]).toBe(1);
+  });
+
+  it("splitCsvRecords keeps quoted newlines inside one record", () => {
+    const csv = `a,b,c\n1,2,3\n4,"hello\nworld",6\n7,8,9`;
+    const records = splitCsvRecords(csv);
+    expect(records).toHaveLength(4); // header + 3 logical data rows (raw lines = 5)
+    expect(records[2]).toBe('4,"hello\nworld",6');
   });
 
   it("returns latest collected and stay dates", () => {
