@@ -29,6 +29,7 @@ button,select,input{font:inherit}button{cursor:pointer}.page{max-width:1480px;ma
 .metric-sub{display:block;margin-top:8px;font-size:11.5px;color:var(--muted);font-weight:700;line-height:1.6}
 .help{color:var(--muted);font-weight:700;font-size:11px}
 .detail-note{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.fc-reason{grid-column:1/-1;font-weight:800}
 .band-pill,.pressure-pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:950}
 .band-low{background:#e8f8ef;color:var(--green)}
 .band-mid{background:#eef1f6;color:#475569}

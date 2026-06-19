@@ -187,11 +187,14 @@ describe("ZMI BI export - price aggregation & confidence", () => {
     expect(u[0]!.room_basis_summary).toContain("confirmed_two_person_standard_room:1");
   });
 
-  it("Booking strong price but UNKNOWN room basis => price_confidence NOT high", () => {
+  it("Booking strong price, no room name => PROBABLE two-person, medium (never high)", () => {
     const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A" })]);
-    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
-    expect(u[0]!.price_confidence).not.toBe("high");
-    expect(u[0]!.unknown_room_basis_count).toBe(1);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1); // confirmed + probable
+    expect(u[0]!.confirmed_two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.probable_two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.room_basis_confidence).toBe("medium");
+    expect(u[0]!.price_confidence).toBe("medium"); // probable lifts low->medium, never high
+    expect(u[0]!.unknown_room_basis_count).toBe(0);
   });
 
   it("Booking strong price + confirmed two-person room => high", () => {
@@ -229,13 +232,13 @@ describe("ZMI BI export - price aggregation & confidence", () => {
   });
 
   // HOTFIX: room-basis must not blank BI display prices; it only caps confidence.
-  it("(hotfix-1) legacy Booking room-only with UNKNOWN room basis still shows a display price, capped low", () => {
+  it("(hotfix-1) Booking room-only with no room name is PROBABLE two-person, lifted to medium", () => {
     const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A" })]);
     expect(u[0]!.median_directional_price).toBe(30000); // display price preserved
     expect(u[0]!.room_only_price_sample_count).toBe(1);
-    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
-    expect(u[0]!.unknown_room_basis_count).toBeGreaterThanOrEqual(1);
-    expect(u[0]!.price_confidence).toBe("low"); // capped: no confirmed two-person sample
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1); // probable counts
+    expect(u[0]!.probable_two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.price_confidence).toBe("medium"); // probable Booking lifts low->medium
     expect(u[0]!.price_basis_confidence).toBe("high"); // reading quality may still be high
   });
 
@@ -263,9 +266,9 @@ describe("ZMI BI export - price aggregation & confidence", () => {
       row({ source: "jalan", normalized_total_price: 18000, is_price_usable_for_dp_directional: false, is_price_excluded_from_dp: true, source_classification: "jalan_room_type_excluded", dp_exclusion_reason: "excluded_room_type_family_or_suite" })
     ]);
     expect(u[0]!.median_directional_price).toBe(30000); // booking room-only price still displays
-    expect(u[0]!.two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.two_person_room_price_sample_count).toBe(1); // booking row is probable two-person
     expect(u[0]!.excluded_room_type_price_sample_count).toBe(1);
-    expect(u[0]!.price_confidence).toBe("low");
+    expect(u[0]!.price_confidence).toBe("medium"); // probable booking lifts to medium
   });
 
   it("drops structurally invalid observations (blank checkin/name/source) — no _early/NaN row", () => {
@@ -320,8 +323,8 @@ describe("ZMI BI export - flags, csv, metadata", () => {
   it("csv header matches the required schema exactly", () => {
     const csv = renderUnifiedCsv(unifyByPropertyCheckin([row({})]));
     const header = csv.split("\n")[0];
-    expect(header).toBe("period_key,period_label,checkin,canonical_property_name,unified_availability_status,source_count,available_source_count,sold_out_source_count,no_data_source_count,median_directional_price,avg_directional_price,price_sample_count,price_confidence,price_basis_confidence,price_coverage_confidence,meal_basis_summary,room_only_price_sample_count,excluded_meal_price_sample_count,unknown_meal_basis_count,room_basis_summary,two_person_room_price_sample_count,excluded_room_type_price_sample_count,unknown_room_basis_count,inventory_confidence,latest_collected_at_jst,is_room_only_comp,is_own_property,tier");
-    expect(BI_CSV_HEADERS.length).toBe(28);
+    expect(header).toBe("period_key,period_label,checkin,canonical_property_name,unified_availability_status,source_count,available_source_count,sold_out_source_count,no_data_source_count,median_directional_price,avg_directional_price,price_sample_count,price_confidence,price_basis_confidence,price_coverage_confidence,meal_basis_summary,room_only_price_sample_count,excluded_meal_price_sample_count,unknown_meal_basis_count,room_basis_summary,two_person_room_price_sample_count,excluded_room_type_price_sample_count,unknown_room_basis_count,inventory_confidence,latest_collected_at_jst,is_room_only_comp,is_own_property,tier,confirmed_two_person_room_price_sample_count,probable_two_person_room_price_sample_count,room_basis_confidence,price_confidence_reason,low_confidence_reason");
+    expect(BI_CSV_HEADERS.length).toBe(33);
   });
 
   it("csv summaries do not shift numeric columns for comma-split sanity checks", () => {
@@ -387,6 +390,8 @@ describe("ZMI BI export - period retention", () => {
       room_only_price_sample_count: 1, excluded_meal_price_sample_count: 0, unknown_meal_basis_count: 0,
       room_basis_summary: "confirmed_two_person_standard_room:1,excluded_single_room:0,excluded_semi_double_room:0,excluded_large_room:0,excluded_family_or_suite_room:0,unknown:0",
       two_person_room_price_sample_count: 1, excluded_room_type_price_sample_count: 0, unknown_room_basis_count: 0,
+      confirmed_two_person_room_price_sample_count: 1, probable_two_person_room_price_sample_count: 0,
+      room_basis_confidence: "high", price_confidence_reason: "confirmed_two_person_standard_room", low_confidence_reason: "",
       inventory_confidence: "medium", latest_collected_at_jst: "2026-06-14T12:00:00+09:00",
       is_room_only_comp: false, is_own_property: false, tier: "tier_budget_small"
     };
@@ -549,5 +554,31 @@ describe("AUTO-RUNNER17X - availability rate separation (§8.5)", () => {
     const meta = buildBiMetadata({ generatedAtJst: "2026-07-01T00:00:00+09:00", historyRowsTotal: 4, latest: [], unifiedBeforeRetention: unified, retention });
     expect(meta.availability_breakdown.ota_unavailable_rate).toBe(meta.availability_breakdown.sold_out / (meta.availability_breakdown.available + meta.availability_breakdown.sold_out));
     expect(meta.availability_rate_policy).toContain("never counted as sold_out");
+  });
+});
+
+describe("PRICE-CONFIDENCE01 — probable two-person Booking confidence", () => {
+  it("probable Booking lifts price_confidence low->medium with a reason", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 28000, is_price_usable_for_dp_directional: true })]);
+    expect(u[0]!.price_confidence).toBe("medium");
+    expect(u[0]!.room_basis_confidence).toBe("medium");
+    expect(u[0]!.confirmed_two_person_room_price_sample_count).toBe(0);
+    expect(u[0]!.probable_two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.price_confidence_reason).toContain("probable");
+    expect(u[0]!.room_basis_summary).toContain("probable_two_person_standard_room:1");
+    expect(u[0]!.low_confidence_reason).toBe("");
+  });
+
+  it("confirmed stays high and is not demoted by the probable broadening", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", normalized_total_price: 30000, is_price_usable_for_dp_directional: true, basis_confidence: "A", basis_note: BOOKING_ROOM_OK })]);
+    expect(u[0]!.confirmed_two_person_room_price_sample_count).toBe(1);
+    expect(u[0]!.room_basis_confidence).toBe("high");
+    expect(u[0]!.price_confidence).toBe("high");
+  });
+
+  it("no available price stays low with a low_confidence_reason", () => {
+    const u = unifyByPropertyCheckin([row({ source: "booking", availability_status: "sold_out", normalized_total_price: null, is_price_usable_for_dp_directional: false })]);
+    expect(u[0]!.price_confidence).toBe("low");
+    expect(u[0]!.low_confidence_reason).not.toBe("");
   });
 });

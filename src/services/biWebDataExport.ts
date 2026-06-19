@@ -89,10 +89,12 @@ export function isRoomOnlyPriceSample(row: BiHistoryRow): boolean {
 
 export type RoomBasisBi =
   | "confirmed_two_person_standard_room"
+  | "probable_two_person_standard_room"
   | "excluded_single_room"
   | "excluded_semi_double_room"
   | "excluded_large_room"
   | "excluded_family_or_suite_room"
+  | "excluded_other_room_type"
   | "unknown_room_basis";
 
 // Derive room basis for a BI row from existing v1 columns (§5.3-style):
@@ -109,6 +111,7 @@ export function deriveBiRoomBasis(row: BiHistoryRow): RoomBasisBi {
   if (reason === "excluded_room_type_semi_double") return "excluded_semi_double_room";
   if (reason === "excluded_room_type_large") return "excluded_large_room";
   if (reason === "excluded_room_type_family_or_suite") return "excluded_family_or_suite_room";
+  if (reason === "excluded_room_type_other") return "excluded_other_room_type";
   if (reason === "unknown_room_basis_excluded" || reason === "no_confirmed_two_person_room_only_safe_plan_candidates") {
     return "unknown_room_basis";
   }
@@ -123,13 +126,45 @@ export function deriveBiRoomBasis(row: BiHistoryRow): RoomBasisBi {
   ) {
     return "confirmed_two_person_standard_room";
   }
+  // Explicit probable marker (future live data carrying a room card hint).
+  if (
+    wf.includes("room_basis=probable_two_person_standard_room") ||
+    wf.includes("room_basis_probable_two_person_standard") ||
+    bn.includes("room_basis=probable_two_person_standard_room") ||
+    sc.includes("two_person_probable")
+  ) {
+    return "probable_two_person_standard_room";
+  }
+  // Booking is queried at 2 adults / 1 room by ZMI policy, so an AVAILABLE,
+  // priced, non-excluded Booking row with no confirmed marker is a PROBABLE
+  // two-person standard room (lifts low -> medium without claiming confirmed).
+  if (
+    row.source === "booking" &&
+    normalizeAvailability(row.availability_status) === "available" &&
+    row.normalized_total_price !== null &&
+    row.is_price_excluded_from_dp !== true
+  ) {
+    return "probable_two_person_standard_room";
+  }
   return "unknown_room_basis";
 }
 
-// A row is a DP price sample under the room-basis-hardened policy only when it is
-// a room-only eligible price sample AND a confirmed two-person standard room.
-export function isTwoPersonStandardRoomPriceSample(row: BiHistoryRow): boolean {
+// Room-only eligible price sample whose room basis is a CONFIRMED two-person
+// standard room (highest room confidence).
+export function isConfirmedTwoPersonStandardRoomPriceSample(row: BiHistoryRow): boolean {
   return isRoomOnlyPriceSample(row) && deriveBiRoomBasis(row) === "confirmed_two_person_standard_room";
+}
+
+// Room-only eligible price sample whose room basis is a PROBABLE two-person
+// standard room (Booking 2-adult search, no exclusion — medium room confidence).
+export function isProbableTwoPersonStandardRoomPriceSample(row: BiHistoryRow): boolean {
+  return isRoomOnlyPriceSample(row) && deriveBiRoomBasis(row) === "probable_two_person_standard_room";
+}
+
+// Backward-compatible "two-person" sample = confirmed + probable. Detailed
+// confirmed/probable counts are reported separately so the broadening is visible.
+export function isTwoPersonStandardRoomPriceSample(row: BiHistoryRow): boolean {
+  return isConfirmedTwoPersonStandardRoomPriceSample(row) || isProbableTwoPersonStandardRoomPriceSample(row);
 }
 
 // A priced row excluded specifically for room type (or unknown room basis).
@@ -162,10 +197,15 @@ export interface UnifiedRow {
   room_only_price_sample_count: number;
   excluded_meal_price_sample_count: number;
   unknown_meal_basis_count: number;
-  room_basis_summary: string; // e.g. "confirmed_two_person_standard_room:1,excluded_single_room:0,...,unknown:2"
-  two_person_room_price_sample_count: number;
+  room_basis_summary: string; // e.g. "confirmed_two_person_standard_room:1,probable_two_person_standard_room:1,...,unknown:2"
+  two_person_room_price_sample_count: number; // confirmed + probable (back-compat broadened)
+  confirmed_two_person_room_price_sample_count: number;
+  probable_two_person_room_price_sample_count: number;
   excluded_room_type_price_sample_count: number;
   unknown_room_basis_count: number;
+  room_basis_confidence: Confidence; // confirmed -> high, probable -> medium, else low
+  price_confidence_reason: string; // why price_confidence is what it is
+  low_confidence_reason: string; // populated only when price_confidence === "low"
   inventory_confidence: Confidence;
   latest_collected_at_jst: string;
   is_room_only_comp: boolean;
@@ -287,7 +327,9 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
     // a price. Room-basis is reported separately and used only to CAP confidence
     // — it must not blank the display price. two_person is the confirmed subset.
     const roomOnlyRows = unified === "available" ? rows.filter((r) => isRoomOnlyPriceSample(r)) : [];
-    const twoPersonRows = unified === "available" ? rows.filter((r) => isTwoPersonStandardRoomPriceSample(r)) : [];
+    const confirmedRows = unified === "available" ? rows.filter((r) => isConfirmedTwoPersonStandardRoomPriceSample(r)) : [];
+    const probableRows = unified === "available" ? rows.filter((r) => isProbableTwoPersonStandardRoomPriceSample(r)) : [];
+    const twoPersonRows = [...confirmedRows, ...probableRows];
     const displayPriceRows = roomOnlyRows;
     const prices = displayPriceRows.map((r) => r.normalized_total_price!);
     const med = median(prices);
@@ -297,10 +339,12 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
     const mealCounts = { assumed_room_only: 0, confirmed_room_only: 0, meal_included: 0, unknown_meal_basis: 0 };
     const roomCounts = {
       confirmed_two_person_standard_room: 0,
+      probable_two_person_standard_room: 0,
       excluded_single_room: 0,
       excluded_semi_double_room: 0,
       excluded_large_room: 0,
       excluded_family_or_suite_room: 0,
+      excluded_other_room_type: 0,
       unknown_room_basis: 0
     };
     let excludedMealPriced = 0;
@@ -324,9 +368,35 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
     const basisConf = priceBasisConfidence({ roomOnlySampleCount: prices.length, strongBookingRoomOnly });
     const coverageConf = priceCoverageConfidence(roomOnlySourceCount);
     const baseOverallConf = overallPriceConfidence({ basis: basisConf, coverage: coverageConf, strongBookingRoomOnly, roomOnlySampleCount: prices.length });
-    const overallConf: Confidence = prices.length === 0 ? "low" : twoPersonRows.length === 0 ? "low" : baseOverallConf;
+    // Room basis confidence: confirmed two-person -> high; probable (Booking
+    // 2-adult, no exclusion) -> medium; otherwise low.
+    const roomBasisConf: Confidence = confirmedRows.length > 0 ? "high" : probableRows.length > 0 ? "medium" : "low";
+    // Overall price confidence ladder (replaces the old "low unless confirmed"
+    // hard cap): confirmed -> base overall (may be high); probable -> capped to
+    // medium (never high); only-unknown / no price -> low. Reasons are recorded
+    // so the BI page can explain WHY each price is high/medium/low.
+    let overallConf: Confidence;
+    let priceConfidenceReason: string;
+    let lowConfidenceReason = "";
+    if (prices.length === 0) {
+      overallConf = "low";
+      priceConfidenceReason = "no_room_only_price_sample";
+      lowConfidenceReason = roomOnlyRows.length === 0 ? "no_room_only_price_sample" : "no_priced_available_room";
+    } else if (confirmedRows.length > 0) {
+      overallConf = baseOverallConf;
+      priceConfidenceReason = "confirmed_two_person_standard_room";
+      if (overallConf === "low") lowConfidenceReason = "low_basis_and_coverage";
+    } else if (probableRows.length > 0) {
+      overallConf = baseOverallConf === "high" ? "medium" : baseOverallConf; // probable never high
+      priceConfidenceReason = "probable_two_person_standard_room_booking_2adults";
+      if (overallConf === "low") lowConfidenceReason = "probable_low_basis_and_coverage";
+    } else {
+      overallConf = "low";
+      priceConfidenceReason = "unknown_room_basis";
+      lowConfidenceReason = "unknown_room_basis";
+    }
     const mealSummary = `assumed_room_only:${mealCounts.assumed_room_only},confirmed_room_only:${mealCounts.confirmed_room_only},meal_included:${mealCounts.meal_included},unknown:${mealCounts.unknown_meal_basis}`;
-    const roomSummary = `confirmed_two_person_standard_room:${roomCounts.confirmed_two_person_standard_room},excluded_single_room:${roomCounts.excluded_single_room},excluded_semi_double_room:${roomCounts.excluded_semi_double_room},excluded_large_room:${roomCounts.excluded_large_room},excluded_family_or_suite_room:${roomCounts.excluded_family_or_suite_room},unknown:${roomCounts.unknown_room_basis}`;
+    const roomSummary = `confirmed_two_person_standard_room:${roomCounts.confirmed_two_person_standard_room},probable_two_person_standard_room:${roomCounts.probable_two_person_standard_room},excluded_single_room:${roomCounts.excluded_single_room},excluded_semi_double_room:${roomCounts.excluded_semi_double_room},excluded_large_room:${roomCounts.excluded_large_room},excluded_family_or_suite_room:${roomCounts.excluded_family_or_suite_room},excluded_other_room_type:${roomCounts.excluded_other_room_type},unknown:${roomCounts.unknown_room_basis}`;
 
     const latestCollected = rows.reduce((acc, r) => (r.collected_at_jst > acc ? r.collected_at_jst : acc), "");
     const sourceCount = new Set(rows.map((r) => r.source)).size;
@@ -354,8 +424,13 @@ export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): Unified
       unknown_meal_basis_count: mealCounts.unknown_meal_basis,
       room_basis_summary: roomSummary,
       two_person_room_price_sample_count: twoPersonRows.length,
+      confirmed_two_person_room_price_sample_count: confirmedRows.length,
+      probable_two_person_room_price_sample_count: probableRows.length,
       excluded_room_type_price_sample_count: excludedRoomTypePriced,
       unknown_room_basis_count: roomCounts.unknown_room_basis,
+      room_basis_confidence: roomBasisConf,
+      price_confidence_reason: priceConfidenceReason,
+      low_confidence_reason: lowConfidenceReason,
       inventory_confidence: inventoryConfidence(sourceCount),
       latest_collected_at_jst: latestCollected,
       is_room_only_comp: (ROOM_ONLY_COMPS as readonly string[]).includes(first.canonical_property_name),
@@ -443,7 +518,12 @@ export const BI_CSV_HEADERS = [
   "latest_collected_at_jst",
   "is_room_only_comp",
   "is_own_property",
-  "tier"
+  "tier",
+  "confirmed_two_person_room_price_sample_count",
+  "probable_two_person_room_price_sample_count",
+  "room_basis_confidence",
+  "price_confidence_reason",
+  "low_confidence_reason"
 ] as const;
 
 function csvCell(value: string): string {
@@ -486,7 +566,12 @@ export function renderUnifiedCsv(rows: readonly UnifiedRow[]): string {
       r.latest_collected_at_jst,
       String(r.is_room_only_comp),
       String(r.is_own_property),
-      r.tier
+      r.tier,
+      String(r.confirmed_two_person_room_price_sample_count),
+      String(r.probable_two_person_room_price_sample_count),
+      r.room_basis_confidence,
+      r.price_confidence_reason,
+      r.low_confidence_reason
     ].map(csvCell).join(",")
   );
   return [BI_CSV_HEADERS.join(","), ...body].join("\n") + "\n";

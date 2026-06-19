@@ -180,6 +180,7 @@
     "bi:web:publish": "node --import tsx src/scripts/publishBiWeb.ts",
     "bi:web:serve": "python3 -m http.server 8787 --directory apps/zmi-bi-web",
     "bi:web:check": "node --import tsx src/scripts/exportBiWebData.ts --check",
+    "review:booking-price-confidence": "node --import tsx src/scripts/runBookingPriceConfidenceReview.ts",
     "build:price-history-signals": "node --import tsx src/scripts/runPriceHistorySignals.ts",
     "validate:price-history-signals": "node --import tsx src/scripts/runPriceHistorySignals.ts --check",
     "build:market-booking-curve": "node --import tsx src/scripts/runMarketBookingCurve.ts",

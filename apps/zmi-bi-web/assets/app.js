@@ -91,7 +91,7 @@ function aggregateByProperty(rows) {
   const m = new Map();
   rows.forEach((r) => {
     const name = r.canonical_property_name || "不明";
-    const e = m.get(name) || { name, tier: r.tier || "", prices: [], statuses: [], latest: "", srcMax: 0, priceConf: "low", basisConf: "low", coverageConf: "low", invConf: "low", roomOnlySamples: 0, excludedMealSamples: 0, unknownMealCount: 0, twoPersonSamples: 0, excludedRoomTypeSamples: 0, unknownRoomCount: 0, own: isTrue(r.is_own_property), comp: isTrue(r.is_room_only_comp), days: 0, soldDays: 0, availableDays: 0, nodataDays: 0 };
+    const e = m.get(name) || { name, tier: r.tier || "", prices: [], statuses: [], latest: "", srcMax: 0, priceConf: "low", basisConf: "low", coverageConf: "low", invConf: "low", roomBasisConf: "low", roomOnlySamples: 0, excludedMealSamples: 0, unknownMealCount: 0, twoPersonSamples: 0, confirmedTwoPerson: 0, probableTwoPerson: 0, excludedRoomTypeSamples: 0, unknownRoomCount: 0, own: isTrue(r.is_own_property), comp: isTrue(r.is_room_only_comp), days: 0, soldDays: 0, availableDays: 0, nodataDays: 0 };
     const price = num(r.median_directional_price);
     if (price != null && price > 0) e.prices.push(price);
     const st = r.unified_availability_status || "no_data";
@@ -105,9 +105,12 @@ function aggregateByProperty(rows) {
     e.excludedMealSamples += num(r.excluded_meal_price_sample_count) || 0;
     e.unknownMealCount += num(r.unknown_meal_basis_count) || 0;
     e.twoPersonSamples += num(r.two_person_room_price_sample_count) || 0;
+    e.confirmedTwoPerson += num(r.confirmed_two_person_room_price_sample_count) || 0;
+    e.probableTwoPerson += num(r.probable_two_person_room_price_sample_count) || 0;
     e.excludedRoomTypeSamples += num(r.excluded_room_type_price_sample_count) || 0;
     e.unknownRoomCount += num(r.unknown_room_basis_count) || 0;
     if ((r.latest_collected_at_jst || "") > e.latest) e.latest = r.latest_collected_at_jst || "";
+    if (rankConf(r.room_basis_confidence) > rankConf(e.roomBasisConf)) e.roomBasisConf = r.room_basis_confidence || "low";
     if (rankConf(r.price_confidence) > rankConf(e.priceConf)) e.priceConf = r.price_confidence || "low";
     if (rankConf(r.price_basis_confidence) > rankConf(e.basisConf)) e.basisConf = r.price_basis_confidence || "low";
     if (rankConf(r.price_coverage_confidence) > rankConf(e.coverageConf)) e.coverageConf = r.price_coverage_confidence || "low";
@@ -154,6 +157,14 @@ function statusLabel(s) {
 }
 function confidenceLabel(c) { return c === "high" ? "高" : c === "medium" ? "中" : "低"; }
 function confidenceHelp(c) { return c === "high" ? "価格判断に使いやすい" : c === "medium" ? "参考にできる" : "注意して見る"; }
+// Plain-Japanese reason for the price confidence level (Booking room-basis aware).
+function priceConfidenceReasonText(p) {
+  if (p.priceConf === "high") return "高: Bookingで二人用標準部屋を確認";
+  if (p.priceConf === "medium") return p.confirmedTwoPerson > 0 ? "中: 二人用標準部屋を確認（単独ソース）" : "中: Bookingで二人用標準部屋の可能性が高い";
+  if (p.medianPrice == null) return "低: 二人用標準部屋の価格が未取得のため参考値";
+  if (p.roomOnlySamples === 0 && p.unknownMealCount > 0) return "低: 素泊まり判定未確定のため参考値";
+  return "低: 部屋タイプ未確定のため参考値";
+}
 // Relative price feel within the current view (rough — Zao market is small).
 function priceBandLabel(price, ref) {
   if (price == null || price <= 0) return "価格なし";
@@ -340,9 +351,12 @@ function sparkVals(name) { return state.rows.filter((r) => r.canonical_property_
 // basis sample counts. Kept available, just not in the primary columns.
 function facilityDetailGrid(p) {
   return `<div class="fc-grid detail-note">
+    <div class="fc-reason"><div class="k">価格信頼度理由</div>${esc(priceConfidenceReasonText(p))}</div>
     <div><div class="k">読取/カバレッジ信頼度</div>${confPill(p.basisConf)} ${confPill(p.coverageConf)}</div>
+    <div><div class="k">2人用部屋 確認/可能性</div>${p.confirmedTwoPerson} / ${p.probableTwoPerson}</div>
     <div><div class="k">素泊まり価格件数</div>${p.roomOnlySamples}</div>
     <div><div class="k">2人用部屋価格件数</div>${p.twoPersonSamples}</div>
+    <div><div class="k">部屋条件不明数</div>${p.unknownRoomCount}</div>
     <div><div class="k">食事込み除外/不明</div>${p.excludedMealSamples} / ${p.unknownMealCount}</div>
     <div><div class="k">部屋タイプ除外/不明</div>${p.excludedRoomTypeSamples} / ${p.unknownRoomCount}</div>
     <div><div class="k">販売中/販売不可 日数</div>${p.availableDays} / ${p.soldDays}</div>

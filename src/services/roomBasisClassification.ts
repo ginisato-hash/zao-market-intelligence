@@ -9,10 +9,12 @@
 
 export type RoomBasis =
   | "confirmed_two_person_standard_room"
+  | "probable_two_person_standard_room"
   | "excluded_single_room"
   | "excluded_semi_double_room"
   | "excluded_large_room"
   | "excluded_family_or_suite_room"
+  | "excluded_other_room_type"
   | "unknown_room_basis";
 
 export type RoomBasisConfidence = "high" | "medium" | "low" | "none";
@@ -163,12 +165,40 @@ export function isTwoPersonStandardRoom(classification: RoomBasisClassification)
   return classification.roomBasis === "confirmed_two_person_standard_room";
 }
 
+export function isProbableOrConfirmedTwoPersonStandardRoom(classification: RoomBasisClassification): boolean {
+  return classification.roomBasis === "confirmed_two_person_standard_room" || classification.roomBasis === "probable_two_person_standard_room";
+}
+
+// Booking-centric room-basis: when the room NAME/text is not confirmed and not
+// excluded, an available, priced Booking row searched at 2 adults / 1 room is a
+// PROBABLE two-person standard room (req. §3.3). Confirmed and excluded text
+// always win. ZMI's Booking collector always searches 2 adults, so an absent
+// occupancy hint is treated as the 2-adult default.
+export function classifyBookingRoomBasis(input: {
+  roomName?: string | undefined;
+  blockText?: string | undefined;
+  bedHint?: string | undefined;
+  occupancyHint?: string | undefined;
+  available: boolean;
+  hasPrice: boolean;
+}): RoomBasisClassification {
+  const base = classifyRoomBasisFromParts({ roomName: input.roomName, blockText: input.blockText, bedHint: input.bedHint });
+  if (base.roomBasis !== "unknown_room_basis") return base; // confirmed or excluded wins
+  const occ = normalizeRoomText(input.occupancyHint ?? "");
+  const twoAdults = occ === "" || /2\s*adults|2\s*名|two adults|2名様/u.test(occ);
+  if (input.available && input.hasPrice && twoAdults) {
+    return { roomBasis: "probable_two_person_standard_room", roomBasisConfidence: "medium", reason: "booking_two_adult_search_no_exclusion" };
+  }
+  return base;
+}
+
 // Map a room basis to the dp_exclusion_reason encoded into the existing v1
 // columns. confirmed_two_person_standard_room has no exclusion reason (null).
 export function roomBasisDpExclusionReason(roomBasis: RoomBasis): string | null {
   switch (roomBasis) {
     case "confirmed_two_person_standard_room":
-      return null;
+    case "probable_two_person_standard_room":
+      return null; // usable for DP (probable lifts confidence to medium, not excluded)
     case "excluded_single_room":
       return "excluded_room_type_single";
     case "excluded_semi_double_room":
@@ -177,6 +207,8 @@ export function roomBasisDpExclusionReason(roomBasis: RoomBasis): string | null 
       return "excluded_room_type_large";
     case "excluded_family_or_suite_room":
       return "excluded_room_type_family_or_suite";
+    case "excluded_other_room_type":
+      return "excluded_room_type_other";
     case "unknown_room_basis":
       return "unknown_room_basis_excluded";
     default:

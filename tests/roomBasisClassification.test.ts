@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyBookingRoomBasis,
   classifyRoomBasis,
   classifyRoomBasisFromParts,
   isTwoPersonStandardRoom,
@@ -135,5 +136,35 @@ describe("room-basis classification — twin room with two single beds (HOTFIX)"
     expect(roomBasisDpExclusionReason("excluded_large_room")).toBe("excluded_room_type_large");
     expect(roomBasisDpExclusionReason("excluded_family_or_suite_room")).toBe("excluded_room_type_family_or_suite");
     expect(roomBasisDpExclusionReason("unknown_room_basis")).toBe("unknown_room_basis_excluded");
+    expect(roomBasisDpExclusionReason("excluded_other_room_type")).toBe("excluded_room_type_other");
+    expect(roomBasisDpExclusionReason("probable_two_person_standard_room")).toBeNull();
+  });
+});
+
+describe("PRICE-CONFIDENCE01 — §9.1 confirmed / probable / excluded cases", () => {
+  it("confirmed two-person standard rooms (incl. two single beds = twin)", () => {
+    expect(classifyRoomBasisFromParts({ roomName: "ツインルーム", bedHint: "シングルベッド2台" }).roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("Twin Room - 2 single beds").roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("Double Room").roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+
+  it("probable when room name absent but Booking 2-adult available priced (no exclusion)", () => {
+    const probable = classifyBookingRoomBasis({ roomName: "Standard room", occupancyHint: "2 adults", available: true, hasPrice: true });
+    expect(probable.roomBasis).toBe("probable_two_person_standard_room");
+    // ZMI default search is 2 adults — absent occupancy hint still probable.
+    expect(classifyBookingRoomBasis({ blockText: "￥24,000 税・手数料込み", available: true, hasPrice: true }).roomBasis).toBe("probable_two_person_standard_room");
+    // not available / no price => not probable.
+    expect(classifyBookingRoomBasis({ available: false, hasPrice: true }).roomBasis).toBe("unknown_room_basis");
+  });
+
+  it("excluded room types are never probable, even when Booking available priced", () => {
+    expect(classifyRoomBasis("Single Room").roomBasis).toBe("excluded_single_room");
+    expect(classifyRoomBasis("シングルルーム").roomBasis).toBe("excluded_single_room");
+    expect(classifyRoomBasis("Semi-double").roomBasis).toBe("excluded_semi_double_room");
+    expect(classifyRoomBasis("Family Room").roomBasis).toBe("excluded_family_or_suite_room");
+    expect(classifyRoomBasis("Suite").roomBasis).toBe("excluded_family_or_suite_room");
+    expect(classifyRoomBasis("Triple Room").roomBasis).toBe("excluded_large_room");
+    // exclusion wins over the Booking-probable path
+    expect(classifyBookingRoomBasis({ roomName: "Single Room", available: true, hasPrice: true }).roomBasis).toBe("excluded_single_room");
   });
 });

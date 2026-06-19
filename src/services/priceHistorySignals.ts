@@ -158,8 +158,17 @@ export function comparability(mealBasis: string, roomBasis: string): { isCompara
   return { isComparable: true, reason: "" };
 }
 
+// The probable_two_person_standard_room basis is AVAILABILITY-dependent (a
+// Booking row is probable only while available+priced). Using it verbatim in the
+// comparison key would fragment a stay's timeline (available->probable vs
+// sold_out->unknown) and hide availability transitions. For KEY STABILITY only,
+// probable collapses to unknown; the change row still reports the actual basis.
+function keyRoomBasis(roomBasis: string): string {
+  return roomBasis === "probable_two_person_standard_room" ? "unknown_room_basis" : roomBasis;
+}
+
 export function comparisonKey(row: PriceHistoryInputRow, mealBasis: string, roomBasis: string): { key: string; level: "level_1" | "level_2" } {
-  const level1 = [row.property_id, row.source, row.checkin_date, mealBasis, roomBasis, row.occupancy_basis].join("|");
+  const level1 = [row.property_id, row.source, row.checkin_date, mealBasis, keyRoomBasis(roomBasis), row.occupancy_basis].join("|");
   if (row.room_type_key !== "") return { key: `${level1}|${row.room_type_key}`, level: "level_2" };
   return { key: level1, level: "level_1" };
 }
