@@ -1,0 +1,66 @@
+[
+  {
+    "property_name": "ル・ベール蔵王",
+    "property_url": "https://www.jalan.net/yad328232/",
+    "verification_status": "confirmed",
+    "verification_method": "manual_browser_or_targeted_web",
+    "verified_at": "2026-05-28",
+    "notes": "Used successfully in Phase 18."
+  },
+  {
+    "property_name": "深山荘 高見屋 −MIYAMASO TAKAMIYA−",
+    "property_url": "https://www.jalan.net/yad321744/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-28",
+    "notes": "Confirmed across Jalan plans/blog/review pages and used in Phase 18."
+  },
+  {
+    "property_name": "蔵王温泉 名湯リゾート ルーセントタカミヤ",
+    "property_url": "https://www.jalan.net/yad331969/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-28",
+    "notes": "Confirmed across Jalan plans/blog/review pages and used in Phase 18."
+  },
+  {
+    "property_name": "ホテル　喜らく",
+    "property_url": "https://www.jalan.net/yad325153/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-29",
+    "notes": "Confirmed by targeted web lookup in Phase 26. No real collection run performed."
+  },
+  {
+    "property_name": "蔵王温泉　BED’n ONSEN HAMMOND - ハモンド -",
+    "property_url": "https://www.jalan.net/yad348320/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-29",
+    "notes": "Confirmed by targeted web lookup in Phase 26. No real collection run performed."
+  },
+  {
+    "property_name": "蔵王温泉　JURIN",
+    "property_url": "https://www.jalan.net/yad332556/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-29",
+    "notes": "Confirmed by targeted web lookup in Phase 26. No real collection run performed."
+  },
+  {
+    "property_name": "蔵王温泉　吉田屋",
+    "property_url": "https://www.jalan.net/yad327282/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-29",
+    "notes": "Confirmed by targeted web lookup in Phase 26. No real collection run performed."
+  },
+  {
+    "property_name": "蔵王温泉　名湯舎　創　‐MEITOYA　SO‐",
+    "property_url": "https://www.jalan.net/yad396378/",
+    "verification_status": "confirmed",
+    "verification_method": "targeted_web",
+    "verified_at": "2026-05-29",
+    "notes": "Confirmed by targeted web lookup in Phase 26. No real collection run performed."
+  }
+]

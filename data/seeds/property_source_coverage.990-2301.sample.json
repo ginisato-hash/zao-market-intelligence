@@ -1,0 +1,123 @@
+[
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "jalan",
+    "source_property_id": "yad328232",
+    "property_url": "https://www.jalan.net/yad328232/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Jalan prototype and batch collection succeeded.",
+    "active": true
+  },
+  {
+    "property_name": "深山荘 高見屋",
+    "source": "jalan",
+    "source_property_id": "yad321744",
+    "property_url": "https://www.jalan.net/yad321744/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "名湯リゾート ルーセント",
+    "source": "jalan",
+    "source_property_id": "yad331969",
+    "property_url": "https://www.jalan.net/yad331969/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "ホテル喜らく",
+    "source": "jalan",
+    "source_property_id": "yad325153",
+    "property_url": "https://www.jalan.net/yad325153/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "BED'n ONSEN HAMMOND",
+    "source": "jalan",
+    "source_property_id": "yad348320",
+    "property_url": "https://www.jalan.net/yad348320/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "JURIN",
+    "source": "jalan",
+    "source_property_id": "yad332556",
+    "property_url": "https://www.jalan.net/yad332556/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "吉田屋",
+    "source": "jalan",
+    "source_property_id": "yad327282",
+    "property_url": "https://www.jalan.net/yad327282/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "名湯舎 創",
+    "source": "jalan",
+    "source_property_id": "yad396378",
+    "property_url": "https://www.jalan.net/yad396378/",
+    "coverage_status": "confirmed",
+    "access_status": "collector_working",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "Confirmed Jalan URL from verified property seed.",
+    "active": true
+  },
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "rakuten",
+    "source_property_id": "29465",
+    "property_url": "https://travel.rakuten.co.jp/HOTEL/29465/",
+    "coverage_status": "needs_review",
+    "access_status": "date_specific_results_not_reached",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "overview loads; query params ignored; /PLAN/ returns 404; date-specific plan results not reached",
+    "active": true
+  },
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "booking",
+    "source_property_id": "le-vert-zao",
+    "property_url": "https://www.booking.com/hotel/jp/le-vert-zao.ja.html",
+    "coverage_status": "blocked",
+    "access_status": "empty_body_or_upstream_bot_detection",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "prior investigation found empty body / upstream bot detection; no accepted price",
+    "active": false
+  },
+  {
+    "property_name": "ル・ベール蔵王",
+    "source": "google_hotels",
+    "source_property_id": "CgoIn_eG0v78uPpiEAE",
+    "property_url": "https://www.google.com/travel/hotels/entity/CgoIn_eG0v78uPpiEAE",
+    "coverage_status": "needs_review",
+    "access_status": "free_direct_feasibility_unresolved",
+    "last_verified_at": "2026-05-29T00:00:00+09:00",
+    "notes": "paid SerpAPI route is forbidden; free direct feasibility unresolved",
+    "active": true
+  }
+]

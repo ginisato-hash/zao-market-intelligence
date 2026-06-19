@@ -1,0 +1,28 @@
+{
+  "ota": "jalan",
+  "properties": [
+    {
+      "property_name": "ル・ベール蔵王",
+      "property_url": "https://www.jalan.net/yad328232/"
+    },
+    {
+      "property_name": "MANUAL_PROPERTY_NAME_REQUIRED",
+      "property_url": "MANUAL_JALAN_PROPERTY_URL_REQUIRED"
+    },
+    {
+      "property_name": "MANUAL_PROPERTY_NAME_REQUIRED",
+      "property_url": "MANUAL_JALAN_PROPERTY_URL_REQUIRED"
+    }
+  ],
+  "stay_dates": [
+    "2026-07-18",
+    "2026-08-08",
+    "2026-10-10"
+  ],
+  "adults": 2,
+  "children": 0,
+  "rooms": 1,
+  "nights": 1,
+  "max_jobs": 9,
+  "delay_ms_between_jobs": 3000
+}

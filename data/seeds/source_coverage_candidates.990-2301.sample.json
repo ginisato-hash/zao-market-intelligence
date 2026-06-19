@@ -1,0 +1,254 @@
+[
+  {
+    "property_name": "ホテル喜らく",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad325153); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "ホテル喜らく",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad325153); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "ホテル喜らく",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad325153); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "BED'n ONSEN HAMMOND",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad348320); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "BED'n ONSEN HAMMOND",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad348320); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "BED'n ONSEN HAMMOND",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad348320); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "JURIN",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad332556); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "JURIN",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad332556); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "JURIN",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad332556); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "吉田屋",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad327282); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "吉田屋",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad327282); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "吉田屋",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad327282); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "名湯舎 創",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad396378); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "名湯舎 創",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad396378); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "名湯舎 創",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad396378); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "名湯リゾート ルーセント",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad331969); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "名湯リゾート ルーセント",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad331969); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "名湯リゾート ルーセント",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad331969); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "深山荘 高見屋",
+    "source": "rakuten",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Rakuten Travel hotel page to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad321744); Rakuten hotel number not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "深山荘 高見屋",
+    "source": "booking",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Booking.com property slug to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad321744); Booking.com slug not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "深山荘 高見屋",
+    "source": "google_hotels",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Google Hotels entity ID to be manually verified",
+    "evidence_note": "Jalan coverage confirmed (yad321744); Google Hotels entity token not yet verified.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "ONSEN & STAY OAKHILL",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "たかみや瑠璃倶楽",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "三浦屋",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "ぼくのうち",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "シバママのお宿",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "ロッジスガノ",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  },
+  {
+    "property_name": "松尾ハウス",
+    "source": "jalan",
+    "candidate_property_url": null,
+    "candidate_source_property_id": null,
+    "candidate_label": "Jalan property page to be manually verified",
+    "evidence_note": "Known Zao Onsen lodging in priority coverage list; no source coverage yet.",
+    "verification_status": "candidate"
+  }
+]

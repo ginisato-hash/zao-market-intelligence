@@ -1,0 +1,62 @@
+[
+  {
+    "stay_date": "2026-06-06",
+    "priority": "A",
+    "reason": "Near-term Saturday sample for weekend demand tracking.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-06-13",
+    "priority": "A",
+    "reason": "Near-term Saturday sample for short-horizon market checks.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-07-18",
+    "priority": "B",
+    "reason": "Summer peak example date; requires local calendar verification.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-08-08",
+    "priority": "S",
+    "reason": "Summer peak placeholder date for high-priority monitoring.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-10-10",
+    "priority": "S",
+    "reason": "Autumn foliage example date; requires manual verification.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-10-17",
+    "priority": "A",
+    "reason": "Autumn foliage Saturday sample for market planning.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-12-12",
+    "priority": "S",
+    "reason": "Ski season launch example date; requires resort calendar verification.",
+    "active": true
+  },
+  {
+    "stay_date": "2026-12-19",
+    "priority": "A",
+    "reason": "Early ski season Saturday sample for launch monitoring.",
+    "active": true
+  },
+  {
+    "stay_date": "2027-01-09",
+    "priority": "B",
+    "reason": "Winter high-season placeholder custom date.",
+    "active": true
+  },
+  {
+    "stay_date": "2027-02-14",
+    "priority": "C",
+    "reason": "Placeholder custom date retained for future manual planning.",
+    "active": false
+  }
+]

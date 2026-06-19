@@ -1,0 +1,36 @@
+{
+  "ota": "jalan",
+  "properties": [
+    {
+      "property_name": "ル・ベール蔵王",
+      "property_url": "https://www.jalan.net/yad328232/"
+    },
+    {
+      "property_name": "深山荘 高見屋 −MIYAMASO TAKAMIYA−",
+      "property_url": "https://www.jalan.net/yad321744/"
+    },
+    {
+      "property_name": "蔵王温泉 名湯リゾート ルーセントタカミヤ",
+      "property_url": "https://www.jalan.net/yad331969/"
+    },
+    {
+      "property_name": "蔵王温泉 JURIN",
+      "property_url": "https://www.jalan.net/yad332556/"
+    },
+    {
+      "property_name": "蔵王温泉 名湯舎 創 ‐MEITOYA SO‐",
+      "property_url": "https://www.jalan.net/yad396378/"
+    }
+  ],
+  "stay_dates": [
+    "2026-07-18",
+    "2026-08-08",
+    "2026-10-10"
+  ],
+  "adults": 2,
+  "children": 0,
+  "rooms": 1,
+  "nights": 1,
+  "max_jobs": 15,
+  "delay_ms_between_jobs": 3000
+}

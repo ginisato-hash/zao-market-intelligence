@@ -1,0 +1,20 @@
+[
+  {
+    "property_name": "三浦屋",
+    "source": "local_operator",
+    "canonicalization_status": "canonical",
+    "evidence_note": "User-operated property and core target asset for Zao Onsen market intelligence."
+  },
+  {
+    "property_name": "シバママのお宿",
+    "source": "local_known",
+    "canonicalization_status": "needs_review",
+    "evidence_note": "Known local lodging candidate mentioned by user; not confirmed in Jalan/Rakuten source pages."
+  },
+  {
+    "property_name": "松尾ハウス",
+    "source": "local_known",
+    "canonicalization_status": "needs_review",
+    "evidence_note": "Known local lodging candidate mentioned by user; not confirmed in Jalan/Rakuten source pages."
+  }
+]

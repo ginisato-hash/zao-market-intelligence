@@ -1,0 +1,876 @@
+{
+  "generated_at": "2026-05-31T14:19:15.692Z",
+  "method": "AI-assisted faithful extraction of two pinned public listing pages (Jalan keyword search + Rakuten onsen page). No prices, availability, paid APIs, or login.",
+  "source_pages": [
+    {
+      "source": "jalan",
+      "url": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "status": "ok",
+      "final_url": "https://www.jalan.net/uw/uwp2011/uww2011search.do?actionId=G&keyword=%91%A0%89%A4%89%B7%90%F2&dateUndecided=1&stayYear=2026&stayMonth=06&stayDay=01&minPrice=0&maxPrice=999999&distCd=06&rootCd=7701&activeSort=0&screenId=UWW2011&dispStartIndex=0",
+      "http_status": 200,
+      "extracted_count": 56,
+      "notes": "page0(start=0):30 new; page1(start=30):26 new; page2(start=60):0 new"
+    },
+    {
+      "source": "rakuten",
+      "url": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "status": "ok",
+      "final_url": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "http_status": 200,
+      "extracted_count": 29,
+      "notes": "Parsed 29 hotelBox blocks."
+    }
+  ],
+  "listings": [
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 吉田屋",
+      "propertyNameNormalized": "蔵王温泉吉田屋",
+      "propertyUrl": "https://www.jalan.net/yad327282/",
+      "sourcePropertyId": "327282",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad327282 paired with facilityName \"蔵王温泉 吉田屋\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 JURIN",
+      "propertyNameNormalized": "蔵王温泉jurin",
+      "propertyUrl": "https://www.jalan.net/yad332556/",
+      "sourcePropertyId": "332556",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad332556 paired with facilityName \"蔵王温泉 JURIN\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 おおみや旅館",
+      "propertyNameNormalized": "蔵王温泉おおみや旅館",
+      "propertyUrl": "https://www.jalan.net/yad338565/",
+      "sourcePropertyId": "338565",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad338565 paired with facilityName \"蔵王温泉 おおみや旅館\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 えびや旅館",
+      "propertyNameNormalized": "蔵王温泉えびや旅館",
+      "propertyUrl": "https://www.jalan.net/yad333065/",
+      "sourcePropertyId": "333065",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad333065 paired with facilityName \"蔵王温泉 えびや旅館\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 名湯リゾート ルーセントタカミヤ",
+      "propertyNameNormalized": "蔵王温泉名湯リゾトルセントタカミヤ",
+      "propertyUrl": "https://www.jalan.net/yad331969/",
+      "sourcePropertyId": "331969",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad331969 paired with facilityName \"蔵王温泉 名湯リゾート ルーセントタカミヤ\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 名湯舎 創 ‐MEITOYA SO‐",
+      "propertyNameNormalized": "蔵王温泉名湯舎創‐meitoyaso‐",
+      "propertyUrl": "https://www.jalan.net/yad396378/",
+      "sourcePropertyId": "396378",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad396378 paired with facilityName \"蔵王温泉 名湯舎 創 ‐MEITOYA SO‐\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 善七乃湯・oohira HOTEL",
+      "propertyNameNormalized": "蔵王温泉善七乃湯oohirahotel",
+      "propertyUrl": "https://www.jalan.net/yad316011/",
+      "sourcePropertyId": "316011",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad316011 paired with facilityName \"蔵王温泉 善七乃湯・oohira HOTEL\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 BED’n ONSEN HAMMOND - ハモンド -",
+      "propertyNameNormalized": "蔵王温泉bednonsenhammond-ハモンド-",
+      "propertyUrl": "https://www.jalan.net/yad348320/",
+      "sourcePropertyId": "348320",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad348320 paired with facilityName \"蔵王温泉 BED’n ONSEN HAMMOND - ハモンド -\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 松金や －MATSUKANEYA ANNEX－",
+      "propertyNameNormalized": "蔵王温泉松金や-matsukaneyaannex-",
+      "propertyUrl": "https://www.jalan.net/yad335940/",
+      "sourcePropertyId": "335940",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad335940 paired with facilityName \"蔵王温泉 松金や －MATSUKANEYA ANNEX－\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 ONSEN & STAY OAKHILL",
+      "propertyNameNormalized": "蔵王温泉onsen&stayoakhill",
+      "propertyUrl": "https://www.jalan.net/yad388065/",
+      "sourcePropertyId": "388065",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad388065 paired with facilityName \"蔵王温泉 ONSEN & STAY OAKHILL\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王温泉 たかみや瑠璃倶楽リゾート ‐RURIKURA RESORT‐",
+      "propertyNameNormalized": "蔵王温泉たかみや瑠璃倶楽リゾト‐rurikuraresort‐",
+      "propertyUrl": "https://www.jalan.net/yad316848/",
+      "sourcePropertyId": "316848",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad316848 paired with facilityName \"蔵王温泉 たかみや瑠璃倶楽リゾート ‐RURIKURA RESORT‐\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "三浦屋",
+      "propertyNameNormalized": "三浦屋",
+      "propertyUrl": "https://www.jalan.net/yad302145/",
+      "sourcePropertyId": "302145",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad302145 paired with facilityName \"三浦屋\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "YuiLocalZao",
+      "propertyNameNormalized": "yuilocalzao",
+      "propertyUrl": "https://www.jalan.net/yad346260/",
+      "sourcePropertyId": "346260",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad346260 paired with facilityName \"YuiLocalZao\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンション ぷうたろう",
+      "propertyNameNormalized": "ペンションぷうたろう",
+      "propertyUrl": "https://www.jalan.net/yad394784/",
+      "sourcePropertyId": "394784",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad394784 paired with facilityName \"ペンション ぷうたろう\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンション ステラ",
+      "propertyNameNormalized": "ペンションステラ",
+      "propertyUrl": "https://www.jalan.net/yad377732/",
+      "sourcePropertyId": "377732",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad377732 paired with facilityName \"ペンション ステラ\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "源泉湯宿 蔵王プラザホテル",
+      "propertyNameNormalized": "源泉湯宿蔵王プラザホテル",
+      "propertyUrl": "https://www.jalan.net/yad353340/",
+      "sourcePropertyId": "353340",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad353340 paired with facilityName \"源泉湯宿 蔵王プラザホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "東横ＩＮＮ 山形駅西口",
+      "propertyNameNormalized": "東横inn山形駅西口",
+      "propertyUrl": "https://www.jalan.net/yad361630/",
+      "sourcePropertyId": "361630",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad361630 paired with facilityName \"東横ＩＮＮ 山形駅西口\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンション木いちご",
+      "propertyNameNormalized": "ペンション木いちご",
+      "propertyUrl": "https://www.jalan.net/yad325769/",
+      "sourcePropertyId": "325769",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad325769 paired with facilityName \"ペンション木いちご\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンション 飛雪流星",
+      "propertyNameNormalized": "ペンション飛雪流星",
+      "propertyUrl": "https://www.jalan.net/yad358631/",
+      "sourcePropertyId": "358631",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad358631 paired with facilityName \"ペンション 飛雪流星\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "Bed＆Vegetable Kahoku",
+      "propertyNameNormalized": "bed&vegetablekahoku",
+      "propertyUrl": "https://www.jalan.net/yad340791/",
+      "sourcePropertyId": "340791",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad340791 paired with facilityName \"Bed＆Vegetable Kahoku\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "天童セントラルホテル",
+      "propertyNameNormalized": "天童セントラルホテル",
+      "propertyUrl": "https://www.jalan.net/yad324795/",
+      "sourcePropertyId": "324795",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad324795 paired with facilityName \"天童セントラルホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "お食事処・お泊まり処・お湯処ろばた",
+      "propertyNameNormalized": "お食事処お泊まり処お湯処ろばた",
+      "propertyUrl": "https://www.jalan.net/yad389060/",
+      "sourcePropertyId": "389060",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad389060 paired with facilityName \"お食事処・お泊まり処・お湯処ろばた\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "forest inn. ＳＡＮＧＯＲＯ",
+      "propertyNameNormalized": "forestinnsangoro",
+      "propertyUrl": "https://www.jalan.net/yad302675/",
+      "sourcePropertyId": "302675",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad302675 paired with facilityName \"forest inn. ＳＡＮＧＯＲＯ\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "高砂屋旅館",
+      "propertyNameNormalized": "高砂屋旅館",
+      "propertyUrl": "https://www.jalan.net/yad391608/",
+      "sourcePropertyId": "391608",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad391608 paired with facilityName \"高砂屋旅館\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ユニテ蔵王ジョーニダ・リゾート",
+      "propertyNameNormalized": "ユニテ蔵王ジョニダリゾト",
+      "propertyUrl": "https://www.jalan.net/yad354840/",
+      "sourcePropertyId": "354840",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad354840 paired with facilityName \"ユニテ蔵王ジョーニダ・リゾート\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ダイワロイネットホテル山形駅前",
+      "propertyNameNormalized": "ダイワロイネットホテル山形駅前",
+      "propertyUrl": "https://www.jalan.net/yad326892/",
+      "sourcePropertyId": "326892",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad326892 paired with facilityName \"ダイワロイネットホテル山形駅前\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王四季のホテル",
+      "propertyNameNormalized": "蔵王四季のホテル",
+      "propertyUrl": "https://www.jalan.net/yad322447/",
+      "sourcePropertyId": "322447",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad322447 paired with facilityName \"蔵王四季のホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "五感の湯 つるや",
+      "propertyNameNormalized": "五感の湯つるや",
+      "propertyUrl": "https://www.jalan.net/yad341866/",
+      "sourcePropertyId": "341866",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad341866 paired with facilityName \"五感の湯 つるや\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王アストリアホテル",
+      "propertyNameNormalized": "蔵王アストリアホテル",
+      "propertyUrl": "https://www.jalan.net/yad385780/",
+      "sourcePropertyId": "385780",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad385780 paired with facilityName \"蔵王アストリアホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ホテルルートイン山形駅前",
+      "propertyNameNormalized": "ホテルルトイン山形駅前",
+      "propertyUrl": "https://www.jalan.net/yad302598/",
+      "sourcePropertyId": "302598",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad302598 paired with facilityName \"ホテルルートイン山形駅前\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "かみのやま温泉 寒河江屋旅館",
+      "propertyNameNormalized": "かみのやま温泉寒河江屋旅館",
+      "propertyUrl": "https://www.jalan.net/yad343891/",
+      "sourcePropertyId": "343891",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad343891 paired with facilityName \"かみのやま温泉 寒河江屋旅館\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王ライザウッディロッジ",
+      "propertyNameNormalized": "蔵王ライザウッディロッジ",
+      "propertyUrl": "https://www.jalan.net/yad324339/",
+      "sourcePropertyId": "324339",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad324339 paired with facilityName \"蔵王ライザウッディロッジ\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "リッチモンドホテル山形駅前",
+      "propertyNameNormalized": "リッチモンドホテル山形駅前",
+      "propertyUrl": "https://www.jalan.net/yad396952/",
+      "sourcePropertyId": "396952",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad396952 paired with facilityName \"リッチモンドホテル山形駅前\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王国際ホテル",
+      "propertyNameNormalized": "蔵王国際ホテル",
+      "propertyUrl": "https://www.jalan.net/yad309590/",
+      "sourcePropertyId": "309590",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad309590 paired with facilityName \"蔵王国際ホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "深山荘 高見屋 －MIYAMASO TAKAMIYA－",
+      "propertyNameNormalized": "深山荘高見屋-miyamasotakamiya-",
+      "propertyUrl": "https://www.jalan.net/yad321744/",
+      "sourcePropertyId": "321744",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad321744 paired with facilityName \"深山荘 高見屋 －MIYAMASO TAKAMIYA－\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "和歌（うた）の宿 わかまつや",
+      "propertyNameNormalized": "和歌うたの宿わかまつや",
+      "propertyUrl": "https://www.jalan.net/yad334773/",
+      "sourcePropertyId": "334773",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad334773 paired with facilityName \"和歌（うた）の宿 わかまつや\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ホテルルートイン山形南ー大学病院前ー",
+      "propertyNameNormalized": "ホテルルトイン山形南大学病院前",
+      "propertyUrl": "https://www.jalan.net/yad346325/",
+      "sourcePropertyId": "346325",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad346325 paired with facilityName \"ホテルルートイン山形南ー大学病院前ー\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "山形国際ホテル",
+      "propertyNameNormalized": "山形国際ホテル",
+      "propertyUrl": "https://www.jalan.net/yad323666/",
+      "sourcePropertyId": "323666",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad323666 paired with facilityName \"山形国際ホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ビジネスホテルいずくら",
+      "propertyNameNormalized": "ビジネスホテルいずくら",
+      "propertyUrl": "https://www.jalan.net/yad357952/",
+      "sourcePropertyId": "357952",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad357952 paired with facilityName \"ビジネスホテルいずくら\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "山形県職員会館あこや会館",
+      "propertyNameNormalized": "山形県職員会館あこや会館",
+      "propertyUrl": "https://www.jalan.net/yad317126/",
+      "sourcePropertyId": "317126",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad317126 paired with facilityName \"山形県職員会館あこや会館\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンションおもちゃばこ",
+      "propertyNameNormalized": "ペンションおもちゃばこ",
+      "propertyUrl": "https://www.jalan.net/yad355545/",
+      "sourcePropertyId": "355545",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad355545 paired with facilityName \"ペンションおもちゃばこ\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王エコー山荘",
+      "propertyNameNormalized": "蔵王エコ山荘",
+      "propertyUrl": "https://www.jalan.net/yad377722/",
+      "sourcePropertyId": "377722",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad377722 paired with facilityName \"蔵王エコー山荘\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王・岩清水料理の宿 季の里",
+      "propertyNameNormalized": "蔵王岩清水料理の宿季の里",
+      "propertyUrl": "https://www.jalan.net/yad314797/",
+      "sourcePropertyId": "314797",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad314797 paired with facilityName \"蔵王・岩清水料理の宿 季の里\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "森のホテル ヴァルトベルク －ＷａｌｄＢｅｒｇ－",
+      "propertyNameNormalized": "森のホテルヴァルトベルク-waldberg-",
+      "propertyUrl": "https://www.jalan.net/yad314747/",
+      "sourcePropertyId": "314747",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad314747 paired with facilityName \"森のホテル ヴァルトベルク －ＷａｌｄＢｅｒｇ－\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "山形七日町ワシントンホテル",
+      "propertyNameNormalized": "山形七日町ワシントンホテル",
+      "propertyUrl": "https://www.jalan.net/yad345243/",
+      "sourcePropertyId": "345243",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad345243 paired with facilityName \"山形七日町ワシントンホテル\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "蔵王つららぎの宿 花ゆらん",
+      "propertyNameNormalized": "蔵王つららぎの宿花ゆらん",
+      "propertyUrl": "https://www.jalan.net/yad374010/",
+      "sourcePropertyId": "374010",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad374010 paired with facilityName \"蔵王つららぎの宿 花ゆらん\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "石亭 小松",
+      "propertyNameNormalized": "石亭小松",
+      "propertyUrl": "https://www.jalan.net/yad308071/",
+      "sourcePropertyId": "308071",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad308071 paired with facilityName \"石亭 小松\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "熊野大社の麓 地酒と肴で「緑」を繋ぐ宿 いとや旅館",
+      "propertyNameNormalized": "熊野大社の麓地酒と肴で「緑」を繋ぐ宿いとや旅館",
+      "propertyUrl": "https://www.jalan.net/yad380300/",
+      "sourcePropertyId": "380300",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad380300 paired with facilityName \"熊野大社の麓 地酒と肴で「緑」を繋ぐ宿 いとや旅館\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ＫＫＲ蔵王 白銀荘（国家公務員共済組合連合会蔵王保養所）",
+      "propertyNameNormalized": "kkr蔵王白銀荘国家公務員共済組合連合会蔵王保養所",
+      "propertyUrl": "https://www.jalan.net/yad393448/",
+      "sourcePropertyId": "393448",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad393448 paired with facilityName \"ＫＫＲ蔵王 白銀荘（国家公務員共済組合連合会蔵王保養所）\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "小野川温泉 名湯の宿 吾妻荘",
+      "propertyNameNormalized": "小野川温泉名湯の宿吾妻荘",
+      "propertyUrl": "https://www.jalan.net/yad315046/",
+      "sourcePropertyId": "315046",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad315046 paired with facilityName \"小野川温泉 名湯の宿 吾妻荘\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンション櫻",
+      "propertyNameNormalized": "ペンション櫻",
+      "propertyUrl": "https://www.jalan.net/yad343698/",
+      "sourcePropertyId": "343698",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad343698 paired with facilityName \"ペンション櫻\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "こけしの宿 招仙閣",
+      "propertyNameNormalized": "こけしの宿招仙閣",
+      "propertyUrl": "https://www.jalan.net/yad348951/",
+      "sourcePropertyId": "348951",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad348951 paired with facilityName \"こけしの宿 招仙閣\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンションスイス",
+      "propertyNameNormalized": "ペンションスイス",
+      "propertyUrl": "https://www.jalan.net/yad330570/",
+      "sourcePropertyId": "330570",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad330570 paired with facilityName \"ペンションスイス\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ペンションあっぷる",
+      "propertyNameNormalized": "ペンションあっぷる",
+      "propertyUrl": "https://www.jalan.net/yad370284/",
+      "sourcePropertyId": "370284",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad370284 paired with facilityName \"ペンションあっぷる\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ル・ベール蔵王",
+      "propertyNameNormalized": "ルベル蔵王",
+      "propertyUrl": "https://www.jalan.net/yad328232/",
+      "sourcePropertyId": "328232",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad328232 paired with facilityName \"ル・ベール蔵王\"."
+    },
+    {
+      "source": "jalan",
+      "sourceListUrl": "https://www.jalan.net/uw/uwp2011/uww2011init.do?keyword=%91%A0%89%A4%89%B7%90%F2&distCd=06&rootCd=7701&screenId=FWPCTOP&ccnt=button-fw&image1=",
+      "propertyNameRaw": "ZAO BASE",
+      "propertyNameNormalized": "zaobase",
+      "propertyUrl": "https://www.jalan.net/yad365550/",
+      "sourcePropertyId": "365550",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Jalan search results: yad365550 paired with facilityName \"ZAO BASE\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 最上高湯 善七乃湯（旧：蔵王温泉 大平ホテル）",
+      "propertyNameNormalized": "蔵王温泉最上高湯善七乃湯旧:蔵王温泉大平ホテル",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/8084/",
+      "sourcePropertyId": "8084",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/8084 with anchor name \"蔵王温泉 最上高湯 善七乃湯（旧：蔵王温泉 大平ホテル）\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 名湯リゾート ルーセントタカミヤ",
+      "propertyNameNormalized": "蔵王温泉名湯リゾトルセントタカミヤ",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/39565/",
+      "sourcePropertyId": "39565",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/39565 with anchor name \"蔵王温泉 名湯リゾート ルーセントタカミヤ\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ＪＵＲＩＮ",
+      "propertyNameNormalized": "蔵王温泉jurin",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/14585/",
+      "sourcePropertyId": "14585",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/14585 with anchor name \"蔵王温泉 ＪＵＲＩＮ\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 たかみや瑠璃倶楽リゾート ‐ＲＵＲＩＫＵＲＡ ＲＥＳＯＲＴ‐",
+      "propertyNameNormalized": "蔵王温泉たかみや瑠璃倶楽リゾト‐rurikuraresort‐",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/67210/",
+      "sourcePropertyId": "67210",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/67210 with anchor name \"蔵王温泉 たかみや瑠璃倶楽リゾート ‐ＲＵＲＩＫＵＲＡ ＲＥＳＯＲＴ‐\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 名湯舎 創 －MEITOYA SO－",
+      "propertyNameNormalized": "蔵王温泉名湯舎創-meitoyaso-",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/162736/",
+      "sourcePropertyId": "162736",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/162736 with anchor name \"蔵王温泉 名湯舎 創 －MEITOYA SO－\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "深山荘 高見屋",
+      "propertyNameNormalized": "深山荘高見屋",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/38534/",
+      "sourcePropertyId": "38534",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/38534 with anchor name \"深山荘 高見屋\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 蔵王国際ホテル",
+      "propertyNameNormalized": "蔵王温泉蔵王国際ホテル",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/5723/",
+      "sourcePropertyId": "5723",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/5723 with anchor name \"蔵王温泉 蔵王国際ホテル\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 蔵王・和歌（うた）の宿 わかまつや",
+      "propertyNameNormalized": "蔵王温泉蔵王和歌うたの宿わかまつや",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/12587/",
+      "sourcePropertyId": "12587",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/12587 with anchor name \"蔵王温泉 蔵王・和歌（うた）の宿 わかまつや\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 堺屋森のホテルヴァルトベルク",
+      "propertyNameNormalized": "蔵王温泉堺屋森のホテルヴァルトベルク",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/38663/",
+      "sourcePropertyId": "38663",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/38663 with anchor name \"蔵王温泉 堺屋森のホテルヴァルトベルク\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 蔵王四季のホテル",
+      "propertyNameNormalized": "蔵王温泉蔵王四季のホテル",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/16423/",
+      "sourcePropertyId": "16423",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/16423 with anchor name \"蔵王温泉 蔵王四季のホテル\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 五感の湯つるや＜山形県＞",
+      "propertyNameNormalized": "蔵王温泉五感の湯つるや<山形県>",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/8411/",
+      "sourcePropertyId": "8411",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/8411 with anchor name \"蔵王温泉 五感の湯つるや＜山形県＞\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 おおみや旅館",
+      "propertyNameNormalized": "蔵王温泉おおみや旅館",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/5722/",
+      "sourcePropertyId": "5722",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/5722 with anchor name \"蔵王温泉 おおみや旅館\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 吉田屋",
+      "propertyNameNormalized": "蔵王温泉吉田屋",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/196554/",
+      "sourcePropertyId": "196554",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/196554 with anchor name \"蔵王温泉 吉田屋\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ＢＥＤ＇ｎ ＯＮＳＥＮ ＨＡＭＭＯＮＤ（ハモンド）",
+      "propertyNameNormalized": "蔵王温泉bednonsenhammondハモンド",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/40033/",
+      "sourcePropertyId": "40033",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/40033 with anchor name \"蔵王温泉 ＢＥＤ＇ｎ ＯＮＳＥＮ ＨＡＭＭＯＮＤ（ハモンド）\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 岩清水料理の宿 季の里",
+      "propertyNameNormalized": "蔵王温泉岩清水料理の宿季の里",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/18758/",
+      "sourcePropertyId": "18758",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/18758 with anchor name \"蔵王温泉 岩清水料理の宿 季の里\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "ＯＮＳＥＮ ＆ ＳＴＡＹ ＯＡＫＨＩＬＬ",
+      "propertyNameNormalized": "onsen&stayoakhill",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/196553/",
+      "sourcePropertyId": "196553",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/196553 with anchor name \"ＯＮＳＥＮ ＆ ＳＴＡＹ ＯＡＫＨＩＬＬ\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 源泉湯宿 蔵王プラザホテル",
+      "propertyNameNormalized": "蔵王温泉源泉湯宿蔵王プラザホテル",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/7747/",
+      "sourcePropertyId": "7747",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/7747 with anchor name \"蔵王温泉 源泉湯宿 蔵王プラザホテル\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王つららぎの宿 花ゆらん",
+      "propertyNameNormalized": "蔵王つららぎの宿花ゆらん",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/149097/",
+      "sourcePropertyId": "149097",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/149097 with anchor name \"蔵王つららぎの宿 花ゆらん\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "お食事処・お泊り処・お湯処 ろばた",
+      "propertyNameNormalized": "お食事処お泊り処お湯処ろばた",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/67903/",
+      "sourcePropertyId": "67903",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/67903 with anchor name \"お食事処・お泊り処・お湯処 ろばた\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 えびや旅館",
+      "propertyNameNormalized": "蔵王温泉えびや旅館",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/14790/",
+      "sourcePropertyId": "14790",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/14790 with anchor name \"蔵王温泉 えびや旅館\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ＫＫＲ蔵王 白銀荘（国家公務員共済組合連合会蔵王保養所）",
+      "propertyNameNormalized": "蔵王温泉kkr蔵王白銀荘国家公務員共済組合連合会蔵王保養所",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/40164/",
+      "sourcePropertyId": "40164",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/40164 with anchor name \"蔵王温泉 ＫＫＲ蔵王 白銀荘（国家公務員共済組合連合会蔵王保養所）\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ル・ベール蔵王",
+      "propertyNameNormalized": "蔵王温泉ルベル蔵王",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/29465/",
+      "sourcePropertyId": "29465",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/29465 with anchor name \"蔵王温泉 ル・ベール蔵王\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王アストリアホテル",
+      "propertyNameNormalized": "蔵王アストリアホテル",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/145312/",
+      "sourcePropertyId": "145312",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/145312 with anchor name \"蔵王アストリアホテル\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ホテル松金屋アネックス",
+      "propertyNameNormalized": "蔵王温泉ホテル松金屋アネックス",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/5097/",
+      "sourcePropertyId": "5097",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/5097 with anchor name \"蔵王温泉 ホテル松金屋アネックス\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 こけしの宿 招仙閣",
+      "propertyNameNormalized": "蔵王温泉こけしの宿招仙閣",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/4877/",
+      "sourcePropertyId": "4877",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/4877 with anchor name \"蔵王温泉 こけしの宿 招仙閣\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ホテル喜らく",
+      "propertyNameNormalized": "蔵王温泉ホテル喜らく",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/12535/",
+      "sourcePropertyId": "12535",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/12535 with anchor name \"蔵王温泉 ホテル喜らく\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ホテル ラルジャン蔵王",
+      "propertyNameNormalized": "蔵王温泉ホテルラルジャン蔵王",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/13603/",
+      "sourcePropertyId": "13603",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/13603 with anchor name \"蔵王温泉 ホテル ラルジャン蔵王\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 ぼくのうち",
+      "propertyNameNormalized": "蔵王温泉ぼくのうち",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/41644/",
+      "sourcePropertyId": "41644",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/41644 with anchor name \"蔵王温泉 ぼくのうち\"."
+    },
+    {
+      "source": "rakuten",
+      "sourceListUrl": "https://travel.rakuten.co.jp/onsen/yamagata/OK00161.html",
+      "propertyNameRaw": "蔵王温泉 暖炉の宿 ロッヂスガノ",
+      "propertyNameNormalized": "蔵王温泉暖炉の宿ロッヂスガノ",
+      "propertyUrl": "https://travel.rakuten.co.jp/HOTEL/80467/",
+      "sourcePropertyId": "80467",
+      "extractionStatus": "extracted",
+      "evidenceNote": "Extracted from Rakuten onsen listing: HOTEL/80467 with anchor name \"蔵王温泉 暖炉の宿 ロッヂスガノ\"."
+    }
+  ]
+}

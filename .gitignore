@@ -157,3 +157,14 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 .env.cloudflare.local
+
+# macOS
+.DS_Store
+
+# local/generated review packets
+*.zip
+
+# local-only crawler/prototype artifacts
+*.local.json
+*.ai-discovered.local.json
+*.verified.local.json
