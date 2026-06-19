@@ -268,6 +268,17 @@ describe("ZMI BI export - price aggregation & confidence", () => {
     expect(u[0]!.price_confidence).toBe("low");
   });
 
+  it("drops structurally invalid observations (blank checkin/name/source) — no _early/NaN row", () => {
+    const u = unifyByPropertyCheckin([
+      row({ source: "booking", canonical_property_name: "三浦屋", checkin: "2026-07-18", normalized_total_price: 30000 }),
+      row({ source: "", canonical_property_name: "", checkin: "" }), // garbage partial row
+      row({ source: "jalan", canonical_property_name: "三浦屋", checkin: "bad-date" })
+    ]);
+    expect(u).toHaveLength(1);
+    expect(u[0]!.checkin).toBe("2026-07-18");
+    expect(u.some((r) => r.period_key.startsWith("_") || r.period_label.includes("NaN"))).toBe(false);
+  });
+
   it("no price when not available (sold_out) even if a stale price exists", () => {
     const u = unifyByPropertyCheckin([
       row({ source: "booking", availability_status: "sold_out", normalized_total_price: 30000, is_price_usable_for_dp_directional: true }),

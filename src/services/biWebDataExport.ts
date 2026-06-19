@@ -247,10 +247,21 @@ function median(values: number[]): number | null {
   return s.length % 2 === 1 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2);
 }
 
+/** A BI observation is structurally valid only with a real checkin date, a
+ *  non-blank property name, and a source. Invalid rows (e.g. partial rows from a
+ *  mis-parsed shard) would otherwise produce a garbage "_early / 年NaN月" BI row,
+ *  so they are dropped here as a library-level guarantee. */
+export function isValidBiObservation(r: BiHistoryRow): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/u.test((r.checkin ?? "").trim())
+    && (r.canonical_property_name ?? "").trim() !== ""
+    && (r.source ?? "").trim() !== "";
+}
+
 /** Unify latest observations into one row per (property, checkin) across all sources. */
 export function unifyByPropertyCheckin(latest: readonly BiHistoryRow[]): UnifiedRow[] {
   const groups = new Map<string, BiHistoryRow[]>();
   for (const r of latest) {
+    if (!isValidBiObservation(r)) continue; // never emit an invalid BI row
     const key = `${r.canonical_property_name}|${r.checkin}`;
     const list = groups.get(key) ?? [];
     list.push(r);

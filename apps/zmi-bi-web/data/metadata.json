@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-06-18T23:42:36+09:00",
-  "latest_collected_at_jst": "2026-06-17T22:00:06+09:00",
-  "history_rows_total": 1931,
-  "latest_observation_rows": 1065,
-  "unified_rows": 933,
-  "unified_rows_before_retention": 933,
-  "distinct_properties": 24,
-  "distinct_checkins": 108,
+  "generated_at_jst": "2026-06-19T09:30:21+09:00",
+  "latest_collected_at_jst": "2026-06-19T08:00:06+09:00",
+  "history_rows_total": 2107,
+  "latest_observation_rows": 1067,
+  "unified_rows": 936,
+  "unified_rows_before_retention": 936,
+  "distinct_properties": 23,
+  "distinct_checkins": 107,
   "sources_included": [
     "booking",
     "jalan",
@@ -38,14 +38,14 @@
   "dropped_past_period_keys_count": 0,
   "dropped_past_rows_count": 0,
   "availability_breakdown": {
-    "total": 933,
-    "available": 817,
+    "total": 936,
+    "available": 820,
     "sold_out": 104,
     "not_found": 2,
     "excluded": 10,
-    "ota_unavailable_rate": 0.1115,
-    "data_missing_rate": 0.0021,
-    "data_reliability_rate": 0.9979
+    "ota_unavailable_rate": 0.1126,
+    "data_missing_rate": 0.0128,
+    "data_reliability_rate": 0.9872
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out"
 }
