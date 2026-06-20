@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-06-20T14:06:19+09:00",
+  "generated_at_jst": "2026-06-20T14:20:41+09:00",
   "latest_collected_at_jst": "2026-06-20T14:05:19+09:00",
-  "history_rows_total": 2671,
-  "latest_observation_rows": 1148,
-  "unified_rows": 1007,
-  "unified_rows_before_retention": 1007,
+  "history_rows_total": 2720,
+  "latest_observation_rows": 1154,
+  "unified_rows": 1011,
+  "unified_rows_before_retention": 1011,
   "distinct_properties": 23,
   "distinct_checkins": 107,
   "sources_included": [
@@ -38,12 +38,12 @@
   "dropped_past_period_keys_count": 0,
   "dropped_past_rows_count": 0,
   "availability_breakdown": {
-    "total": 1007,
-    "available": 893,
+    "total": 1011,
+    "available": 897,
     "sold_out": 104,
     "not_found": 2,
     "excluded": 8,
-    "ota_unavailable_rate": 0.1043,
+    "ota_unavailable_rate": 0.1039,
     "data_missing_rate": 0.0099,
     "data_reliability_rate": 0.9901
   },
