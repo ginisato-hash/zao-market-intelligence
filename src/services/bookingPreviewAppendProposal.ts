@@ -202,6 +202,21 @@ function deriveRoomBasisMarker(row: PreviewRow): RoomBasisMarker {
       dpExclusionReason: null
     };
   }
+  if (roomBasis === "probable_two_person_standard_room") {
+    // Booking 2-adult search, no exclusion, but room name/bed not confirmed:
+    // DP-usable directional (medium), NOT excluded. The probable marker is what
+    // deriveBiRoomBasis reads to keep it probable (not confirmed, not excluded).
+    return {
+      sourceClassification: "booking_assumed_room_only_two_person_probable",
+      basisNote: "meal_basis=assumed_room_only;room_basis=probable_two_person_standard_room;booking 2-adult search no exclusion; directional visible price signal",
+      warningFlags: [existingFlags, "room_basis_probable_two_person_standard", "room_basis=probable_two_person_standard_room"]
+        .filter((f) => f.length > 0)
+        .join(";"),
+      isPriceUsableForDpDirectional: true,
+      isPriceExcludedFromDp: false,
+      dpExclusionReason: null
+    };
+  }
   // Wrong or unknown room type: excluded audit row.
   return {
     sourceClassification: "booking_room_type_excluded",

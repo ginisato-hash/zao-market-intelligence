@@ -23,6 +23,7 @@ import {
 import { type PreviewRow } from "../src/services/autoRunnerBookingPreview";
 import { extractBookingRoomContextAroundPrice } from "../src/services/bookingRoomContextExtraction";
 import { classifyRoomBasisFromParts } from "../src/services/roomBasisClassification";
+import { deriveBiRoomBasis } from "../src/services/biWebDataExport";
 
 const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/bookingPreviewAppendProposal.ts"), "utf8");
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/buildBookingPreviewAppendProposal.ts"), "utf8");
@@ -297,6 +298,23 @@ describe("ROOM-LIVE - room-basis markers in the history row", () => {
     expect(h.basisNote).toContain("room_basis=confirmed_two_person_standard_room");
     expect(h.warningFlags).toContain("room_basis=confirmed_two_person_standard_room");
     expect(h.isPriceExcludedFromDp).toBe(false);
+  });
+
+  it("A4 — probable two-person room is DP-usable (medium), not excluded", () => {
+    const h = build({ room_basis: "probable_two_person_standard_room", primary_room_name: "スタンダードルーム" });
+    expect(h.basisNote).toContain("room_basis=probable_two_person_standard_room");
+    expect(h.warningFlags).toContain("room_basis=probable_two_person_standard_room");
+    expect(h.sourceClassification).toBe("booking_assumed_room_only_two_person_probable");
+    expect(h.isPriceUsableForDpDirectional).toBe(true);
+    expect(h.isPriceExcludedFromDp).toBe(false);
+    expect(h.dpExclusionReason).toBeNull();
+    // BI must read this back as probable (not confirmed, not excluded).
+    expect(deriveBiRoomBasis({
+      source: "booking", canonical_property_name: "X", source_slug_or_code: "", checkin: "2026-08-10", checkout: "2026-08-11",
+      availability_status: "available_price_basis", normalized_total_price: 24000, is_price_usable_for_dp_directional: true,
+      collected_at_jst: "2026-06-20T13:00:00+09:00", tier: "", source_classification: h.sourceClassification,
+      warning_flags: h.warningFlags, basis_confidence: "B", is_price_excluded_from_dp: false, dp_exclusion_reason: h.dpExclusionReason ?? "", basis_note: h.basisNote
+    })).toBe("probable_two_person_standard_room");
   });
 
   it("B1 — single room is excluded from two-person DP", () => {
