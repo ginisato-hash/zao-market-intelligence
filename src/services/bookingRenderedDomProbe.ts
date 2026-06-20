@@ -1,5 +1,5 @@
 import { extractBookingRoomContextAroundPrice } from "./bookingRoomContextExtraction";
-import { classifyRoomBasisFromParts, type RoomBasis } from "./roomBasisClassification";
+import { classifyBookingRoomBasis, type RoomBasis } from "./roomBasisClassification";
 
 export type BookingRenderedDomClassification =
   | "booking_rendered_price_basis_candidate_found"
@@ -263,11 +263,21 @@ export function buildBookingRenderedDomRow(input: {
   debugArtifactPath: string;
 }): BookingRenderedDomRow {
   const classification = classifyBookingRenderedDom(input.signals);
-  // Classify room basis from the extracted room context (card text is already
-  // sanitized so "シングルベッド2台" reads as a twin, not a single room).
-  const roomBasis = classifyRoomBasisFromParts({
+  // Classify room basis from the FULL extracted room context — room name, the
+  // sanitized card text, the bed hint ("シングルベッド2台"/"2 single beds" = twin),
+  // and the occupancy hint. Passing bed/occupancy hints lets a priced, available
+  // 2-adult Booking row be CONFIRMED via its beds even when the room name was
+  // not surfaced, and otherwise fall to probable (not unknown). Confirmed and
+  // excluded text always win over the probable default.
+  const hasPrice = input.signals.priceCandidates.length > 0;
+  const available = hasPrice && !input.signals.soldOutOrUnavailableDetected;
+  const roomBasis = classifyBookingRoomBasis({
     roomName: input.signals.primaryRoomName,
-    blockText: input.signals.primaryRoomCardText
+    blockText: input.signals.primaryRoomCardText,
+    bedHint: input.signals.primaryBedHint,
+    occupancyHint: input.signals.primaryOccupancyHint,
+    available,
+    hasPrice
   });
   return {
     canonicalPropertyName: input.target.canonicalPropertyName,

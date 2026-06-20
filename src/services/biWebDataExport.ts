@@ -21,9 +21,13 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = {
   "喜らく": "ホテル喜らく",
   "ホテル喜らく": "ホテル喜らく",
   "旅館きらく": "ホテル喜らく",
+  "きらく": "ホテル喜らく",
   "kiraku": "ホテル喜らく",
   "hotelkiraku": "ホテル喜らく",
-  "zaospahotelkiraku": "ホテル喜らく"
+  "zaospahotelkiraku": "ホテル喜らく",
+  // 三浦屋 (own): Booking currently labels it "三浦屋"; fold romanized variants too.
+  "miuraya": "三浦屋",
+  "miurayaryokan": "三浦屋"
 };
 
 /** Fold a raw canonical_property_name to the unified canonical (alias-aware). */
@@ -32,6 +36,23 @@ export function canonicalizeName(name: string): string {
   if (CANONICAL_ALIASES[raw]) return CANONICAL_ALIASES[raw];
   const key = raw.normalize("NFKC").toLowerCase().replace(/[\s　・･]+/gu, "");
   return CANONICAL_ALIASES[key] ?? raw;
+}
+
+/**
+ * Own (self-operated) facilities — 三浦屋 / 喜らく (= ZAO SPA HOTEL Kiraku on
+ * Booking, 喜らく on Jalan). These are collected but MUST NOT be used as market
+ * pricing/competitor evidence: feeding our own OTA price back into ZMI as
+ * "market" would create a self-referential pricing loop. Alias-folded so every
+ * OTA label resolves to the same own facility.
+ */
+export function isOwnProperty(name: string): boolean {
+  return (OWN_PROPERTIES as readonly string[]).includes(canonicalizeName(name));
+}
+
+/** A facility is usable as market/competitor pricing evidence only when it is
+ *  NOT an own property (circularity guard). */
+export function marketEvidenceEligible(name: string): boolean {
+  return !isOwnProperty(name);
 }
 
 export interface BiHistoryRow {

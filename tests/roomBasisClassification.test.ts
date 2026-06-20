@@ -168,3 +168,27 @@ describe("PRICE-CONFIDENCE01 — §9.1 confirmed / probable / excluded cases", (
     expect(classifyBookingRoomBasis({ roomName: "Single Room", available: true, hasPrice: true }).roomBasis).toBe("excluded_single_room");
   });
 });
+
+describe("BOOKING-ROOM-CONTEXT — bed hint promotes confirmed at the probe (§7)", () => {
+  it("Double Room + 1 double bed + price => confirmed", () => {
+    expect(classifyBookingRoomBasis({ roomName: "Double Room", bedHint: "1 double bed", available: true, hasPrice: true }).roomBasis)
+      .toBe("confirmed_two_person_standard_room");
+  });
+  it("room name absent + bed hint シングルベッド2台 => confirmed (not single)", () => {
+    expect(classifyBookingRoomBasis({ roomName: "", bedHint: "シングルベッド2台", occupancyHint: "大人2名", available: true, hasPrice: true }).roomBasis)
+      .toBe("confirmed_two_person_standard_room");
+  });
+  it("room name absent + bed hint 2 single beds => confirmed (not single)", () => {
+    expect(classifyBookingRoomBasis({ roomName: "", bedHint: "2 single beds", available: true, hasPrice: true }).roomBasis)
+      .toBe("confirmed_two_person_standard_room");
+  });
+  it("no room/bed evidence + available priced 2-adult => probable (not unknown)", () => {
+    expect(classifyBookingRoomBasis({ roomName: "Standard room", occupancyHint: "2 adults", available: true, hasPrice: true }).roomBasis)
+      .toBe("probable_two_person_standard_room");
+  });
+  it("sold-out / no price never promoted", () => {
+    expect(classifyBookingRoomBasis({ roomName: "", available: false, hasPrice: false }).roomBasis).toBe("unknown_room_basis");
+    expect(classifyBookingRoomBasis({ roomName: "", bedHint: "シングルベッド2台", available: false, hasPrice: false }).roomBasis)
+      .toBe("confirmed_two_person_standard_room"); // bed hint is a positive token regardless of availability
+  });
+});

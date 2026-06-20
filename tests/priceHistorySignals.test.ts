@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPriceHistorySignals,
+  comparisonKey,
   dedupeObservations,
   normalizeStatus,
   type PriceHistoryInputRow
@@ -28,6 +29,22 @@ function row(over: Partial<PriceHistoryInputRow> = {}): PriceHistoryInputRow {
     ...over
   };
 }
+
+describe("PRICE-HISTORY01 — probable does not break the comparison key", () => {
+  it("probable_two_person_standard_room collapses to unknown for key stability", () => {
+    const r = row();
+    const probable = comparisonKey(r, "assumed_room_only", "probable_two_person_standard_room");
+    const unknown = comparisonKey(r, "assumed_room_only", "unknown_room_basis");
+    // probable must NOT fragment a stay timeline: same key as unknown.
+    expect(probable.key).toBe(unknown.key);
+  });
+  it("confirmed keeps a distinct comparison key", () => {
+    const r = row();
+    const confirmed = comparisonKey(r, "assumed_room_only", "confirmed_two_person_standard_room");
+    const probable = comparisonKey(r, "assumed_room_only", "probable_two_person_standard_room");
+    expect(confirmed.key).not.toBe(probable.key);
+  });
+});
 
 const OPTS = {
   runAt: "2026-06-18T12:00:00+09:00",

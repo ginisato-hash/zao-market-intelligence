@@ -7,6 +7,8 @@ import {
   availabilityBreakdown,
   buildBiMetadata,
   canonicalizeName,
+  isOwnProperty,
+  marketEvidenceEligible,
   getCurrentPeriodKeyJst,
   halfOf,
   latestObservations,
@@ -580,5 +582,29 @@ describe("PRICE-CONFIDENCE01 — probable two-person Booking confidence", () => 
     const u = unifyByPropertyCheckin([row({ source: "booking", availability_status: "sold_out", normalized_total_price: null, is_price_usable_for_dp_directional: false })]);
     expect(u[0]!.price_confidence).toBe("low");
     expect(u[0]!.low_confidence_reason).not.toBe("");
+  });
+});
+
+describe("ZMI own-property circularity guard (BOOKING-RECRAWL)", () => {
+  it("recognizes 三浦屋 / 喜らく aliases as own properties", () => {
+    for (const name of ["三浦屋", "Miuraya", "MIURAYA", "ホテル喜らく", "喜らく", "旅館きらく", "きらく", "Kiraku", "ZAO SPA HOTEL Kiraku", "Zao Spa Hotel Kiraku", "ZAO SPA HOTEL KIRAKU"]) {
+      expect(isOwnProperty(name), name).toBe(true);
+    }
+  });
+  it("treats Booking=ZAO SPA HOTEL Kiraku and Jalan=喜らく as the same own facility", () => {
+    expect(canonicalizeName("ZAO SPA HOTEL Kiraku")).toBe(canonicalizeName("喜らく"));
+    expect(isOwnProperty("ZAO SPA HOTEL Kiraku")).toBe(true);
+    expect(isOwnProperty("喜らく")).toBe(true);
+  });
+  it("own properties are NOT market-evidence eligible (no self-referential pricing)", () => {
+    for (const name of ["三浦屋", "Miuraya", "ホテル喜らく", "ZAO SPA HOTEL Kiraku"]) {
+      expect(marketEvidenceEligible(name), name).toBe(false);
+    }
+  });
+  it("competitors ARE market-evidence eligible and not own", () => {
+    for (const name of ["HAMMOND", "ONSEN & STAY OAKHILL", "吉田屋", "JURIN", "蔵王国際ホテル", "ル・ベール蔵王"]) {
+      expect(isOwnProperty(name), name).toBe(false);
+      expect(marketEvidenceEligible(name), name).toBe(true);
+    }
   });
 });

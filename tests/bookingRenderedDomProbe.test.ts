@@ -211,8 +211,27 @@ describe("ROOM-LIVE - rendered DOM row extracts room context (A1)", () => {
     expect(rowFor(body).roomBasis).toBe("excluded_single_room");
   });
 
-  it("price with no room-type context is unknown_room_basis", () => {
-    const row = rowFor(visibleText()); // no room-type token present
-    expect(row.roomBasis).toBe("unknown_room_basis");
+  it("priced 2-adult page with no room-type context is probable_two_person_standard_room", () => {
+    // No room name / bed token, but available + priced + 2-adult Booking search
+    // => probable (the live probe now applies the Booking 2-adult default).
+    const row = rowFor(visibleText());
+    expect(row.roomBasis).toBe("probable_two_person_standard_room");
+  });
+
+  it("room name absent but bed hint 'シングルベッド2台' => confirmed via bed hint", () => {
+    const body = [
+      "蔵王国際ホテル", "2026年8月10日", "2026年8月11日", "1泊", "大人2名", "1室",
+      "禁煙", "シングルベッド2台", "税・手数料込み", "￥24,000", "宿泊施設の説明 ".repeat(30)
+    ].join(" ");
+    const row = rowFor(body);
+    expect(row.primaryBedHint).toMatch(/シングルベッド2台|ベッド2台|two beds/u);
+    expect(row.roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+
+  it("sold-out page with no price is not promoted to probable", () => {
+    const body = ["蔵王国際ホテル", "2026年8月10日", "2026年8月11日", "1泊", "大人2名", "1室", "満室", "空室なし", "x ".repeat(200)].join(" ");
+    const row = rowFor(body);
+    expect(row.roomBasis).not.toBe("probable_two_person_standard_room");
+    expect(row.roomBasis).not.toBe("confirmed_two_person_standard_room");
   });
 });
