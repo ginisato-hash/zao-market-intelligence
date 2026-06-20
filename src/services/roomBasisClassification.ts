@@ -25,12 +25,13 @@ export interface RoomBasisClassification {
   reason: string;
 }
 
-// Two-person standard room positives.
+// Two-person standard room positives. Unambiguous two-bed / two-person tokens
+// only (exclusion still wins, so adding these never overrides suite/family/etc.).
 export const TWO_PERSON_STANDARD_ROOM_TOKENS = [
-  "ツイン", "ダブル", "洋室ツイン", "洋室ダブル",
+  "ツイン", "ダブル", "洋室ツイン", "洋室ダブル", "2ベッド", "ツインベッド",
   "twin", "double", "queen", "king",
   "2 beds", "two beds", "2 bed", "two bed",
-  "1 queen", "1 king"
+  "1 queen", "1 king", "sleeps 2", "sleeps two"
 ] as const;
 
 // Single-room exclusions.
@@ -73,7 +74,7 @@ function containsAny(haystack: string, tokens: readonly string[]): boolean {
 // token matching. Single-bed counts other than two (e.g. "シングルベッド1台")
 // are left untouched and keep classifying as single.
 const TWO_SINGLE_BEDS_RE =
-  /シングルベッド\s*2\s*台|シングル\s*ベッド\s*2\s*台|シングルベッド\s*[×x]\s*2|2\s*single\s*beds?|two\s*single\s*beds?|single\s*beds?\s*2|single\s*beds?\s*two/gu;
+  /シングルベッド\s*2\s*台|シングル\s*ベッド\s*2\s*台|シングルベッド\s*[×x]\s*2|ベッド\s*2\s*台|ベッド\s*[×x]\s*2|2\s*single\s*beds?|two\s*single\s*beds?|single\s*beds?\s*2|single\s*beds?\s*two/gu;
 
 function scrubTwoSingleBeds(text: string): string {
   return text.replace(TWO_SINGLE_BEDS_RE, " twin ");

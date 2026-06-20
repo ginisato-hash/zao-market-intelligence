@@ -192,3 +192,26 @@ describe("BOOKING-ROOM-CONTEXT — bed hint promotes confirmed at the probe (§7
       .toBe("confirmed_two_person_standard_room"); // bed hint is a positive token regardless of availability
   });
 });
+
+describe("BOOKING-RECRAWL probable->confirmed extraction tokens (§4.3)", () => {
+  it("same-card twin / 2 single beds => confirmed", () => {
+    expect(classifyRoomBasisFromParts({ roomName: "スタンダードツイン", bedHint: "2 single beds" }).roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("Standard Room - sleeps 2").roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("2ベッド 禁煙").roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+  it("same-card Japanese シングルベッド2台 / ベッド2台 => confirmed", () => {
+    expect(classifyRoomBasis("和室 シングルベッド2台").roomBasis).toBe("confirmed_two_person_standard_room");
+    expect(classifyRoomBasis("禁煙ルーム ベッド2台").roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+  it("suite + 2 single beds => excluded (exclusion wins over bed/positive token)", () => {
+    expect(classifyRoomBasis("スイート シングルベッド2台").roomBasis).toBe("excluded_family_or_suite_room");
+    expect(classifyRoomBasis("Suite - 2 single beds").roomBasis).toBe("excluded_family_or_suite_room");
+  });
+  it("family + double => excluded", () => {
+    expect(classifyRoomBasis("ファミリールーム ダブルベッド").roomBasis).toBe("excluded_family_or_suite_room");
+    expect(classifyRoomBasis("Family Room double").roomBasis).toBe("excluded_family_or_suite_room");
+  });
+  it("probable stays probable when only the 2-adult default applies (no room/bed token)", () => {
+    expect(classifyBookingRoomBasis({ roomName: "おまかせ", occupancyHint: "大人2名", available: true, hasPrice: true }).roomBasis).toBe("probable_two_person_standard_room");
+  });
+});

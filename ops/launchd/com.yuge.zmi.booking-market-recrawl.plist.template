@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuge.zmi.booking-market-recrawl</string>
+
+  <!-- Dedicated competitor market re-crawl operator. Runs ONE batch per firing
+       (state-tracked round-robin over ~6 batches => ~3 weeks per full cycle),
+       twice weekly, offset from the odd-hour :10 bi-web-publish jobs to keep
+       Booking bot exposure low. preview-only live crawl + conflict-safe
+       UNIQUE-only append + bi:web:export/check + commit/push + publish, all via
+       npm run ops:booking-market-recrawl (node loads .env.cloudflare.local
+       itself; own properties 三浦屋/喜らく are guarded out; never overwrites
+       history; never touches the global auto-runner:booking-preview cap). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_MARKET_RECRAWL_MODE=scheduled npm run ops:booking-market-recrawl &gt;&gt; .data/logs/booking-market-recrawl.log 2&gt;&amp;1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+
+  <!-- Tuesday (2) and Friday (5), 14:35 JST. -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>35</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>35</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/booking-market-recrawl.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/booking-market-recrawl.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

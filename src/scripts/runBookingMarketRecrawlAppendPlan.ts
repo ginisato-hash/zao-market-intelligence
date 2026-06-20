@@ -43,9 +43,19 @@ interface RawObs { canonical_property_name: string; checkin: string; room_basis?
 
 function readPreviewArtifacts(): { obs: RawObs[]; artifacts: string[] } {
   const obs: RawObs[] = []; const artifacts: string[] = [];
-  if (!existsSync(REPORT_GLOB_DIR)) return { obs, artifacts };
-  for (const f of readdirSync(REPORT_GLOB_DIR).filter((x) => /^booking_market_recrawl_preview_.*\.json$/u.test(x)).sort()) {
-    const path = join(REPORT_GLOB_DIR, f);
+  // Pipeline scoping: ZMI_RECRAWL_APPEND_ARTIFACT pins a single preview JSON (the
+  // batch just crawled) so a scheduled run appends only that batch's fresh
+  // observations. Unset = read all artifacts (manual full-set behavior).
+  const pinned = (process.env["ZMI_RECRAWL_APPEND_ARTIFACT"] ?? "").trim();
+  let paths: string[];
+  if (pinned !== "") {
+    paths = existsSync(pinned) ? [pinned] : [];
+  } else if (existsSync(REPORT_GLOB_DIR)) {
+    paths = readdirSync(REPORT_GLOB_DIR).filter((x) => /^booking_market_recrawl_preview_.*\.json$/u.test(x)).sort().map((f) => join(REPORT_GLOB_DIR, f));
+  } else {
+    paths = [];
+  }
+  for (const path of paths) {
     const d = JSON.parse(readFileSync(path, "utf8")) as { generated_at_jst?: string; selected_batch_index?: number; rows?: Array<Record<string, unknown>> };
     artifacts.push(path);
     for (const r of d.rows ?? []) {
