@@ -184,6 +184,7 @@
     "review:booking-room-context": "node --import tsx src/scripts/runBookingRoomContextExtractionReview.ts",
     "target:booking-low-confidence": "node --import tsx src/scripts/runBookingLowConfidenceTargeting.ts",
     "review:booking-verified-target-gap": "node --import tsx src/scripts/runBookingVerifiedTargetGapReview.ts",
+    "preview:booking-market-recrawl": "node --import tsx src/scripts/runBookingMarketRecrawlPreview.ts",
     "build:price-history-signals": "node --import tsx src/scripts/runPriceHistorySignals.ts",
     "validate:price-history-signals": "node --import tsx src/scripts/runPriceHistorySignals.ts --check",
     "build:market-booking-curve": "node --import tsx src/scripts/runMarketBookingCurve.ts",
