@@ -18,9 +18,20 @@ import {
   unifyByPropertyCheckin,
   type BiHistoryRow
 } from "../services/biWebDataExport";
+import {
+  assembleMovementArtifacts,
+  latestCollectedAt,
+  renderDpPressureCsv,
+  renderMovementCsv
+} from "../services/marketPriceMovementSignals";
 
 const HISTORY_DIR = ".data/history";
 const OUT_DIR = "apps/zmi-bi-web/data";
+
+function readHistoryFiles(): { filename: string; content: string }[] {
+  if (!existsSync(HISTORY_DIR)) return [];
+  return readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x)).sort().map((f) => ({ filename: f, content: readFileSync(join(HISTORY_DIR, f), "utf8") }));
+}
 
 function parseCsvLine(line: string): string[] {
   const cells: string[] = [];
@@ -176,11 +187,27 @@ function run(): void {
   const unified = retention.retainedRows;
   const metadata = buildBiMetadata({ generatedAtJst, historyRowsTotal: total, latest, unifiedBeforeRetention: unifiedAll, retention });
 
+  // Market price movement / DP pressure proxy — additive public CSVs (the
+  // existing unified CSV schema is untouched). Read-only; no pricing/PMS output.
+  const movement = assembleMovementArtifacts(readHistoryFiles());
+  const movementMeta = {
+    price_movement_rows: movement.movements.length,
+    dp_pressure_rows: movement.dpPressure.length,
+    price_movement_own_property_rows: movement.ownPropertyRows,
+    price_movement_latest_collected_at_jst: latestCollectedAt(movement.movements),
+    dp_pressure_latest_collected_at_jst: latestCollectedAt(movement.dpPressure),
+    price_movement_policy: "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only"
+  };
+
   mkdirSync(resolve(OUT_DIR), { recursive: true });
   const csvPath = resolve(OUT_DIR, "zmi_market_unified.csv");
   const metaPath = resolve(OUT_DIR, "metadata.json");
+  const movementCsvPath = resolve(OUT_DIR, "market_price_movement_signals.csv");
+  const dpCsvPath = resolve(OUT_DIR, "market_dp_pressure_by_checkin.csv");
   writeFileSync(csvPath, renderUnifiedCsv(unified), "utf8");
-  writeFileSync(metaPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+  writeFileSync(metaPath, `${JSON.stringify({ ...metadata, ...movementMeta }, null, 2)}\n`, "utf8");
+  writeFileSync(movementCsvPath, renderMovementCsv(movement.movements), "utf8");
+  writeFileSync(dpCsvPath, renderDpPressureCsv(movement.dpPressure), "utf8");
 
   // Strict validation of the written artifacts (guards against invalid BI rows
   // ever reaching Cloudflare). Applies to both export and --check.
@@ -216,6 +243,9 @@ function run(): void {
   console.log(`data_reliability_rate=${metadata.availability_breakdown.data_reliability_rate}`);
   console.log(`csv_path=${csvPath}`);
   console.log(`metadata_path=${metaPath}`);
+  console.log(`price_movement_rows=${movementMeta.price_movement_rows}`);
+  console.log(`dp_pressure_rows=${movementMeta.dp_pressure_rows}`);
+  console.log(`price_movement_own_property_rows=${movementMeta.price_movement_own_property_rows}`);
   console.log(`pricing_output_generated=false`);
   console.log(`pms_output_generated=false`);
   // Fail closed whenever the output is invalid — for --check AND plain export —
