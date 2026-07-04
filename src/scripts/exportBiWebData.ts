@@ -24,6 +24,52 @@ import {
   renderDpPressureCsv,
   renderMovementCsv
 } from "../services/marketPriceMovementSignals";
+import { parseHistoryForPriceHistory } from "../services/priceHistorySignals";
+import { PRIORITY_COMPETITORS } from "../services/priorityCompetitors";
+import { OWN_PROPERTY_TARGETS } from "../services/ownPropertyTargets";
+import { buildJstDateRange } from "../services/priorityRecrawlTargets";
+import {
+  OWN_PROPERTY_THRESHOLDS,
+  PRIORITY_COMPETITOR_THRESHOLDS,
+  computeCoverageForProperties,
+  type PropertyCoverageResult
+} from "../services/priorityCoverageReport";
+import { buildOwnPropertyPriceRows, renderOwnPropertyPriceCsv } from "../services/ownPropertyPricesExport";
+import { detectPriceChanges, type PriceChangeRecord } from "../services/priorityPriceChangeDetection";
+import { liveTargets } from "../services/marketRefreshTargetUniverse";
+
+function renderPriceChangeCsv(rows: readonly PriceChangeRecord[]): string {
+  const headers = ["target_type", "property", "display_name", "source", "checkin", "previous_price", "latest_price", "delta_amount", "delta_rate", "direction", "previous_collected_at_jst", "latest_collected_at_jst"];
+  const esc = (v: string): string => (/[",\n]/u.test(v) ? `"${v.replace(/"/gu, '""')}"` : v);
+  const body = rows.map((r) => [r.target_type, r.property, r.display_name, r.source, r.checkin, String(r.previous_price), String(r.latest_price), String(r.delta_amount), String(r.delta_rate), r.direction, r.previous_collected_at_jst, r.latest_collected_at_jst].map(esc).join(","));
+  return [headers.join(","), ...body].join("\n") + "\n";
+}
+
+function renderCoverageCsv(rows: readonly PropertyCoverageResult[]): string {
+  const headers = [
+    "property", "display_name", "price_source_type", "is_ota_price", "is_pms_price",
+    "coverage_30d", "coverage_45d", "coverage_90d", "status", "latest_collected_at_jst", "missing_dates_30d_count",
+    "booking_live_supported", "booking_coverage_30d", "booking_coverage_45d", "booking_coverage_90d", "booking_latest_collected_at_jst",
+    "jalan_live_supported", "jalan_coverage_30d", "jalan_coverage_45d", "jalan_coverage_90d", "jalan_latest_collected_at_jst",
+    "rakuten_live_supported", "rakuten_coverage_30d", "rakuten_coverage_45d", "rakuten_coverage_90d", "rakuten_latest_collected_at_jst",
+    "warnings", "reasons"
+  ];
+  const esc = (v: string): string => (/[",\n]/u.test(v) ? `"${v.replace(/"/gu, '""')}"` : v);
+  const body = rows.map((r) => {
+    const booking = r.coverage["booking"];
+    const jalan = r.coverage["jalan"];
+    const rakuten = r.coverage["rakuten"];
+    return [
+      r.property, r.display_name, "ota_display_price", "true", "false",
+      String(r.coverage_30d), String(r.coverage_45d), String(r.coverage_90d), r.status, r.latest_collected_at_jst ?? "", String(r.missing_dates_30d.length),
+      String(booking?.live_supported ?? false), String(booking?.coverage_30d ?? 0), String(booking?.coverage_45d ?? 0), String(booking?.coverage_90d ?? 0), booking?.latest_collected_at_jst ?? "",
+      String(jalan?.live_supported ?? false), String(jalan?.coverage_30d ?? 0), String(jalan?.coverage_45d ?? 0), String(jalan?.coverage_90d ?? 0), jalan?.latest_collected_at_jst ?? "",
+      String(rakuten?.live_supported ?? false), String(rakuten?.coverage_30d ?? 0), String(rakuten?.coverage_45d ?? 0), String(rakuten?.coverage_90d ?? 0), rakuten?.latest_collected_at_jst ?? "",
+      r.warnings.join(";"), r.reasons.join(";")
+    ].map(esc).join(",");
+  });
+  return [headers.join(","), ...body].join("\n") + "\n";
+}
 
 const HISTORY_DIR = ".data/history";
 const OUT_DIR = "apps/zmi-bi-web/data";
@@ -77,6 +123,16 @@ const CHECKIN_RE = /^\d{4}-\d{2}-\d{2}$/u;
 function jstIso(): string {
   const f = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
   return `${f.replace(" ", "T")}+09:00`;
+}
+
+function todayJst(): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+const LIVE_COLLECT_SOURCES = new Set(["booking"]);
+
+function verifiedSourcesFor(canonicalPropertyName: string): string[] {
+  return [...new Set(liveTargets().filter((t) => t.canonical_property_name === canonicalPropertyName).map((t) => t.source))];
 }
 
 function readHistory(): { rows: BiHistoryRow[]; total: number; skipped: number } {
@@ -199,15 +255,60 @@ function run(): void {
     price_movement_policy: "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only"
   };
 
+  // Priority competitor / own property coverage + own price + price-change axes
+  // (§5/§6/§7) — additive only; zmi_market_unified.csv schema is untouched.
+  const priceHistoryParsed = parseHistoryForPriceHistory(readHistoryFiles());
+  const dateRange90d = buildJstDateRange();
+  const todayIso = todayJst();
+  const competitorRefs = PRIORITY_COMPETITORS.map((c) => ({ canonical_property_key: c.canonical_property_key, display_name: c.display_name, canonical_property_name: c.canonical_property_name, verified_sources: verifiedSourcesFor(c.canonical_property_name) }));
+  const ownRefs = OWN_PROPERTY_TARGETS.map((p) => ({ canonical_property_key: p.canonical_property_key, display_name: p.display_name, canonical_property_name: p.canonical_property_name, verified_sources: verifiedSourcesFor(p.canonical_property_name) }));
+  const priorityCompetitorCoverage = computeCoverageForProperties({ rows: priceHistoryParsed.rows, properties: competitorRefs, dateRange90d, thresholds: PRIORITY_COMPETITOR_THRESHOLDS, liveCollectSources: LIVE_COLLECT_SOURCES, todayIso });
+  const ownPropertyCoverage = computeCoverageForProperties({ rows: priceHistoryParsed.rows, properties: ownRefs, dateRange90d, thresholds: OWN_PROPERTY_THRESHOLDS, liveCollectSources: LIVE_COLLECT_SOURCES, todayIso });
+  const ownCoverageByKey = new Map(ownPropertyCoverage.map((c) => [c.property, c]));
+  const ownPropertyPrices = buildOwnPropertyPriceRows({ rows: priceHistoryParsed.rows, properties: ownRefs, coverageByPropertyKey: ownCoverageByKey });
+  const priorityCompetitorPriceChanges = detectPriceChanges({ rows: priceHistoryParsed.rows, properties: competitorRefs, targetType: "competitor" });
+  const ownPropertyPriceChanges = detectPriceChanges({ rows: priceHistoryParsed.rows, properties: ownRefs, targetType: "own_property" });
+
+  // Simple, defensible own-vs-competitor price gap: latest available own price
+  // (min across sources) vs the latest available priority-competitor median.
+  function latestOwnPrice(propertyName: string): number | null {
+    const rows = priceHistoryParsed.rows.filter((r) => r.property_name === propertyName && r.normalized_total_price !== null).sort((a, b) => b.observed_at.localeCompare(a.observed_at));
+    return rows[0]?.normalized_total_price ?? null;
+  }
+  const ownMiurayaPrice = latestOwnPrice("三浦屋");
+  const ownKirakuPrice = latestOwnPrice("ホテル喜らく");
+  const latestCompetitorPrices = competitorRefs.map((c) => latestOwnPrice(c.canonical_property_name)).filter((p): p is number => p !== null);
+  const competitorMedianPrice = latestCompetitorPrices.length === 0 ? null : latestCompetitorPrices.sort((a, b) => a - b)[Math.floor(latestCompetitorPrices.length / 2)]!;
+  const ownAvgPrice = [ownMiurayaPrice, ownKirakuPrice].filter((p): p is number => p !== null);
+  const ownAvg = ownAvgPrice.length === 0 ? null : ownAvgPrice.reduce((a, b) => a + b, 0) / ownAvgPrice.length;
+  const priorityCompetitorVsOwnGap = competitorMedianPrice !== null && ownAvg !== null ? Math.round(competitorMedianPrice - ownAvg) : null;
+
+  const pricingCriticalMeta = {
+    own_miuraya_price: ownMiurayaPrice,
+    own_kiraku_price: ownKirakuPrice,
+    own_property_price_status: ownPropertyCoverage.map((c) => ({ property: c.property, status: c.status })),
+    own_property_coverage_status: ownPropertyCoverage.map((c) => ({ property: c.property, coverage_30d: c.coverage_30d, coverage_90d: c.coverage_90d, status: c.status })),
+    priority_competitor_coverage_status: priorityCompetitorCoverage.map((c) => ({ property: c.property, coverage_30d: c.coverage_30d, coverage_90d: c.coverage_90d, status: c.status })),
+    competitor_vs_own_price_gap: priorityCompetitorVsOwnGap,
+    priority_competitor_vs_own_price_gap: priorityCompetitorVsOwnGap,
+    priority_competitor_price_changes_count: priorityCompetitorPriceChanges.length,
+    own_property_price_changes_count: ownPropertyPriceChanges.length
+  };
+
   mkdirSync(resolve(OUT_DIR), { recursive: true });
   const csvPath = resolve(OUT_DIR, "zmi_market_unified.csv");
   const metaPath = resolve(OUT_DIR, "metadata.json");
   const movementCsvPath = resolve(OUT_DIR, "market_price_movement_signals.csv");
   const dpCsvPath = resolve(OUT_DIR, "market_dp_pressure_by_checkin.csv");
   writeFileSync(csvPath, renderUnifiedCsv(unified), "utf8");
-  writeFileSync(metaPath, `${JSON.stringify({ ...metadata, ...movementMeta }, null, 2)}\n`, "utf8");
+  writeFileSync(metaPath, `${JSON.stringify({ ...metadata, ...movementMeta, ...pricingCriticalMeta }, null, 2)}\n`, "utf8");
   writeFileSync(movementCsvPath, renderMovementCsv(movement.movements), "utf8");
   writeFileSync(dpCsvPath, renderDpPressureCsv(movement.dpPressure), "utf8");
+  writeFileSync(resolve(OUT_DIR, "own_property_prices.csv"), renderOwnPropertyPriceCsv(ownPropertyPrices), "utf8");
+  writeFileSync(resolve(OUT_DIR, "own_property_coverage.csv"), renderCoverageCsv(ownPropertyCoverage), "utf8");
+  writeFileSync(resolve(OUT_DIR, "priority_competitor_coverage.csv"), renderCoverageCsv(priorityCompetitorCoverage), "utf8");
+  writeFileSync(resolve(OUT_DIR, "own_property_price_changes.csv"), renderPriceChangeCsv(ownPropertyPriceChanges), "utf8");
+  writeFileSync(resolve(OUT_DIR, "priority_competitor_price_changes.csv"), renderPriceChangeCsv(priorityCompetitorPriceChanges), "utf8");
 
   // Strict validation of the written artifacts (guards against invalid BI rows
   // ever reaching Cloudflare). Applies to both export and --check.
@@ -246,6 +347,14 @@ function run(): void {
   console.log(`price_movement_rows=${movementMeta.price_movement_rows}`);
   console.log(`dp_pressure_rows=${movementMeta.dp_pressure_rows}`);
   console.log(`price_movement_own_property_rows=${movementMeta.price_movement_own_property_rows}`);
+  console.log(`priority_competitor_coverage=${JSON.stringify(priorityCompetitorCoverage.map((c) => ({ property: c.property, coverage_30d: c.coverage_30d, status: c.status })))}`);
+  console.log(`own_property_coverage=${JSON.stringify(ownPropertyCoverage.map((c) => ({ property: c.property, coverage_30d: c.coverage_30d, status: c.status })))}`);
+  console.log(`own_property_prices_rows=${ownPropertyPrices.length}`);
+  console.log(`priority_competitor_price_changes_count=${pricingCriticalMeta.priority_competitor_price_changes_count}`);
+  console.log(`own_property_price_changes_count=${pricingCriticalMeta.own_property_price_changes_count}`);
+  console.log(`own_miuraya_price=${ownMiurayaPrice ?? "null"}`);
+  console.log(`own_kiraku_price=${ownKirakuPrice ?? "null"}`);
+  console.log(`priority_competitor_vs_own_price_gap=${priorityCompetitorVsOwnGap ?? "null"}`);
   console.log(`pricing_output_generated=false`);
   console.log(`pms_output_generated=false`);
   // Fail closed whenever the output is invalid — for --check AND plain export —
