@@ -9,6 +9,7 @@
 // AND self price monitoring — own properties are explicitly INCLUDED here.
 
 import type { PriceHistoryInputRow } from "./priceHistorySignals";
+import { validatePrimaryPriceNumeric } from "./pricePlausibilityGuard";
 
 export type PriceChangeDirection = "up" | "down" | "unchanged";
 export type PriceChangeTargetType = "competitor" | "own_property";
@@ -34,8 +35,16 @@ export interface PriceChangeRecord {
   latest_collected_at_jst: string;
 }
 
+// Implausible Booking prices already committed to append-only history (e.g.
+// ¥100 from a DOM-extraction defect) must never surface as a price change —
+// treat them exactly like "no price" so they neither become a previous nor a
+// latest comparison point (existing legitimate observations on either side of
+// a bad one still compare correctly with each other).
 function priceOf(row: PriceHistoryInputRow): number | null {
-  return Number.isFinite(row.normalized_total_price as number) ? row.normalized_total_price : null;
+  const raw = Number.isFinite(row.normalized_total_price as number) ? row.normalized_total_price : null;
+  if (raw === null) return null;
+  const plausibility = validatePrimaryPriceNumeric({ source: row.source, propertyName: row.property_name, price: raw });
+  return plausibility.data_quality_suspect ? null : raw;
 }
 
 export function detectPriceChanges(input: {

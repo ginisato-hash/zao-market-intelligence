@@ -146,6 +146,31 @@ describe("MARKET-PRICE-MOVEMENT01 - comparison scope", () => {
     expect(probable.row_weight).toBeLessThan(confirmed.row_weight);
     expect(probable.row_weight).toBeCloseTo(0.36, 5);
   });
+
+  it("an implausible Booking price (¥100, DOM-extraction defect) is not comparable, not a fake price_down", () => {
+    // Mirrors the real HAMMOND contamination: 15400 -> 100 must never read as a
+    // -99% price_down_available movement. With the ¥100 observation treated as
+    // unpriced, only one legitimate priced anchor remains (no prior to trend
+    // against), so this correctly resolves to "unknown", not a fake down move.
+    const m = one([
+      row({ property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-10T10:00:00+09:00", normalized_total_price: 15400 }),
+      row({ property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-11T10:00:00+09:00", normalized_total_price: 100 })
+    ]);
+    expect(m.movement_type).not.toBe("price_down_available");
+    expect(m.movement_type).toBe("unknown");
+    expect(m.last_available_price).toBe(15400);
+  });
+
+  it("a legitimate price rise is still detected when an earlier ¥100 observation is skipped over", () => {
+    const m = one([
+      row({ property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-09T10:00:00+09:00", normalized_total_price: 14245 }),
+      row({ property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-10T10:00:00+09:00", normalized_total_price: 100 }),
+      row({ property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-11T10:00:00+09:00", normalized_total_price: 15400 })
+    ]);
+    expect(m.movement_type).toBe("price_up_available");
+    expect(m.previous_price).toBe(14245);
+    expect(m.latest_price).toBe(15400);
+  });
 });
 
 describe("MARKET-PRICE-MOVEMENT01 - checkin DP pressure", () => {
@@ -174,5 +199,20 @@ describe("MARKET-PRICE-MOVEMENT01 - checkin DP pressure", () => {
     const dp = buildDpPressureByCheckin(movements);
     expect(dp[0]!.dp_pressure_score_normalized).toBeLessThan(0);
     expect(["downward_pressure", "strong_downward_pressure"]).toContain(dp[0]!.dp_pressure_level);
+  });
+
+  it("an implausible ¥100 HAMMOND observation does not register as downward DP pressure", () => {
+    const { movements } = buildMarketPriceMovements([
+      row({ property_id: "a", property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-10T10:00:00+09:00", normalized_total_price: 15400 }),
+      row({ property_id: "a", property_name: "HAMMOND", basis_note: CONFIRMED, observed_at: "2026-06-11T10:00:00+09:00", normalized_total_price: 100 }),
+      // property B: a genuine, unrelated price rise on the same checkin.
+      row({ property_id: "b", property_name: "JURIN", basis_note: CONFIRMED, observed_at: "2026-06-10T10:00:00+09:00", normalized_total_price: 18000 }),
+      row({ property_id: "b", property_name: "JURIN", basis_note: CONFIRMED, observed_at: "2026-06-11T10:00:00+09:00", normalized_total_price: 21000 })
+    ]);
+    const dp = buildDpPressureByCheckin(movements);
+    expect(dp).toHaveLength(1);
+    expect(dp[0]!.price_down_count).toBe(0);
+    expect(dp[0]!.price_up_count).toBe(1);
+    expect(dp[0]!.dp_pressure_score_normalized).toBeGreaterThan(0);
   });
 });

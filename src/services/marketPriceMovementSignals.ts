@@ -18,6 +18,7 @@ import {
   type PriceHistoryInputRow
 } from "./priceHistorySignals";
 import { isOwnProperty } from "./biWebDataExport";
+import { validatePrimaryPriceNumeric } from "./pricePlausibilityGuard";
 
 export type MovementType =
   | "price_up_available"
@@ -117,7 +118,13 @@ function toAnchor(row: PriceHistoryInputRow): Anchor {
   const status = normalizeStatus(row.availability_status_raw);
   const meal = deriveMealBasis(row);
   const room = deriveRoomBasis(row);
-  const price = Number.isFinite(row.normalized_total_price as number) ? row.normalized_total_price : null;
+  const rawPrice = Number.isFinite(row.normalized_total_price as number) ? row.normalized_total_price : null;
+  // Implausible Booking prices (e.g. ¥100 from a DOM-extraction defect, already
+  // committed to append-only history) must not feed price-movement / DP-pressure
+  // evidence — treat them as unpriced, same as priceOf() in
+  // priorityPriceChangeDetection.ts.
+  const plausible = rawPrice === null ? true : !validatePrimaryPriceNumeric({ source: row.source, propertyName: row.property_name, price: rawPrice }).data_quality_suspect;
+  const price = plausible ? rawPrice : null;
   const eligiblePriced =
     status === "available" &&
     mealOk(meal) &&

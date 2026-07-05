@@ -50,6 +50,7 @@ import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } 
 import { buildPriorityCompetitorTargets, buildOwnPropertyTargets, todayJstIso, type RecrawlTarget } from "../services/priorityRecrawlTargets";
 import { isOwnPropertyName } from "../services/ownPropertyTargets";
 import { buildRefreshPlan, todaysSelectedTargets } from "../services/priorityRefreshTiers";
+import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 
 const HISTORY_DIR = ".data/history";
 const REPORT_DIR = ".data/reports/source-discovery";
@@ -155,11 +156,16 @@ function readExistingRowHashById(): Map<string, string> {
 // Own-property append: same primitives as the competitor path (buildProposedHistoryRow
 // + runRealAppend), own rows explicitly ALLOWED (that gate is specific to the
 // competitor-evidence script, not a general prohibition on recording our own price).
-function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; appendResult: ReturnType<typeof runRealAppend> | null } {
+function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; appendResult: ReturnType<typeof runRealAppend> | null } {
   const existing = readExistingRowHashById();
   const toAppend: HistoryRow[] = [];
-  let dupSkipped = 0, dupConflicts = 0;
+  let dupSkipped = 0, dupConflicts = 0, implausiblePrice = 0;
   for (const r of rows) {
+    // Same data-quality guard as the competitor append path: a "priced" row
+    // whose price is implausible for Booking (e.g. ¥100) never becomes an
+    // append candidate, regardless of dedup outcome.
+    const plausibility = validatePrimaryPriceNumeric({ source: r.source, propertyName: r.canonical_property_name, price: r.primary_price_numeric, roomBasis: r.room_basis, roomName: r.primary_room_name, bedHint: r.primary_bed_hint });
+    if (r.primary_price_numeric !== null && plausibility.data_quality_suspect) { implausiblePrice += 1; continue; }
     let hRow: HistoryRow;
     try { hRow = buildProposedHistoryRow({ row: r, sourceReportPath: "", sourceCsvPath: "" }); } catch { continue; }
     const prevHash = existing.get(hRow.rowId);
@@ -170,10 +176,10 @@ function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: num
     }
     toAppend.push(hRow);
   }
-  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, appendResult: null };
+  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, appendResult: null };
   const runId = `pricing_critical_own_recrawl_${ts()}`;
   const result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(toAppend) });
-  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, appendResult: result };
+  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, appendResult: result };
 }
 
 async function run(): Promise<void> {
@@ -295,6 +301,7 @@ async function run(): Promise<void> {
       console.log(`own_rows_to_append=${r.rowsToAppend}`);
       console.log(`own_dup_skipped=${r.dupSkipped}`);
       console.log(`own_dup_conflicts=${r.dupConflicts}`);
+      console.log(`own_implausible_price_excluded=${r.implausiblePrice}`);
       console.log(`own_append_decision=${r.appendResult?.decision ?? "no_rows_to_append"}`);
       console.log(`own_rows_written=${r.appendResult?.rowsWritten ?? 0}`);
     } else {

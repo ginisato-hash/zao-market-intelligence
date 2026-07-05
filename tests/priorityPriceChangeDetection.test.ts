@@ -83,6 +83,42 @@ describe("PRICING-CRITICAL01 - price change detection (§12.9)", () => {
     expect(changes).toHaveLength(0);
   });
 
+  it("15400 -> 100 (implausible Booking DOM-extraction defect) does not emit a false down alert", () => {
+    const changes = detectPriceChanges({
+      rows: [row({ observed_at: "2026-07-03T13:35:00+09:00", normalized_total_price: 15400 }), row({ observed_at: "2026-07-04T13:35:00+09:00", normalized_total_price: 100 })],
+      properties: [HAMMOND_REF],
+      targetType: "competitor"
+    });
+    // The ¥100 observation is treated as unpriced: with only one legitimate
+    // priced observation left, there is nothing to compare against.
+    expect(changes).toHaveLength(0);
+  });
+
+  it("100 -> 15400 (implausible earlier value) does not emit a false up alert", () => {
+    const changes = detectPriceChanges({
+      rows: [row({ observed_at: "2026-07-03T13:35:00+09:00", normalized_total_price: 100 }), row({ observed_at: "2026-07-04T13:35:00+09:00", normalized_total_price: 15400 })],
+      properties: [HAMMOND_REF],
+      targetType: "competitor"
+    });
+    expect(changes).toHaveLength(0);
+  });
+
+  it("14245 -> 15400 still reports normally when a bad ¥100 observation is skipped over", () => {
+    const changes = detectPriceChanges({
+      rows: [
+        row({ observed_at: "2026-07-01T13:35:00+09:00", normalized_total_price: 14245 }),
+        row({ observed_at: "2026-07-02T13:35:00+09:00", normalized_total_price: 100 }),
+        row({ observed_at: "2026-07-03T13:35:00+09:00", normalized_total_price: 15400 })
+      ],
+      properties: [HAMMOND_REF],
+      targetType: "competitor"
+    });
+    expect(changes).toHaveLength(1);
+    expect(changes[0]!.previous_price).toBe(14245);
+    expect(changes[0]!.latest_price).toBe(15400);
+    expect(changes[0]!.direction).toBe("up");
+  });
+
   it("different checkin dates are compared separately, not against each other", () => {
     const changes = detectPriceChanges({
       rows: [

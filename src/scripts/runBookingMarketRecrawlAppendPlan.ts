@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { buildProposedHistoryRow } from "../services/bookingPreviewAppendProposal";
 import { groupRowsToSourceShards } from "../services/bookingPreviewHistoryAppendRealRun";
 import { runRealAppend, validatePostWriteShards } from "../services/localHistoryRealAppend";
+import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 import { HISTORY_CSV_HEADERS, type HistoryRow } from "../services/localHistorySchemaDesign";
 import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppendValidationPolicy";
 import { SOURCE_PHASE, STAY_SCOPE, type PreviewRow } from "../services/autoRunnerBookingPreview";
@@ -145,9 +146,10 @@ function run(): void {
   const slugs = slugByName();
   const existing = readExistingRowHashById();
 
-  let ownRows = 0, invalid = 0, schemaErrors = 0, dupSkipped = 0, dupConflicts = 0;
+  let ownRows = 0, invalid = 0, schemaErrors = 0, dupSkipped = 0, dupConflicts = 0, implausiblePrice = 0;
   let confirmed = 0, probable = 0, unknown = 0, excluded = 0, usablePrice = 0, excludedPrice = 0;
   const toAppend: HistoryRow[] = [];
+  const implausibleSamples: Array<{ canonical_property_name: string; checkin: string; primary_price_numeric: number | null; reason: string }> = [];
   const previewCsvRows: string[][] = [["canonical_property_name", "checkin", "room_basis", "is_price_excluded_from_dp", "is_price_usable_for_dp_directional", "normalized_total_price", "source_classification", "dedup_status"]];
 
   for (const o of obs) {
@@ -157,6 +159,21 @@ function run(): void {
     if (slug === "") { invalid += 1; continue; }
     const rb = o.room_basis ?? "unknown_room_basis";
     const priced = o.primary_price_numeric !== null;
+
+    // Data-quality guard: a "priced" candidate whose price is implausible for
+    // Booking (e.g. ¥100 — DOM extraction failure, never a real Zao room rate)
+    // is excluded BEFORE it can become an append candidate, ahead of the
+    // duplicate/conflict dedup below (which only catches a bad price when it
+    // happens to collide with an existing rowId; a fresh rowId would sail
+    // through untouched otherwise).
+    const plausibility = validatePrimaryPriceNumeric({ source: "booking", propertyName: o.canonical_property_name, price: o.primary_price_numeric, roomBasis: rb, roomName: o.primary_room_name, bedHint: o.primary_bed_hint });
+    if (priced && plausibility.data_quality_suspect) {
+      implausiblePrice += 1;
+      implausibleSamples.push({ canonical_property_name: o.canonical_property_name, checkin: o.checkin, primary_price_numeric: o.primary_price_numeric, reason: plausibility.reason });
+      previewCsvRows.push([o.canonical_property_name, o.checkin, rb, "", "", String(o.primary_price_numeric ?? ""), "", "implausible_price_excluded"]);
+      continue;
+    }
+
     if (rb === "confirmed_two_person_standard_room") confirmed += 1;
     else if (rb === "probable_two_person_standard_room") probable += 1;
     else if (rb === "unknown_room_basis") unknown += 1;
@@ -209,6 +226,8 @@ function run(): void {
     conflict_skipped: conflictPolicy === "skip_conflicts_append_unique" ? dupConflicts : 0,
     schema_errors: schemaErrors,
     invalid_rows: invalid,
+    implausible_price_excluded: implausiblePrice,
+    implausible_price_samples: implausibleSamples.slice(0, 20),
     expected_high_uplift_rows: confirmed,
     expected_medium_uplift_rows: probable,
     expected_no_price_sample_rows: excludedPrice,
@@ -220,6 +239,7 @@ function run(): void {
       "Reconstructed via canonical buildProposedHistoryRow (45-col v1 schema, rowId/rowHash, room-basis markers identical to live append).",
       "Own properties (三浦屋/喜らく) excluded by circularity guard (own_property_rows must be 0).",
       "excluded room-type rows are appended as audit rows with is_price_excluded_from_dp=true (observed but not a market price sample).",
+      "implausible_price_excluded rows (Booking price < 1000 JPY) are dropped BEFORE dedup — a data-quality defect, not a market observation (see PRICE-PLAUSIBILITY01).",
       "Append only runs with ZMI_APPEND_BOOKING_MARKET_RECRAWL=1 AND all gates green; write uses runRealAppend (lock+backup+atomic+rollback)."
     ] as string[],
     append_result: null as unknown
