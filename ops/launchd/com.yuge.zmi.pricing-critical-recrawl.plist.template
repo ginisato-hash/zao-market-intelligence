@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuge.zmi.pricing-critical-recrawl</string>
+
+  <!-- Priority-competitor (HAMMOND/OAKHILL/吉田屋) + own-property (三浦屋/喜らく)
+       GUARANTEED 90-day recrawl. Unlike the existing booking-market-recrawl job
+       (which only recrawls dates BI already has a low-confidence row for), this
+       forces coverage of D+1..D+90 regardless of prior state — fixes the gap
+       where a never-crawled date (e.g. OAKHILL's early August) never surfaced.
+       Date selection is stateless/tiered: D+1..D+30 every run, D+31..D+60
+       within 3 days, D+61..D+90 within 7 days. Live execution remains capped
+       per firing, daily 13:35 JST — offset from bi-web-publish (odd hours
+       :10), market-refresh-rotating (every 2h on :00), and
+       booking-market-recrawl (Tue/Fri 14:35). This is a TEMPLATE only until
+       explicitly installed. Live crawl + conflict-safe append (competitor rows
+       via the existing, unmodified plan:booking-market-recrawl-append;
+       own-property rows via the same underlying primitives, gated separately)
+       + bi:web:export/check.
+       Booking source only in this pass (Jalan live collection for these 90-day
+       targets is not yet wired — see PRICING-CRITICAL01 completion report).
+       Never touches launchd/cron for other jobs; never writes Beds24/PMS/pricing
+       output; own properties (三浦屋/喜らく) never enter a competitor batch. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; COLLECT_BOOKING=1 ZMI_APPEND_OWN_PROPERTY_RECRAWL=1 npm run market:pricing-critical-recrawl:append &amp;&amp; npm run bi:web:export &amp;&amp; npm run bi:web:check &gt;&gt; .data/logs/pricing-critical-recrawl.log 2&gt;&amp;1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+
+  <!-- Daily, 13:35 JST. -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>35</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/pricing-critical-recrawl.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/pricing-critical-recrawl.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
