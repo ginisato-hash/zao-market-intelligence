@@ -147,6 +147,57 @@ describe("Booking rendered DOM extraction", () => {
     expect(row.roomBasis).toBe("confirmed_two_person_standard_room");
   });
 
+  it("prefers the effective (現在の料金) sale price over the crossed-out original price, for the same room card", () => {
+    // Matches the real HAMMOND page structure exactly: a bare was/now pair,
+    // then the same two numbers again with explicit labels, then a standalone
+    // tax line item that must not be mistaken for either price.
+    const text = [
+      "HAMMOND / ハモンド",
+      "2026年7月6日", "2026年7月7日", "大人2名", "1室", "1泊",
+      "エコノミー ツインルーム 当サイトでは残り1室 シングルベッド2台 18 平方メートル 人数: 2",
+      "￥14,245 ￥11,019 元の料金 ￥14,245 現在の料金 ￥11,019 税・手数料込 23%OFF HOLIDAYセール 込 消費税/VAT10 %",
+      "、 1泊につき¥150の入湯税 一部返金可",
+      "宿泊施設の説明と設備情報 ".repeat(20)
+    ].join(" ");
+    const s = analyzeBookingRenderedDomSignals({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-06",
+      checkout: "2026-07-07",
+      loaded: true,
+      httpStatus: 200,
+      finalUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      pageTitle: "HAMMOND",
+      bodyText: text
+    });
+    expect(s.primaryPriceCandidate?.numericValue).toBe(11019);
+    expect(s.originalPriceNumeric).toBe(14245);
+    expect(s.priceDiscountDetected).toBe(true);
+    expect(s.primaryRoomName).not.toBe("");
+    expect(s.primaryBedHint).not.toBe("");
+    // Neither the implausible badge-style ¥100 nor the ¥150 bathing tax must
+    // ever be selectable as the primary/original price.
+    expect(s.primaryPriceCandidate?.numericValue).not.toBe(150);
+    expect(s.originalPriceNumeric).not.toBe(150);
+
+    const row = buildBookingRenderedDomRow({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-06",
+      checkout: "2026-07-07",
+      probeUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      signals: s,
+      debugArtifactPath: "/tmp/x"
+    });
+    expect(row.firstPriceCandidateValue).toBe(11019);
+    expect(row.roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+
+  it("no discount pairing on a regular page: primary is the normal price, original is null", () => {
+    const s = signals(); // the existing single-price ￥64,790 fixture, no sale labels
+    expect(s.primaryPriceCandidate?.numericValue).toBe(64790);
+    expect(s.originalPriceNumeric).toBeNull();
+    expect(s.priceDiscountDetected).toBe(false);
+  });
+
   it("selectPrimaryBookingPriceCandidate falls back to the first candidate when nothing is plausible (never invents evidence)", () => {
     const candidates = extractBookingPriceCandidates("キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント");
     const selection = selectPrimaryBookingPriceCandidate("キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント", candidates);

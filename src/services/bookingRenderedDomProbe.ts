@@ -27,11 +27,18 @@ export interface BookingRenderedDomProbeInput extends BookingRenderedDomTarget {
   checkin: string; // YYYY-MM-DD
 }
 
+// What this specific yen amount represents, from the text immediately
+// adjacent to it (NOT the wider ±70 contextBeforeAfter window, which for a
+// discounted room card contains BOTH "元の料金"/"現在の料金" labels for
+// EITHER number — narrow adjacency is what actually distinguishes them).
+export type BookingPriceRole = "effective_price" | "original_price" | "tax_or_fee" | "unknown";
+
 export interface BookingPriceCandidate {
   rawText: string;
   numericValue: number;
   contextBeforeAfter: string;
   candidateTypeGuess: "total_tax_included" | "per_night_or_room" | "tax_excluded" | "unknown";
+  roleGuess: BookingPriceRole;
 }
 
 export interface BookingRenderedDomSignals {
@@ -54,6 +61,11 @@ export interface BookingRenderedDomSignals {
   // promo/loyalty yen-amount before the real room-card price; see that
   // function's selection order). null when there are no candidates at all.
   primaryPriceCandidate: BookingPriceCandidate | null;
+  // Diagnostics only (not persisted to the history/BI CSV schema): the
+  // crossed-out reference price when primaryPriceCandidate is a detected
+  // "現在の料金" sale price, and whether a discount pairing was found at all.
+  originalPriceNumeric: number | null;
+  priceDiscountDetected: boolean;
   soldOutOrUnavailableDetected: boolean;
   captchaOrSecurityDetected: boolean;
   loginRequiredDetected: boolean;
@@ -177,17 +189,35 @@ export function extractBookingPriceCandidates(text: string): BookingPriceCandida
     const rawNumber = match[1] ?? match[2] ?? "";
     const numericValue = Number(toHalfWidth(rawNumber).replace(/[，,]/gu, ""));
     if (!Number.isFinite(numericValue) || numericValue <= 0) continue;
+    const matchLen = match[0]?.length ?? 0;
     const start = Math.max(0, match.index - 70);
-    const end = Math.min(text.length, match.index + (match[0]?.length ?? 0) + 70);
+    const end = Math.min(text.length, match.index + matchLen + 70);
     const context = text.slice(start, end).replace(/\s+/gu, " ").trim();
+    const precedingLabel = text.slice(Math.max(0, match.index - 24), match.index);
+    const followingLabel = text.slice(match.index + matchLen, Math.min(text.length, match.index + matchLen + 20));
     candidates.push({
       rawText: match[0] ?? "",
       numericValue,
       contextBeforeAfter: context,
-      candidateTypeGuess: guessPriceCandidateType(context)
+      candidateTypeGuess: guessPriceCandidateType(context),
+      roleGuess: guessPriceRole(precedingLabel, followingLabel)
     });
   }
   return dedupePriceCandidates(candidates).slice(0, 20);
+}
+
+// Distinguishes "元の料金 ¥14,245" (crossed-out reference price) from
+// "現在の料金 ¥11,019" (the actual payable/sale price) from a standalone tax
+// or fee line item like "1泊につき¥150の入湯税". Effective/original label
+// checks run FIRST because Booking often renders the fee-inclusive disclaimer
+// ("税・手数料込") right after the effective price's own number — without
+// priority ordering that phrase would wrongly reclassify the effective price
+// itself as a tax/fee line.
+function guessPriceRole(precedingLabel: string, followingLabel: string): BookingPriceRole {
+  if (/(現在の料金|現在価格|セール価格|割引後|discounted\s*price|current\s*price|sale\s*price)\s*$/iu.test(precedingLabel)) return "effective_price";
+  if (/(元の料金|元の価格|通常料金|通常価格|original\s*price|standard\s*price)\s*$/iu.test(precedingLabel)) return "original_price";
+  if (/^\s*の?(入湯税|宿泊税|温泉税|手数料(?!込))/u.test(followingLabel)) return "tax_or_fee";
+  return "unknown";
 }
 
 export interface ScoredBookingPriceCandidate extends BookingPriceCandidate {
@@ -200,6 +230,11 @@ export interface BookingPriceCandidateSelection {
   selected: BookingPriceCandidate | null;
   roomContext: BookingRoomContext;
   scored: ScoredBookingPriceCandidate[];
+  // The guest's actual payable price ("現在の料金"/セール価格) when this room
+  // card is discounted AND its original/reference price differs — null when
+  // no discount pairing was found (regular, non-sale listing).
+  originalPriceNumeric: number | null;
+  priceDiscountDetected: boolean;
 }
 
 const NO_ROOM_CONTEXT: BookingRoomContext = { primaryRoomName: "", primaryRoomCardText: "", primaryOccupancyHint: "", primaryBedHint: "" };
@@ -210,19 +245,25 @@ const NO_ROOM_CONTEXT: BookingRoomContext = { primaryRoomName: "", primaryRoomCa
 // the HAMMOND ¥100 extraction defect — candidates[0] was a stray small yen
 // amount with no room card nearby, so its room-context window came up empty
 // and the row fell to the classifier's no-evidence default). Score every
-// candidate by its OWN local room context instead of trusting position:
-//   1) plausible price (>= MIN_PLAUSIBLE_BOOKING_PRICE_JPY) WITH a room name
-//      or bed hint nearby — this is a real room-card price;
-//   2) plausible price with no nearby room evidence (still a usable price,
-//      just lower-confidence room basis, same as before this fix);
-//   3) first candidate — nothing plausible was found; keep it for the
+// candidate by its OWN local room context instead of trusting position, in
+// priority order:
+//   1) plausible price WITH a room name/bed hint nearby AND explicitly
+//      labeled "現在の料金" (the guest's real payable/sale price) — ZMI's
+//      price-strategy use case wants what the guest actually pays, not the
+//      crossed-out reference price;
+//   2) plausible price with a nearby room name/bed hint (no explicit sale
+//      label — either a regular non-discounted room, or the label wasn't
+//      detected; same behavior as before this pass);
+//   3) plausible price with no nearby room evidence (lower-confidence room
+//      basis, unchanged from before);
+//   4) first candidate — nothing plausible was found; keep it for the
 //      downstream plausibility guard to reject rather than fabricating an
 //      empty result (conservative: never invents a candidate that doesn't
 //      exist in the text).
 // For a property whose candidates[0] IS already the room-card price (the
 // common case today), this resolves to the same candidate — no regression.
 export function selectPrimaryBookingPriceCandidate(bodyText: string, candidates: readonly BookingPriceCandidate[]): BookingPriceCandidateSelection {
-  if (candidates.length === 0) return { selected: null, roomContext: { ...NO_ROOM_CONTEXT }, scored: [] };
+  if (candidates.length === 0) return { selected: null, roomContext: { ...NO_ROOM_CONTEXT }, scored: [], originalPriceNumeric: null, priceDiscountDetected: false };
   const scored: ScoredBookingPriceCandidate[] = candidates.map((c) => {
     const roomContext = extractBookingRoomContextAroundPrice({ bodyText, priceValue: c.numericValue, priceRawText: c.rawText, contextBeforeAfter: c.contextBeforeAfter });
     return {
@@ -232,8 +273,12 @@ export function selectPrimaryBookingPriceCandidate(bodyText: string, candidates:
       isPlausible: c.numericValue >= MIN_PLAUSIBLE_BOOKING_PRICE_JPY
     };
   });
-  const best = scored.find((s) => s.isPlausible && s.hasRoomContext) ?? scored.find((s) => s.isPlausible) ?? scored[0]!;
-  return { selected: best, roomContext: best.roomContext, scored };
+  const eligible = (s: ScoredBookingPriceCandidate): boolean => s.isPlausible && s.hasRoomContext;
+  const effective = scored.find((s) => eligible(s) && s.roleGuess === "effective_price");
+  const best = effective ?? scored.find((s) => eligible(s)) ?? scored.find((s) => s.isPlausible) ?? scored[0]!;
+  const original = effective ? scored.find((s) => eligible(s) && s.roleGuess === "original_price") : undefined;
+  const originalPriceNumeric = original !== undefined && original.numericValue !== effective!.numericValue ? original.numericValue : null;
+  return { selected: best, roomContext: best.roomContext, scored, originalPriceNumeric, priceDiscountDetected: originalPriceNumeric !== null };
 }
 
 export function analyzeBookingRenderedDomSignals(input: {
@@ -249,7 +294,7 @@ export function analyzeBookingRenderedDomSignals(input: {
 }): BookingRenderedDomSignals {
   const text = normalizeText(input.bodyText);
   const priceCandidates = extractBookingPriceCandidates(text);
-  const { selected: primaryPriceCandidate, roomContext } = selectPrimaryBookingPriceCandidate(text, priceCandidates);
+  const { selected: primaryPriceCandidate, roomContext, originalPriceNumeric, priceDiscountDetected } = selectPrimaryBookingPriceCandidate(text, priceCandidates);
   return {
     loaded: input.loaded,
     httpStatus: input.httpStatus,
@@ -269,6 +314,8 @@ export function analyzeBookingRenderedDomSignals(input: {
     jpyCurrencyDetected: /￥|¥|JPY|円/u.test(text),
     priceCandidates,
     primaryPriceCandidate,
+    originalPriceNumeric,
+    priceDiscountDetected,
     soldOutOrUnavailableDetected: /(売り切れ|満室|空室なし|予約できません|ご利用いただけません|not available|sold out)/iu.test(text),
     captchaOrSecurityDetected: /(captcha|recaptcha|are you a robot|ロボットではありません|セキュリティチェック)/iu.test(text),
     loginRequiredDetected: /(ログイン|サインイン|sign in|log in)/iu.test(text),

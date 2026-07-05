@@ -72,12 +72,13 @@ async function run(): Promise<void> {
         price_numeric: c.numericValue,
         context: c.contextBeforeAfter,
         candidate_type_guess: c.candidateTypeGuess,
+        role_guess: c.roleGuess,
         room_name: c.roomContext.primaryRoomName,
         bed_hint: c.roomContext.primaryBedHint,
         has_room_context: c.hasRoomContext,
         is_plausible: c.isPlausible,
         is_selected: selection.selected !== null && c.rawText === selection.selected.rawText && c.numericValue === selection.selected.numericValue,
-        reason: c.isPlausible && c.hasRoomContext ? "plausible_with_room_context" : c.isPlausible ? "plausible_no_room_context" : "implausible_booking_price_under_1000"
+        reason: !c.isPlausible ? "implausible_booking_price_under_1000" : c.roleGuess === "tax_or_fee" ? "tax_or_fee_line_item" : c.hasRoomContext && c.roleGuess === "effective_price" ? "plausible_with_room_context_effective_price" : c.hasRoomContext ? "plausible_with_room_context" : "plausible_no_room_context"
       }));
 
       const result = {
@@ -92,6 +93,9 @@ async function run(): Promise<void> {
         body_text_snapshot_path: resolve(bodyTextPath),
         candidate_count: selection.scored.length,
         selected_price_numeric: selection.selected?.numericValue ?? null,
+        effective_price_numeric: signals.primaryPriceCandidate?.numericValue ?? null,
+        original_price_numeric: signals.originalPriceNumeric,
+        price_discount_detected: signals.priceDiscountDetected,
         selected_room_name: signals.primaryRoomName,
         selected_bed_hint: signals.primaryBedHint,
         room_basis_input: { roomName: signals.primaryRoomName, bedHint: signals.primaryBedHint, occupancyHint: signals.primaryOccupancyHint },
@@ -99,7 +103,7 @@ async function run(): Promise<void> {
         rejected_candidates: candidateCards.filter((c) => !c.is_selected)
       };
       results.push(result);
-      console.log(`property=${t.canonicalPropertyName} checkin=${t.checkin} candidate_count=${selection.scored.length} selected_price=${selection.selected?.numericValue ?? "null"} selected_room_name="${signals.primaryRoomName}" selected_bed_hint="${signals.primaryBedHint}"`);
+      console.log(`property=${t.canonicalPropertyName} checkin=${t.checkin} candidate_count=${selection.scored.length} selected_price=${selection.selected?.numericValue ?? "null"} original_price=${signals.originalPriceNumeric ?? "null"} price_discount_detected=${signals.priceDiscountDetected} selected_room_name="${signals.primaryRoomName}" selected_bed_hint="${signals.primaryBedHint}"`);
     }
   } finally {
     await context.close().catch(() => undefined);
