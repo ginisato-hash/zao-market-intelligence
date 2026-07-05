@@ -33,13 +33,34 @@ export interface BookingRenderedDomProbeInput extends BookingRenderedDomTarget {
 // EITHER number — narrow adjacency is what actually distinguishes them).
 export type BookingPriceRole = "effective_price" | "original_price" | "tax_or_fee" | "unknown";
 
+// Which page section this candidate's price appears in. Booking renders a
+// "similar/related properties" carousel — OTHER hotels' prices — when the
+// target property has zero availability for the searched date; those prices
+// are plausible-looking (unlike the ¥100 defect) and would otherwise sail
+// straight past the plausibility guard as if they were the target's own
+// price. main_room_card = no related-property marker precedes this candidate
+// anywhere in the page; related_property = a marker was found at or before
+// this candidate's position (conservative: everything from that point
+// forward is treated as out-of-scope, since the carousel is observed to run
+// to the end of the page once the target itself has no rooms left to list).
+export type BookingPriceBlock = "main_room_card" | "related_property";
+
 export interface BookingPriceCandidate {
   rawText: string;
   numericValue: number;
   contextBeforeAfter: string;
   candidateTypeGuess: "total_tax_included" | "per_night_or_room" | "tax_excluded" | "unknown";
   roleGuess: BookingPriceRole;
+  blockGuess: BookingPriceBlock;
 }
+
+// Real Booking.com UI text observed on a genuinely sold-out property page
+// ("...ご提供できるこの宿泊施設の空室がありません。...選択した日程で予約可能な
+// 類似施設..."), immediately followed by a "similar properties" carousel of
+// OTHER hotels' names/ratings/prices. English equivalents included
+// defensively (locale/UI copy can vary; not yet observed on a live page).
+const RELATED_PROPERTY_SECTION_RE =
+  /この宿泊施設の空室がありません|空室がありません|類似施設|類似の宿泊施設|関連ホテル|周辺の宿泊施設|こちらもおすすめ|おすすめ施設|他の宿泊施設|近くのホテル|他のホテル|related\s*propert(?:y|ies)|similar\s*propert(?:y|ies)|nearby\s*propert(?:y|ies)|you\s*may\s*also\s*like|other\s*propert(?:y|ies)|other\s*hotels?/iu;
 
 export interface BookingRenderedDomSignals {
   loaded: boolean;
@@ -66,6 +87,9 @@ export interface BookingRenderedDomSignals {
   // "現在の料金" sale price, and whether a discount pairing was found at all.
   originalPriceNumeric: number | null;
   priceDiscountDetected: boolean;
+  // null when primaryPriceCandidate !== null. See selectPrimaryBookingPriceCandidate.
+  noUsableRoomPriceReason: NoUsableRoomPriceReason | null;
+  relatedPropertyPriceExcludedCount: number;
   soldOutOrUnavailableDetected: boolean;
   captchaOrSecurityDetected: boolean;
   loginRequiredDetected: boolean;
@@ -183,6 +207,8 @@ export function sanitizeBookingUrl(url: string): string {
 
 export function extractBookingPriceCandidates(text: string): BookingPriceCandidate[] {
   const candidates: BookingPriceCandidate[] = [];
+  const relatedMarker = RELATED_PROPERTY_SECTION_RE.exec(text);
+  const relatedMarkerIndex = relatedMarker ? relatedMarker.index : -1;
   const yenRe = /(?:￥|¥|JPY\s*)\s*([0-9０-９,，]+)|([0-9０-９,，]+)\s*円/giu;
   let match: RegExpExecArray | null;
   while ((match = yenRe.exec(text)) !== null) {
@@ -200,7 +226,8 @@ export function extractBookingPriceCandidates(text: string): BookingPriceCandida
       numericValue,
       contextBeforeAfter: context,
       candidateTypeGuess: guessPriceCandidateType(context),
-      roleGuess: guessPriceRole(precedingLabel, followingLabel)
+      roleGuess: guessPriceRole(precedingLabel, followingLabel),
+      blockGuess: relatedMarkerIndex !== -1 && match.index >= relatedMarkerIndex ? "related_property" : "main_room_card"
     });
   }
   return dedupePriceCandidates(candidates).slice(0, 20);
@@ -226,6 +253,8 @@ export interface ScoredBookingPriceCandidate extends BookingPriceCandidate {
   isPlausible: boolean;
 }
 
+export type NoUsableRoomPriceReason = "related_property_price_excluded" | "room_context_missing" | "no_main_room_card_price_candidate";
+
 export interface BookingPriceCandidateSelection {
   selected: BookingPriceCandidate | null;
   roomContext: BookingRoomContext;
@@ -235,6 +264,12 @@ export interface BookingPriceCandidateSelection {
   // no discount pairing was found (regular, non-sale listing).
   originalPriceNumeric: number | null;
   priceDiscountDetected: boolean;
+  // null when selected !== null. Otherwise explains WHY no candidate was
+  // usable as the target property's own price — used by callers to decide
+  // whether this observation should ever be treated as "we successfully
+  // checked this date" (it should not, when the failure is ambiguous).
+  noUsableRoomPriceReason: NoUsableRoomPriceReason | null;
+  relatedPropertyPriceExcludedCount: number;
 }
 
 const NO_ROOM_CONTEXT: BookingRoomContext = { primaryRoomName: "", primaryRoomCardText: "", primaryOccupancyHint: "", primaryBedHint: "" };
@@ -244,26 +279,32 @@ const NO_ROOM_CONTEXT: BookingRoomContext = { primaryRoomName: "", primaryRoomCa
 // candidates[0] is not reliably "the room price" (this is the root cause of
 // the HAMMOND ¥100 extraction defect — candidates[0] was a stray small yen
 // amount with no room card nearby, so its room-context window came up empty
-// and the row fell to the classifier's no-evidence default). Score every
-// candidate by its OWN local room context instead of trusting position, in
-// priority order:
-//   1) plausible price WITH a room name/bed hint nearby AND explicitly
-//      labeled "現在の料金" (the guest's real payable/sale price) — ZMI's
-//      price-strategy use case wants what the guest actually pays, not the
-//      crossed-out reference price;
-//   2) plausible price with a nearby room name/bed hint (no explicit sale
-//      label — either a regular non-discounted room, or the label wasn't
-//      detected; same behavior as before this pass);
-//   3) plausible price with no nearby room evidence (lower-confidence room
-//      basis, unchanged from before);
-//   4) first candidate — nothing plausible was found; keep it for the
-//      downstream plausibility guard to reject rather than fabricating an
-//      empty result (conservative: never invents a candidate that doesn't
-//      exist in the text).
+// and the row fell to the classifier's no-evidence default). A SECOND, more
+// dangerous defect discovered while verifying live: when the target property
+// has ZERO availability, Booking replaces its room list with a "similar
+// properties" carousel of OTHER hotels — those prices are plausible-looking
+// and would otherwise pass every check below as if they were the target's
+// own. Score every candidate by its OWN local evidence instead of trusting
+// position OR mere plausibility, in priority order:
+//   1) main_room_card block, plausible, WITH room name/bed hint nearby, AND
+//      explicitly labeled "現在の料金" — the guest's real payable/sale price;
+//   2) main_room_card block, plausible, WITH room name/bed hint nearby (any
+//      other role — a regular non-discounted room, or the sale label wasn't
+//      detected);
+//   3) nothing usable — returns selected=null with a reason. There is
+//      DELIBERATELY no further fallback: neither "plausible price with no
+//      room evidence" nor "candidates[0] regardless" are acceptable any
+//      more, because either could silently be a related property's price.
+//      Downstream callers must treat this as "we don't know" (not
+//      "confirmed sold out", not a market price sample, not counted as
+//      successfully-covered), unless they independently detected a genuine
+//      sold-out state some other way.
 // For a property whose candidates[0] IS already the room-card price (the
 // common case today), this resolves to the same candidate — no regression.
 export function selectPrimaryBookingPriceCandidate(bodyText: string, candidates: readonly BookingPriceCandidate[]): BookingPriceCandidateSelection {
-  if (candidates.length === 0) return { selected: null, roomContext: { ...NO_ROOM_CONTEXT }, scored: [], originalPriceNumeric: null, priceDiscountDetected: false };
+  if (candidates.length === 0) {
+    return { selected: null, roomContext: { ...NO_ROOM_CONTEXT }, scored: [], originalPriceNumeric: null, priceDiscountDetected: false, noUsableRoomPriceReason: "no_main_room_card_price_candidate", relatedPropertyPriceExcludedCount: 0 };
+  }
   const scored: ScoredBookingPriceCandidate[] = candidates.map((c) => {
     const roomContext = extractBookingRoomContextAroundPrice({ bodyText, priceValue: c.numericValue, priceRawText: c.rawText, contextBeforeAfter: c.contextBeforeAfter });
     return {
@@ -273,12 +314,20 @@ export function selectPrimaryBookingPriceCandidate(bodyText: string, candidates:
       isPlausible: c.numericValue >= MIN_PLAUSIBLE_BOOKING_PRICE_JPY
     };
   });
-  const eligible = (s: ScoredBookingPriceCandidate): boolean => s.isPlausible && s.hasRoomContext;
+  const relatedPropertyPriceExcludedCount = scored.filter((s) => s.blockGuess === "related_property" && s.isPlausible).length;
+  const eligible = (s: ScoredBookingPriceCandidate): boolean => s.blockGuess === "main_room_card" && s.isPlausible && s.hasRoomContext;
   const effective = scored.find((s) => eligible(s) && s.roleGuess === "effective_price");
-  const best = effective ?? scored.find((s) => eligible(s)) ?? scored.find((s) => s.isPlausible) ?? scored[0]!;
+  const best = effective ?? scored.find((s) => eligible(s));
+
+  if (best === undefined) {
+    const mainPlausible = scored.filter((s) => s.blockGuess === "main_room_card" && s.isPlausible);
+    const reason: NoUsableRoomPriceReason =
+      mainPlausible.length > 0 ? "room_context_missing" : relatedPropertyPriceExcludedCount > 0 ? "related_property_price_excluded" : "no_main_room_card_price_candidate";
+    return { selected: null, roomContext: { ...NO_ROOM_CONTEXT }, scored, originalPriceNumeric: null, priceDiscountDetected: false, noUsableRoomPriceReason: reason, relatedPropertyPriceExcludedCount };
+  }
   const original = effective ? scored.find((s) => eligible(s) && s.roleGuess === "original_price") : undefined;
   const originalPriceNumeric = original !== undefined && original.numericValue !== effective!.numericValue ? original.numericValue : null;
-  return { selected: best, roomContext: best.roomContext, scored, originalPriceNumeric, priceDiscountDetected: originalPriceNumeric !== null };
+  return { selected: best, roomContext: best.roomContext, scored, originalPriceNumeric, priceDiscountDetected: originalPriceNumeric !== null, noUsableRoomPriceReason: null, relatedPropertyPriceExcludedCount };
 }
 
 export function analyzeBookingRenderedDomSignals(input: {
@@ -294,7 +343,7 @@ export function analyzeBookingRenderedDomSignals(input: {
 }): BookingRenderedDomSignals {
   const text = normalizeText(input.bodyText);
   const priceCandidates = extractBookingPriceCandidates(text);
-  const { selected: primaryPriceCandidate, roomContext, originalPriceNumeric, priceDiscountDetected } = selectPrimaryBookingPriceCandidate(text, priceCandidates);
+  const { selected: primaryPriceCandidate, roomContext, originalPriceNumeric, priceDiscountDetected, noUsableRoomPriceReason, relatedPropertyPriceExcludedCount } = selectPrimaryBookingPriceCandidate(text, priceCandidates);
   return {
     loaded: input.loaded,
     httpStatus: input.httpStatus,
@@ -316,7 +365,9 @@ export function analyzeBookingRenderedDomSignals(input: {
     primaryPriceCandidate,
     originalPriceNumeric,
     priceDiscountDetected,
-    soldOutOrUnavailableDetected: /(売り切れ|満室|空室なし|予約できません|ご利用いただけません|not available|sold out)/iu.test(text),
+    noUsableRoomPriceReason,
+    relatedPropertyPriceExcludedCount,
+    soldOutOrUnavailableDetected: /(売り切れ|満室|空室なし|空室がありません|予約できません|ご利用いただけません|not available|sold out)/iu.test(text),
     captchaOrSecurityDetected: /(captcha|recaptcha|are you a robot|ロボットではありません|セキュリティチェック)/iu.test(text),
     loginRequiredDetected: /(ログイン|サインイン|sign in|log in)/iu.test(text),
     notFoundDetected: /(page not found|ページが見つかりません|お探しのページ)/iu.test(text),
@@ -334,7 +385,12 @@ export function classifyBookingRenderedDom(signals: BookingRenderedDomSignals): 
   if (signals.notFoundDetected || signals.httpStatus === 404) return "booking_rendered_not_found";
   if (signals.loginRequiredDetected && signals.bodyTextLength < 1_000) return "booking_rendered_login_required";
   if (signals.bodyTextLength < 300) return "booking_rendered_empty_or_near_empty";
-  if (signals.soldOutOrUnavailableDetected && signals.priceCandidates.length === 0) {
+  // Both checks key off primaryPriceCandidate (the SELECTED, verified-usable
+  // price for THIS property), not the raw priceCandidates list — a page can
+  // have plenty of raw yen amounts (a "similar properties" carousel of OTHER
+  // hotels, tax line items, promo badges) with zero of them usable as this
+  // property's own room price.
+  if (signals.soldOutOrUnavailableDetected && signals.primaryPriceCandidate === null) {
     return "booking_rendered_sold_out_or_unavailable";
   }
   if (
@@ -345,7 +401,7 @@ export function classifyBookingRenderedDom(signals: BookingRenderedDomSignals): 
     signals.roomCountDetected &&
     signals.nightCountDetected &&
     signals.jpyCurrencyDetected &&
-    signals.priceCandidates.length > 0
+    signals.primaryPriceCandidate !== null
   ) {
     return "booking_rendered_price_basis_candidate_found";
   }
@@ -367,7 +423,7 @@ export function buildBookingRenderedDomRow(input: {
   // 2-adult Booking row be CONFIRMED via its beds even when the room name was
   // not surfaced, and otherwise fall to probable (not unknown). Confirmed and
   // excluded text always win over the probable default.
-  const hasPrice = input.signals.priceCandidates.length > 0;
+  const hasPrice = input.signals.primaryPriceCandidate !== null;
   const available = hasPrice && !input.signals.soldOutOrUnavailableDetected;
   const roomBasis = classifyBookingRoomBasis({
     roomName: input.signals.primaryRoomName,

@@ -124,6 +124,19 @@ async function collectLive(cells: readonly RecrawlTarget[], debugRootPath: strin
   return { rows, errors };
 }
 
+// No price AND not a confirmed sold-out/unavailable read: an ambiguous
+// extraction failure for this specific cell (the target's own room cards
+// never rendered — possibly leaving only a related-property carousel behind,
+// see selectPrimaryBookingPriceCandidate). This must never be written into
+// the competitor artifact runBookingMarketRecrawlAppendPlan.ts reads — that
+// script appends ANY new-rowId observation regardless of price, so keeping
+// it out of the artifact entirely (rather than trying to gate it inside that
+// shared, unmodified script) is what stops it from being recorded as if we
+// successfully checked the date.
+function isNoUsableRoomPrice(r: PreviewRow): boolean {
+  return r.primary_price_numeric === null && r.availability_status !== "sold_out_or_unavailable";
+}
+
 function summarize(rows: readonly PreviewRow[]): Record<string, number> {
   const s = { confirmed: 0, probable: 0, unknown: 0, excluded: 0, with_price: 0 };
   for (const r of rows) {
@@ -156,11 +169,17 @@ function readExistingRowHashById(): Map<string, string> {
 // Own-property append: same primitives as the competitor path (buildProposedHistoryRow
 // + runRealAppend), own rows explicitly ALLOWED (that gate is specific to the
 // competitor-evidence script, not a general prohibition on recording our own price).
-function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; appendResult: ReturnType<typeof runRealAppend> | null } {
+function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; noUsableRoomPrice: number; appendResult: ReturnType<typeof runRealAppend> | null } {
   const existing = readExistingRowHashById();
   const toAppend: HistoryRow[] = [];
-  let dupSkipped = 0, dupConflicts = 0, implausiblePrice = 0;
+  let dupSkipped = 0, dupConflicts = 0, implausiblePrice = 0, noUsableRoomPrice = 0;
   for (const r of rows) {
+    // No price AND not a confirmed sold-out/unavailable read: an ambiguous
+    // extraction failure (e.g. the target's own room cards never rendered,
+    // possibly leaving only a related-property carousel behind — see
+    // selectPrimaryBookingPriceCandidate). Never append this as if we
+    // successfully checked the date; it must not count toward coverage.
+    if (r.primary_price_numeric === null && r.availability_status !== "sold_out_or_unavailable") { noUsableRoomPrice += 1; continue; }
     // Same data-quality guard as the competitor append path: a "priced" row
     // whose price is implausible for Booking (e.g. ¥100) never becomes an
     // append candidate, regardless of dedup outcome.
@@ -176,10 +195,10 @@ function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: num
     }
     toAppend.push(hRow);
   }
-  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, appendResult: null };
+  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: null };
   const runId = `pricing_critical_own_recrawl_${ts()}`;
   const result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(toAppend) });
-  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, appendResult: result };
+  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: result };
 }
 
 async function run(): Promise<void> {
@@ -259,11 +278,14 @@ async function run(): Promise<void> {
     competitorRows = rows;
     const s = summarize(rows);
     const runId = `pricing_critical_competitor_recrawl_${ts()}`;
-    const result = { generated_at_jst: collectedAtJst, selection_model: "stateless_tiered_date_sla", live_collection_executed: true, errors, rows: rows.map((r) => ({ canonical_property_name: r.canonical_property_name, checkin: r.checkin, room_basis: r.room_basis, room_basis_reason: r.room_basis_reason, primary_room_name: r.primary_room_name, primary_bed_hint: r.primary_bed_hint, primary_price_numeric: r.primary_price_numeric, classification: r.classification })) };
+    const usableRows = rows.filter((r) => !isNoUsableRoomPrice(r));
+    const noUsableRoomPrice = rows.length - usableRows.length;
+    const result = { generated_at_jst: collectedAtJst, selection_model: "stateless_tiered_date_sla", live_collection_executed: true, errors, rows: usableRows.map((r) => ({ canonical_property_name: r.canonical_property_name, checkin: r.checkin, room_basis: r.room_basis, room_basis_reason: r.room_basis_reason, primary_room_name: r.primary_room_name, primary_bed_hint: r.primary_bed_hint, primary_price_numeric: r.primary_price_numeric, classification: r.classification, availability_status: r.availability_status })) };
     competitorArtifactPath = resolve(REPORT_DIR, `${runId}.json`);
     writeFileSync(competitorArtifactPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
     console.log(`competitor_pages_collected=${rows.length}`);
     console.log(`competitor_confirmed=${s.confirmed} competitor_probable=${s.probable} competitor_unknown=${s.unknown} competitor_excluded=${s.excluded}`);
+    console.log(`competitor_no_usable_room_price_excluded=${noUsableRoomPrice}`);
     console.log(`competitor_preview_json=${competitorArtifactPath}`);
   }
 
@@ -273,7 +295,7 @@ async function run(): Promise<void> {
     ownRows = rows;
     const s = summarize(rows);
     const runId = `pricing_critical_own_recrawl_${ts()}`;
-    const result = { generated_at_jst: collectedAtJst, selection_model: "stateless_tiered_date_sla", live_collection_executed: true, errors, rows: rows.map((r) => ({ canonical_property_name: r.canonical_property_name, checkin: r.checkin, room_basis: r.room_basis, room_basis_reason: r.room_basis_reason, primary_room_name: r.primary_room_name, primary_bed_hint: r.primary_bed_hint, primary_price_numeric: r.primary_price_numeric, classification: r.classification })) };
+    const result = { generated_at_jst: collectedAtJst, selection_model: "stateless_tiered_date_sla", live_collection_executed: true, errors, rows: rows.map((r) => ({ canonical_property_name: r.canonical_property_name, checkin: r.checkin, room_basis: r.room_basis, room_basis_reason: r.room_basis_reason, primary_room_name: r.primary_room_name, primary_bed_hint: r.primary_bed_hint, primary_price_numeric: r.primary_price_numeric, classification: r.classification, availability_status: r.availability_status })) };
     const ownArtifactPath = resolve(OUT_DIR, `${runId}.json`);
     writeFileSync(ownArtifactPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
     console.log(`own_pages_collected=${rows.length}`);
@@ -302,6 +324,7 @@ async function run(): Promise<void> {
       console.log(`own_dup_skipped=${r.dupSkipped}`);
       console.log(`own_dup_conflicts=${r.dupConflicts}`);
       console.log(`own_implausible_price_excluded=${r.implausiblePrice}`);
+      console.log(`own_no_usable_room_price_excluded=${r.noUsableRoomPrice}`);
       console.log(`own_append_decision=${r.appendResult?.decision ?? "no_rows_to_append"}`);
       console.log(`own_rows_written=${r.appendResult?.rowsWritten ?? 0}`);
     } else {

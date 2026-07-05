@@ -29,6 +29,8 @@ function visibleText(): string {
     "1泊",
     "大人2名",
     "1室",
+    "ツインルーム", // room-card evidence: every real Booking room price sits
+    "シングルベッド2台", // next to a room name/bed hint, never a bare number.
     "税・手数料込み",
     "￥64,790",
     "宿泊施設の説明と設備情報 ".repeat(30)
@@ -93,7 +95,7 @@ describe("Booking rendered DOM extraction", () => {
   });
 
   it("does not treat price values containing 404 as page-not-found", () => {
-    const s = signals("蔵王国際ホテル 2026年8月10日 2026年8月11日 大人2名 1室 1泊 料金 ￥404,800 税・手数料込み ".repeat(5));
+    const s = signals("蔵王国際ホテル 2026年8月10日 2026年8月11日 大人2名 1室 1泊 ツインルーム 料金 ￥404,800 税・手数料込み ".repeat(5));
     expect(s.notFoundDetected).toBe(false);
     expect(classifyBookingRenderedDom(s)).toBe("booking_rendered_price_basis_candidate_found");
   });
@@ -191,6 +193,85 @@ describe("Booking rendered DOM extraction", () => {
     expect(row.roomBasis).toBe("confirmed_two_person_standard_room");
   });
 
+  it("HAMMOND sold-out: excludes a related property's (OAKHILL) price from the carousel, never treats it as HAMMOND's own", () => {
+    // Mirrors the real page captured live: HAMMOND has zero rooms for this
+    // date, so Booking swaps in a "similar properties available" carousel of
+    // OTHER hotels — each with its own plausible, room-context-adjacent price.
+    // This is MORE dangerous than the ¥100 defect: a wrong price this
+    // plausible would sail past every prior check.
+    const text = [
+      "HAMMOND",
+      "蔵王温泉にあるHAMMONDは蔵王温泉スキー場から徒歩6分で、無料WiFiと無料専用駐車場を提供しています。",
+      "現在当サイトでは、2026年7月11日～2026年7月12日の間にご提供できるこの宿泊施設の空室がありません。",
+      "違う日程を選択してください。",
+      "選択した日程で予約可能な類似施設",
+      "ホテル",
+      "Onsen & Stay OAKHILL",
+      "8.6 すばらしい",
+      "最安料金：",
+      "￥22,550 ￥17,448 元の料金は￥22,550です。現在の料金は￥17,448です。",
+      "ツインルーム",
+      "シングルベッド2台",
+      "旅館 名湯舎 創 8.3 とても良い 最安料金： ￥36,300 ￥28,314 元の料金は￥36,300です。現在の料金は￥28,314です。",
+      "宿泊施設の説明と設備情報 ".repeat(10)
+    ].join(" ");
+    const s = analyzeBookingRenderedDomSignals({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-11",
+      checkout: "2026-07-12",
+      loaded: true,
+      httpStatus: 200,
+      finalUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      pageTitle: "HAMMOND",
+      bodyText: text
+    });
+    expect(s.primaryPriceCandidate).toBeNull();
+    expect(s.primaryPriceCandidate?.numericValue).not.toBe(22550);
+    expect(s.primaryPriceCandidate?.numericValue).not.toBe(17448);
+    expect(s.primaryPriceCandidate?.numericValue).not.toBe(36300);
+    expect(s.noUsableRoomPriceReason).toBe("related_property_price_excluded");
+    expect(s.relatedPropertyPriceExcludedCount).toBeGreaterThan(0);
+    expect(s.soldOutOrUnavailableDetected).toBe(true);
+
+    const row = buildBookingRenderedDomRow({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-11",
+      checkout: "2026-07-12",
+      probeUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      signals: s,
+      debugArtifactPath: "/tmp/x"
+    });
+    expect(row.firstPriceCandidateValue).toBeNull();
+    expect(row.roomBasis).toBe("unknown_room_basis");
+    expect(row.classification).toBe("booking_rendered_sold_out_or_unavailable");
+  });
+
+  it("和室 (non-twin room name) with an explicit sale label is still selected as the primary price", () => {
+    const text = ["HAMMOND", "2026年7月11日", "2026年7月12日", "大人2名", "1室", "1泊", "和室", "5組の布団", "現在の料金 ￥33,000"].join(" ");
+    const s = analyzeBookingRenderedDomSignals({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-11",
+      checkout: "2026-07-12",
+      loaded: true,
+      httpStatus: 200,
+      finalUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      pageTitle: "HAMMOND",
+      bodyText: text
+    });
+    expect(s.primaryPriceCandidate?.numericValue).toBe(33000);
+    expect(s.primaryRoomName).toBe("和室");
+    const row = buildBookingRenderedDomRow({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-11",
+      checkout: "2026-07-12",
+      probeUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      signals: s,
+      debugArtifactPath: "/tmp/x"
+    });
+    expect(row.firstPriceCandidateValue).toBe(33000);
+    expect(["confirmed_two_person_standard_room", "probable_two_person_standard_room"]).toContain(row.roomBasis);
+  });
+
   it("no discount pairing on a regular page: primary is the normal price, original is null", () => {
     const s = signals(); // the existing single-price ￥64,790 fixture, no sale labels
     expect(s.primaryPriceCandidate?.numericValue).toBe(64790);
@@ -198,16 +279,19 @@ describe("Booking rendered DOM extraction", () => {
     expect(s.priceDiscountDetected).toBe(false);
   });
 
-  it("selectPrimaryBookingPriceCandidate falls back to the first candidate when nothing is plausible (never invents evidence)", () => {
-    const candidates = extractBookingPriceCandidates("キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント");
-    const selection = selectPrimaryBookingPriceCandidate("キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント", candidates);
-    expect(selection.selected?.numericValue).toBe(candidates[0]?.numericValue);
+  it("selectPrimaryBookingPriceCandidate returns no usable price when nothing is plausible (never invents evidence, no candidates[0] fallback)", () => {
+    const text = "キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント";
+    const candidates = extractBookingPriceCandidates(text);
+    const selection = selectPrimaryBookingPriceCandidate(text, candidates);
+    expect(selection.selected).toBeNull();
+    expect(selection.noUsableRoomPriceReason).toBe("no_main_room_card_price_candidate");
   });
 
   it("selectPrimaryBookingPriceCandidate returns null selection for zero candidates", () => {
     const selection = selectPrimaryBookingPriceCandidate("no prices here", []);
     expect(selection.selected).toBeNull();
     expect(selection.roomContext.primaryRoomName).toBe("");
+    expect(selection.noUsableRoomPriceReason).toBe("no_main_room_card_price_candidate");
   });
 
   it("does not regress a normal single-price page (candidates[0] already correct)", () => {
@@ -225,7 +309,7 @@ describe("Booking rendered DOM extraction", () => {
       httpStatus: 200,
       finalUrl: "https://www.booking.com/hotel/jp/shinzanso-takamiya.ja.html",
       pageTitle: "Takamiya Ryokan Miyamaso",
-      bodyText: "Takamiya Ryokan Miyamaso 2026年8月10日 2026年8月11日 大人2名 1室 1泊 ￥68,000 税・手数料込み ".repeat(5)
+      bodyText: "Takamiya Ryokan Miyamaso 2026年8月10日 2026年8月11日 大人2名 1室 1泊 ツインルーム ￥68,000 税・手数料込み ".repeat(5)
     });
     expect(s.propertyNameDetected).toBe(true);
     expect(classifyBookingRenderedDom(s)).toBe("booking_rendered_price_basis_candidate_found");
@@ -330,11 +414,20 @@ describe("ROOM-LIVE - rendered DOM row extracts room context (A1)", () => {
     expect(rowFor(body).roomBasis).toBe("excluded_single_room");
   });
 
-  it("priced 2-adult page with no room-type context is probable_two_person_standard_room", () => {
-    // No room name / bed token, but available + priced + 2-adult Booking search
-    // => probable (the live probe now applies the Booking 2-adult default).
-    const row = rowFor(visibleText());
-    expect(row.roomBasis).toBe("probable_two_person_standard_room");
+  it("priced 2-adult page with NO room-type context anywhere is unknown_room_basis / no usable price (§related-property hardening)", () => {
+    // A bare "available + priced + 2-adult" page with no room name/bed hint
+    // near the price used to fall back to probable via the 2-adult default —
+    // that exact "plausible price, no room evidence" fallback is the one this
+    // task removes, because it's indistinguishable from a related-property
+    // price landing on the page. No room evidence anywhere now means
+    // no_usable_room_price, not a guessed probable classification.
+    const body = ["蔵王国際ホテル", "2026年8月10日", "2026年8月11日", "1泊", "大人2名", "1室", "税・手数料込み", "￥64,790", "宿泊施設の説明と設備情報 ".repeat(30)].join(" ");
+    const s = signals(body);
+    expect(s.primaryPriceCandidate).toBeNull();
+    expect(s.noUsableRoomPriceReason).toBe("room_context_missing");
+    const row = rowFor(body);
+    expect(row.firstPriceCandidateValue).toBeNull();
+    expect(row.roomBasis).toBe("unknown_room_basis");
   });
 
   it("room name absent but bed hint 'シングルベッド2台' => confirmed via bed hint", () => {

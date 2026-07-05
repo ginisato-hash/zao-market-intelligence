@@ -58,6 +58,8 @@ function domRow(overrides: {
       primaryPriceCandidate: null,
       originalPriceNumeric: null,
       priceDiscountDetected: false,
+      noUsableRoomPriceReason: null,
+      relatedPropertyPriceExcludedCount: 0,
       soldOutOrUnavailableDetected: overrides.soldOut ?? false,
       captchaOrSecurityDetected: false,
       loginRequiredDetected: false,
