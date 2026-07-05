@@ -1,5 +1,6 @@
-import { extractBookingRoomContextAroundPrice } from "./bookingRoomContextExtraction";
+import { extractBookingRoomContextAroundPrice, type BookingRoomContext } from "./bookingRoomContextExtraction";
 import { classifyBookingRoomBasis, type RoomBasis } from "./roomBasisClassification";
+import { MIN_PLAUSIBLE_BOOKING_PRICE_JPY } from "./pricePlausibilityGuard";
 
 export type BookingRenderedDomClassification =
   | "booking_rendered_price_basis_candidate_found"
@@ -48,11 +49,16 @@ export interface BookingRenderedDomSignals {
   nightCountDetected: boolean;
   jpyCurrencyDetected: boolean;
   priceCandidates: BookingPriceCandidate[];
+  // The candidate selectPrimaryBookingPriceCandidate chose as the room price —
+  // NOT necessarily priceCandidates[0] (document order can put a stray badge/
+  // promo/loyalty yen-amount before the real room-card price; see that
+  // function's selection order). null when there are no candidates at all.
+  primaryPriceCandidate: BookingPriceCandidate | null;
   soldOutOrUnavailableDetected: boolean;
   captchaOrSecurityDetected: boolean;
   loginRequiredDetected: boolean;
   notFoundDetected: boolean;
-  // Room context extracted around the first price candidate (room-basis input).
+  // Room context extracted around the SELECTED price candidate (room-basis input).
   primaryRoomName: string;
   primaryRoomCardText: string;
   primaryOccupancyHint: string;
@@ -79,6 +85,9 @@ export interface BookingRenderedDomRow {
   nightCountDetected: boolean;
   jpyCurrencyDetected: boolean;
   priceCandidateCount: number;
+  // Despite the name (kept for compatibility with existing consumers/CSV
+  // columns), this is the SELECTED primary candidate's value, not literally
+  // priceCandidates[0] — see selectPrimaryBookingPriceCandidate.
   firstPriceCandidateValue: number | null;
   soldOutOrUnavailableDetected: boolean;
   // Room context + room-basis classification (room-only two-person standard gate).
@@ -181,6 +190,52 @@ export function extractBookingPriceCandidates(text: string): BookingPriceCandida
   return dedupePriceCandidates(candidates).slice(0, 20);
 }
 
+export interface ScoredBookingPriceCandidate extends BookingPriceCandidate {
+  roomContext: BookingRoomContext;
+  hasRoomContext: boolean;
+  isPlausible: boolean;
+}
+
+export interface BookingPriceCandidateSelection {
+  selected: BookingPriceCandidate | null;
+  roomContext: BookingRoomContext;
+  scored: ScoredBookingPriceCandidate[];
+}
+
+const NO_ROOM_CONTEXT: BookingRoomContext = { primaryRoomName: "", primaryRoomCardText: "", primaryOccupancyHint: "", primaryBedHint: "" };
+
+// Document order is NOT selection order: a Booking page can render a
+// promo/loyalty/cashback yen-amount before the real room-card price, so
+// candidates[0] is not reliably "the room price" (this is the root cause of
+// the HAMMOND ¥100 extraction defect — candidates[0] was a stray small yen
+// amount with no room card nearby, so its room-context window came up empty
+// and the row fell to the classifier's no-evidence default). Score every
+// candidate by its OWN local room context instead of trusting position:
+//   1) plausible price (>= MIN_PLAUSIBLE_BOOKING_PRICE_JPY) WITH a room name
+//      or bed hint nearby — this is a real room-card price;
+//   2) plausible price with no nearby room evidence (still a usable price,
+//      just lower-confidence room basis, same as before this fix);
+//   3) first candidate — nothing plausible was found; keep it for the
+//      downstream plausibility guard to reject rather than fabricating an
+//      empty result (conservative: never invents a candidate that doesn't
+//      exist in the text).
+// For a property whose candidates[0] IS already the room-card price (the
+// common case today), this resolves to the same candidate — no regression.
+export function selectPrimaryBookingPriceCandidate(bodyText: string, candidates: readonly BookingPriceCandidate[]): BookingPriceCandidateSelection {
+  if (candidates.length === 0) return { selected: null, roomContext: { ...NO_ROOM_CONTEXT }, scored: [] };
+  const scored: ScoredBookingPriceCandidate[] = candidates.map((c) => {
+    const roomContext = extractBookingRoomContextAroundPrice({ bodyText, priceValue: c.numericValue, priceRawText: c.rawText, contextBeforeAfter: c.contextBeforeAfter });
+    return {
+      ...c,
+      roomContext,
+      hasRoomContext: roomContext.primaryRoomName !== "" || roomContext.primaryBedHint !== "",
+      isPlausible: c.numericValue >= MIN_PLAUSIBLE_BOOKING_PRICE_JPY
+    };
+  });
+  const best = scored.find((s) => s.isPlausible && s.hasRoomContext) ?? scored.find((s) => s.isPlausible) ?? scored[0]!;
+  return { selected: best, roomContext: best.roomContext, scored };
+}
+
 export function analyzeBookingRenderedDomSignals(input: {
   target: BookingRenderedDomTarget;
   checkin: string;
@@ -194,12 +249,7 @@ export function analyzeBookingRenderedDomSignals(input: {
 }): BookingRenderedDomSignals {
   const text = normalizeText(input.bodyText);
   const priceCandidates = extractBookingPriceCandidates(text);
-  const roomContext = extractBookingRoomContextAroundPrice({
-    bodyText: text,
-    priceValue: priceCandidates[0]?.numericValue ?? null,
-    priceRawText: priceCandidates[0]?.rawText,
-    contextBeforeAfter: priceCandidates[0]?.contextBeforeAfter
-  });
+  const { selected: primaryPriceCandidate, roomContext } = selectPrimaryBookingPriceCandidate(text, priceCandidates);
   return {
     loaded: input.loaded,
     httpStatus: input.httpStatus,
@@ -218,6 +268,7 @@ export function analyzeBookingRenderedDomSignals(input: {
     nightCountDetected: /1\s*泊|１\s*泊|1\s*泊分|１\s*泊分/iu.test(text),
     jpyCurrencyDetected: /￥|¥|JPY|円/u.test(text),
     priceCandidates,
+    primaryPriceCandidate,
     soldOutOrUnavailableDetected: /(売り切れ|満室|空室なし|予約できません|ご利用いただけません|not available|sold out)/iu.test(text),
     captchaOrSecurityDetected: /(captcha|recaptcha|are you a robot|ロボットではありません|セキュリティチェック)/iu.test(text),
     loginRequiredDetected: /(ログイン|サインイン|sign in|log in)/iu.test(text),
@@ -298,7 +349,7 @@ export function buildBookingRenderedDomRow(input: {
     nightCountDetected: input.signals.nightCountDetected,
     jpyCurrencyDetected: input.signals.jpyCurrencyDetected,
     priceCandidateCount: input.signals.priceCandidates.length,
-    firstPriceCandidateValue: input.signals.priceCandidates[0]?.numericValue ?? null,
+    firstPriceCandidateValue: input.signals.primaryPriceCandidate?.numericValue ?? null,
     soldOutOrUnavailableDetected: input.signals.soldOutOrUnavailableDetected,
     primaryRoomName: input.signals.primaryRoomName,
     primaryRoomCardText: input.signals.primaryRoomCardText,

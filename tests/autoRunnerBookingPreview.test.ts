@@ -55,6 +55,7 @@ function domRow(overrides: {
       nightCountDetected: true,
       jpyCurrencyDetected: true,
       priceCandidates: [],
+      primaryPriceCandidate: null,
       soldOutOrUnavailableDetected: overrides.soldOut ?? false,
       captchaOrSecurityDetected: false,
       loginRequiredDetected: false,

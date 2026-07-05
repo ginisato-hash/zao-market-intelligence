@@ -188,6 +188,7 @@
     "market:pricing-critical-coverage": "node --import tsx src/scripts/runPricingCriticalCoverage.ts",
     "market:priority-competitor-coverage": "node --import tsx src/scripts/runPricingCriticalCoverage.ts --group=competitor",
     "market:own-property-coverage": "node --import tsx src/scripts/runPricingCriticalCoverage.ts --group=own",
+    "market:pricing-critical-debug:hammond": "node --import tsx src/scripts/debugBookingPriceCandidates.ts",
     "market:pricing-critical-recrawl:preview": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --preview",
     "market:pricing-critical-recrawl:append": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --append",
     "market:priority-competitor-recrawl:preview": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --preview --group=competitor",

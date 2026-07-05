@@ -12,6 +12,7 @@ import {
   renderBookingRenderedDomCsv,
   renderBookingRenderedDomReport,
   sanitizeBookingUrl,
+  selectPrimaryBookingPriceCandidate,
   type BookingRenderedDomTarget
 } from "../src/services/bookingRenderedDomProbe";
 
@@ -95,6 +96,73 @@ describe("Booking rendered DOM extraction", () => {
     const s = signals("蔵王国際ホテル 2026年8月10日 2026年8月11日 大人2名 1室 1泊 料金 ￥404,800 税・手数料込み ".repeat(5));
     expect(s.notFoundDetected).toBe(false);
     expect(classifyBookingRenderedDom(s)).toBe("booking_rendered_price_basis_candidate_found");
+  });
+
+  it("HAMMOND regression: skips a stray low-value badge price and selects the real room-card price", () => {
+    // Mirrors the real defect: a cashback/loyalty badge renders a ¥100 amount
+    // BEFORE the actual room card in document order, with no room-name/bed-hint
+    // text nearby. candidates[0] used to become the "primary" price (¥100, no
+    // room name), which is exactly why HAMMOND rows showed empty room_name/
+    // bed_hint and price=100.
+    const text = [
+      "HAMMOND / ハモンド",
+      "今すぐ予約でキャッシュバック ￥100 相当のポイント還元",
+      "2026年7月6日",
+      "2026年7月7日",
+      "大人2名",
+      "1室",
+      "1泊",
+      "ツインルーム",
+      "シングルベッド2台",
+      "税・手数料込み",
+      "￥14,245",
+      "宿泊施設の説明と設備情報 ".repeat(20)
+    ].join(" ");
+    const s = analyzeBookingRenderedDomSignals({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-06",
+      checkout: "2026-07-07",
+      loaded: true,
+      httpStatus: 200,
+      finalUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      pageTitle: "HAMMOND",
+      bodyText: text
+    });
+    expect(s.priceCandidates.map((c) => c.numericValue)).toContain(100);
+    expect(s.priceCandidates.map((c) => c.numericValue)).toContain(14245);
+    expect(s.primaryPriceCandidate?.numericValue).toBe(14245);
+    expect(s.primaryPriceCandidate?.numericValue).not.toBe(100);
+    expect(s.primaryRoomName).not.toBe("");
+    expect(s.primaryBedHint).not.toBe("");
+
+    const row = buildBookingRenderedDomRow({
+      target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" },
+      checkin: "2026-07-06",
+      checkout: "2026-07-07",
+      probeUrl: "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html",
+      signals: s,
+      debugArtifactPath: "/tmp/x"
+    });
+    expect(row.firstPriceCandidateValue).toBe(14245);
+    expect(row.roomBasis).toBe("confirmed_two_person_standard_room");
+  });
+
+  it("selectPrimaryBookingPriceCandidate falls back to the first candidate when nothing is plausible (never invents evidence)", () => {
+    const candidates = extractBookingPriceCandidates("キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント");
+    const selection = selectPrimaryBookingPriceCandidate("キャンペーン中 ￥50相当 ポイント ￥80相当 ポイント", candidates);
+    expect(selection.selected?.numericValue).toBe(candidates[0]?.numericValue);
+  });
+
+  it("selectPrimaryBookingPriceCandidate returns null selection for zero candidates", () => {
+    const selection = selectPrimaryBookingPriceCandidate("no prices here", []);
+    expect(selection.selected).toBeNull();
+    expect(selection.roomContext.primaryRoomName).toBe("");
+  });
+
+  it("does not regress a normal single-price page (candidates[0] already correct)", () => {
+    const s = signals();
+    expect(s.primaryPriceCandidate?.numericValue).toBe(64790);
+    expect(s.primaryPriceCandidate?.numericValue).toBe(s.priceCandidates[0]?.numericValue);
   });
 
   it("uses the first-party slug URL as a property identity signal when localized name differs", () => {
