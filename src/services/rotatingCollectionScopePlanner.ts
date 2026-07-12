@@ -11,6 +11,7 @@
 
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
 import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
+import { epochDay, roundRobinByGroup } from "./priorityRefreshTiers";
 
 export type RotatingBucket = "short" | "mid" | "long";
 
@@ -317,9 +318,48 @@ export function buildRotatingPlan(input: {
   // Sort by score desc, stable tiebreak by key.
   candidates.sort((a, b) => b.priority_score - a.priority_score || keyOf(a).localeCompare(keyOf(b)));
 
-  // Deterministic slot rotation: rotate the sorted pool so each slot starts at a
-  // different offset, spreading coverage across the day while staying deterministic.
-  const rotated = rotate(candidates, slot.slot_index);
+  // KIRAKU-BOOKING-FIX01 (2026-07-13): interleave by property BEFORE rotating,
+  // SEPARATELY per source, with a rotation offset that also advances by
+  // calendar day (not just intraday slot). Two compounding problems, found by
+  // live verification that 喜らく/Kiraku's Booking slug "xi-raku" was selected
+  // in ZERO of the 12 daily slots despite being a correctly registered,
+  // verified live target:
+  //   1. A flat score-sorted candidate pool can hold thousands of entries
+  //      (many dates x many properties across BOTH sources combined), while
+  //      slot_index only ranges 0..11 (12 slots/day) — rotating that flat
+  //      array shifts the start by at most 11 positions out of thousands,
+  //      negligible: the same handful of top-scoring properties wins the
+  //      per-run cap on every slot, every day. Interleaving one candidate per
+  //      property (round-robin, each property's own list still internally
+  //      score-sorted) collapses the rotation unit from "candidate count" to
+  //      "distinct property count" (~24 for Booking) — small enough for an
+  //      11-position rotation to matter. Interleaving booking+jalan SEPARATELY
+  //      (not mixed together) avoids halving that already-small cycle length.
+  //   2. Even with a clean per-source ~24-group cycle, an 11-position rotation
+  //      spans only 12 of 24 groups on any single day — the group ranked
+  //      dead-last would still never rotate into range, forever. Folding
+  //      epochDay(runDateIso) into the offset (mod group count) means the
+  //      OTHER 12 groups get their turn as the calendar date advances,
+  //      matching the same self-healing, no-stored-state design already
+  //      proven in priorityRefreshTiers.ts's isSelectedToday.
+  // General fix: no property-specific exception, same mechanism (and the same
+  // roundRobinByGroup helper) proven in priorityRefreshTiers.ts's own
+  // starvation fix.
+  function interleaveAndRotate(source: "booking" | "jalan"): RotatingTarget[] {
+    const sourceCandidates = candidates.filter((c) => c.source === source);
+    const interleaved = roundRobinByGroup(sourceCandidates, (c) => c.property_slug);
+    const groupCount = new Set(sourceCandidates.map((c) => c.property_slug)).size;
+    if (groupCount === 0) return interleaved;
+    const dayOffset = epochDay(input.runDateIso) % groupCount;
+    const offsetInGroups = (dayOffset + slot.slot_index) % groupCount;
+    // roundRobinByGroup lays out one item per group per "round" (index 0 of
+    // every group, then index 1 of every group, ...), so the first groupCount
+    // entries are each group's own first item, in group order — rotating the
+    // interleaved array by offsetInGroups positions (< groupCount) directly
+    // shifts which group's turn comes first, without needing any conversion.
+    return rotate(interleaved, offsetInGroups);
+  }
+  const rotated = [...interleaveAndRotate("booking"), ...interleaveAndRotate("jalan")];
 
   // Bucket soft targets: short 35% / mid 40% / long(+winter) 25% of total cap.
   const bucketSoftMax: Record<RotatingBucket, number> = {

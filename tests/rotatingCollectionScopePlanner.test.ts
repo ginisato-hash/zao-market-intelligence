@@ -292,3 +292,32 @@ describe("AUTO-RUNNER17X - near-term dense + forced checkin dates", () => {
     expect(plan.selected.every((t) => t.source === "booking" || t.source === "jalan")).toBe(true);
   });
 });
+
+describe("KIRAKU-BOOKING-FIX01 - every verified property gets a turn within a bounded rotation", () => {
+  // Live verification (2026-07-13) found 喜らく/Kiraku's real, correctly
+  // registered, verified-live Booking target ("xi-raku") was selected in ZERO
+  // of the 12 daily rotating slots: a flat score-sorted pool of thousands of
+  // candidates was rotated by at most 11 array positions (slot_index 0..11),
+  // negligible against that pool size, so the same handful of top-scoring
+  // properties won every slot, every day. Fixed by interleaving candidates by
+  // property (round-robin, per source) before rotating, and folding
+  // epochDay(runDateIso) into the rotation offset alongside slot_index so the
+  // OTHER properties get their turn as the calendar date advances (the same
+  // self-healing, no-stored-state design as priorityRefreshTiers.ts). This is
+  // a general fix — verified here against the REAL verified-live universe
+  // (liveTargets()), not a synthetic fixture, so it would catch a regression
+  // for ANY under-served property, not just Kiraku.
+  it("喜らく/Kiraku's Booking slug (xi-raku) is selected within 7 days of daily rotation", () => {
+    const lastCollectedAt = new Map<string, string>();
+    let found = false;
+    for (let dayAdd = 0; dayAdd < 7 && !found; dayAdd++) {
+      const runDateIso = `2026-07-${String(13 + dayAdd).padStart(2, "0")}`;
+      for (let hour = 0; hour < 24 && !found; hour += 2) {
+        const nowIso = `${runDateIso}T${String(hour).padStart(2, "0")}:00:00+09:00`;
+        const p = buildRotatingPlan({ runDateIso, nowIso, slotHourJst: hour, liveTargets: liveTargets(), config: CONFIG, lastCollectedAt });
+        if (p.selected.some((t) => t.property_slug === "xi-raku")) found = true;
+      }
+    }
+    expect(found).toBe(true);
+  });
+});
