@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase AUTOMATION-HEALTHCHECK01 - standing watchdog for the ZMI always-on Mac
+  automation, added 2026-07-12 after a 7-day incident: market-refresh-rotating
+  kept succeeding locally every 2 hours, but nothing ever committed/pushed its
+  output to GitHub, and booking-market-recrawl silently self-aborted on every
+  scheduled run since 2026-06-23 because of it. None of that was visible
+  without manually reading launchd + git state.
+
+  Runs hourly at :25 (offset from market-refresh-rotating's :00, bi-web-publish's
+  :10, booking-market-recrawl's Tue/Fri 14:35, pricing-critical-recrawl's 13:35).
+  Read-only: no history/DB mutation, no commit/push/publish. Flags (and fires a
+  local macOS notification for): last commit older than 4h, unpushed local
+  commits, unexpected dirty files outside .data/history / apps/zmi-bi-web/data,
+  stale lock files, or any of the four production launchd jobs missing / with a
+  non-zero last exit code. Exits non-zero when unhealthy so this job's own
+  launchd "last exit code" becomes a second, independent signal.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.yuge.zmi.automation-healthcheck</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; npm run ops:automation-healthcheck</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+	<key>StandardOutPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/automation-healthcheck.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/automation-healthcheck.err.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict><key>Minute</key><integer>25</integer></dict>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

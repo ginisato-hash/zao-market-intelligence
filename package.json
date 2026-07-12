@@ -240,7 +240,9 @@
     "inspect:audit": "node --import tsx src/scripts/inspectRunAudit.ts",
     "audit:pricing-recommendations": "node --import tsx src/scripts/inspectPricingRecommendationAudit.ts",
     "review:booking-market-recrawl-quality": "node --import tsx src/scripts/runBookingMarketRecrawlQualityReview.ts",
-    "ops:booking-market-recrawl": "node --import tsx src/scripts/runBookingMarketRecrawlPipeline.ts"
+    "ops:booking-market-recrawl": "node --import tsx src/scripts/runBookingMarketRecrawlPipeline.ts",
+    "ops:auto-commit-push": "node --import tsx src/scripts/runAutoCommitPushMarketData.ts",
+    "ops:automation-healthcheck": "node --import tsx src/scripts/runAutomationHealthcheck.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

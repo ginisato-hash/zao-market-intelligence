@@ -13,6 +13,15 @@
   per (source,property,stay_date). Rakuten/Google never collected.
   PUBLISH_CHATGPT_DB=1 publishes to the chatgpt-db-latest release after a
   successful aligned append (publish failure is non-fatal). No pricing/PMS.
+
+  AUTO-COMMIT-PUSH01 (added 2026-07-12, after a 7-day incident where local
+  collection kept succeeding but nothing ever committed/pushed it — see
+  ops/README or the AUTO-COMMIT-PUSH01 commit message): every cycle now also
+  runs ops:auto-commit-push, which stages ONLY .data/history +
+  apps/zmi-bi-web/data, refuses to commit anything else, and pushes. Runs
+  even if the rotating collection step itself reports a non-zero exit, so a
+  crawl-side failure never also blocks committing whatever was already
+  appended before the failure.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -23,7 +32,7 @@
 	<array>
 		<string>/bin/zsh</string>
 		<string>-lc</string>
-		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_AUTORUN_ENABLED=1 COLLECT_BOOKING=1 COLLECT_JALAN=1 ALLOW_HISTORY_APPEND=1 HISTORY_TO_DB_SYNC=1 BUILD_AI_CONTEXT=1 PLANNER_ROTATION_ENABLED=1 PUBLISH_CHATGPT_DB=1 ZMI_CRAWL_VOLUME_MULTIPLIER=3 ZMI_NEAR_TERM_DENSE_DAYS=30 npm run auto-runner:market-refresh-rotating</string>
+		<string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; ZMI_AUTORUN_ENABLED=1 COLLECT_BOOKING=1 COLLECT_JALAN=1 ALLOW_HISTORY_APPEND=1 HISTORY_TO_DB_SYNC=1 BUILD_AI_CONTEXT=1 PLANNER_ROTATION_ENABLED=1 PUBLISH_CHATGPT_DB=1 ZMI_CRAWL_VOLUME_MULTIPLIER=3 ZMI_NEAR_TERM_DENSE_DAYS=30 npm run auto-runner:market-refresh-rotating; npm run ops:auto-commit-push</string>
 	</array>
 	<key>WorkingDirectory</key>
 	<string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
