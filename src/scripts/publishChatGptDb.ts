@@ -8,7 +8,7 @@
 
 import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import {
@@ -26,6 +26,17 @@ const DESKTOP_ZIP = resolve(homedir(), "Desktop", "ZMI_ChatGPT_Uploads", ASSET_N
 const REPO_LATEST_ZIP = resolve(REPO_DIR, ".data/exports/chatgpt-upload/latest", ASSET_NAME);
 const SQLITE_PATH = resolve(REPO_DIR, ".data/zao-market-intelligence.sqlite");
 const HISTORY_DIR = resolve(REPO_DIR, ".data/history");
+const PUBLISH_MARKER_PATH = resolve(REPO_DIR, ".data/state/last_chatgpt_db_publish.json");
+
+function jstNow(): string {
+  const f = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
+  return `${f.replace(" ", "T")}+09:00`;
+}
+// Read by ops:automation-healthcheck's freshness dashboard.
+function writePublishMarker(releaseUrl: string, assetUrl: string): void {
+  mkdirSync(resolve(REPO_DIR, ".data/state"), { recursive: true });
+  writeFileSync(PUBLISH_MARKER_PATH, `${JSON.stringify({ published_at_jst: jstNow(), release_url: releaseUrl, asset_url: assetUrl }, null, 2)}\n`, "utf8");
+}
 
 function run(cmd: string, args: string[], opts: { cwd?: string } = {}): { ok: boolean; stdout: string; stderr: string; status: number } {
   const r = spawnSync(cmd, args, { cwd: opts.cwd ?? REPO_DIR, encoding: "utf8" });
@@ -153,6 +164,7 @@ function run2(): void {
   }
 
   // 9. Print summary
+  writePublishMarker(releaseUrl, assetUrl);
   console.log(renderPublishSummary(ctx, decision, releaseUrl, assetUrl));
 }
 

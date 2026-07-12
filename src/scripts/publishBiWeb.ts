@@ -7,13 +7,26 @@
 // appends/syncs/refreshes/emits pricing/PMS.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const APP_DIR = "apps/zmi-bi-web";
 const DATA_DIR = `${APP_DIR}/data`;
 const PROJECT_NAME = "zmi-bi-web";
 const ENV_FILE = ".env.cloudflare.local";
+const PUBLISH_MARKER_PATH = ".data/state/last_bi_web_publish.json";
+
+function jstNow(): string {
+  const f = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
+  return `${f.replace(" ", "T")}+09:00`;
+}
+// Read by ops:automation-healthcheck's freshness dashboard: `wrangler pages
+// deploy` doesn't expose a queryable "last successful publish" timestamp
+// anywhere else, so this marker is the only source of truth for that layer.
+function writePublishMarker(url: string): void {
+  mkdirSync(resolve(".data/state"), { recursive: true });
+  writeFileSync(resolve(PUBLISH_MARKER_PATH), `${JSON.stringify({ published_at_jst: jstNow(), url }, null, 2)}\n`, "utf8");
+}
 
 // Load Cloudflare auth from .env.cloudflare.local when it is not already in the
 // environment. launchd does not inherit interactive `export`s, and under macOS
@@ -83,6 +96,7 @@ function run(): void {
     return;
   }
   const url = (dep.stdout ?? "").match(/https:\/\/[^\s]+\.pages\.dev[^\s]*/u)?.[0] ?? "";
+  writePublishMarker(url);
   console.log("decision=bi_web_published");
   console.log(`url=${url}`);
 }

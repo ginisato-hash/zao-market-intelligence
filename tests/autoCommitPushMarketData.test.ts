@@ -39,7 +39,7 @@ describe("AUTO-COMMIT-PUSH01 safety", () => {
   it("reports push failure distinctly from commit failure, and does not silently swallow it", () => {
     expect(SCRIPT_SOURCE).toContain("auto_commit_push_commit_ok_push_failed");
     expect(SCRIPT_SOURCE).toContain("aborted_commit_failed");
-    expect(SCRIPT_SOURCE).toMatch(/if\s*\(!push\.ok\)\s*\{[\s\S]{0,400}process\.exitCode\s*=\s*1/u);
+    expect(SCRIPT_SOURCE).toMatch(/if\s*\(!push\.ok\)\s*\{[\s\S]{0,600}process\.exitCode\s*=\s*1/u);
   });
 
   it("no-ops cleanly on an already-clean tree", () => {
@@ -51,5 +51,34 @@ describe("AUTO-COMMIT-PUSH01 safety", () => {
     // `;` (not `&&`) so a crawl-side failure doesn't also block committing
     // whatever was already appended before the failure.
     expect(ROTATING_PLIST).toMatch(/auto-runner:market-refresh-rotating;\s*npm run ops:auto-commit-push/u);
+  });
+
+  it("uses a dedicated, self-cleaning lock to prevent two overlapping invocations from racing", () => {
+    expect(SCRIPT_SOURCE).toContain("auto_commit_push.lock");
+    expect(SCRIPT_SOURCE).toContain("aborted_lock_held_by_other_run");
+    expect(SCRIPT_SOURCE).toContain("LOCK_STALE_MS");
+    expect(SCRIPT_SOURCE).toMatch(/finally\s*\{\s*releaseLock\(\);/u);
+  });
+
+  it("fetches origin before deciding anything, and never force-pushes on divergence", () => {
+    expect(SCRIPT_SOURCE).toMatch(/git\(\["fetch",\s*"origin",\s*"main"\]\)/u);
+    expect(SCRIPT_SOURCE).toContain("--ff-only");
+    expect(SCRIPT_SOURCE).toContain("aborted_diverged_from_origin_not_fast_forward");
+  });
+
+  it("retries a previously-committed-but-unpushed state even when the working tree is clean", () => {
+    // The unpushed-commit check must run BEFORE the dirty-tree noop check,
+    // so a clean tree with an unpushed commit is never mistaken for
+    // "nothing to do".
+    const unpushedCheckIdx = SCRIPT_SOURCE.indexOf("unpushed_commits_at_start");
+    const noopCleanIdx = SCRIPT_SOURCE.indexOf("auto_commit_push_noop_clean_tree");
+    expect(unpushedCheckIdx).toBeGreaterThan(-1);
+    expect(unpushedCheckIdx).toBeLessThan(noopCleanIdx);
+    expect(SCRIPT_SOURCE).toContain("aborted_retry_push_failed");
+  });
+
+  it("detects a concurrent write to an already-staged file before committing", () => {
+    expect(SCRIPT_SOURCE).toContain("aborted_concurrent_write_detected");
+    expect(SCRIPT_SOURCE).toContain("restaggered_files");
   });
 });

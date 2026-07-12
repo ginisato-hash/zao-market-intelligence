@@ -15,12 +15,17 @@
 //
 // Read-only: no history/DB mutation, no commit/push, no publish.
 
+import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const REPORT_DIR = ".data/reports/automation";
 const LOCKS_DIR = ".data/locks";
+const SQLITE_PATH = ".data/zao-market-intelligence.sqlite";
+const BI_METADATA_PATH = "apps/zmi-bi-web/data/metadata.json";
+const BI_PUBLISH_MARKER_PATH = ".data/state/last_bi_web_publish.json";
+const CHATGPT_PUBLISH_MARKER_PATH = ".data/state/last_chatgpt_db_publish.json";
 const STALE_HOURS = Number(process.env["ZMI_HEALTHCHECK_STALE_HOURS"] ?? "4") || 4;
 const STALE_LOCK_HOURS = Number(process.env["ZMI_HEALTHCHECK_STALE_LOCK_HOURS"] ?? "3") || 3;
 const ALLOWED_DIRTY_PREFIXES = [".data/history/", "apps/zmi-bi-web/data/"];
@@ -100,6 +105,97 @@ function notifyMac(title: string, message: string): void {
   sh("osascript", ["-e", `display notification "${esc(message)}" with title "${esc(title)}"`]);
 }
 
+function readJsonSafe(path: string): Record<string, unknown> | null {
+  try { return JSON.parse(readFileSync(resolve(path), "utf8")) as Record<string, unknown>; } catch { return null; }
+}
+
+// Distinguishes "collection is fine but GitHub is stale" from "GitHub is
+// fine but Cloudflare/D1/ChatGPT-DB is stale" — the exact ambiguity that
+// made the 2026-07-12 incident hard to see without reading launchd + git by
+// hand. Every layer here is read-only: git log (no fetch-dependent ref
+// beyond what's already cached from the check above), a read-only sqlite
+// open, and two local marker files publishBiWeb.ts / publishChatGptDb.ts
+// write on success (wrangler/gh expose no queryable "last publish time").
+interface FreshnessLayer { name: string; at_jst: string | null; delay_hours_since_collection: number | null }
+interface FreshnessSummary {
+  latest_local_collected_at_jst: string | null;
+  latest_history_committed_at_jst: string | null;
+  latest_github_pushed_at_jst: string | null;
+  latest_cloudflare_published_at_jst: string | null;
+  latest_d1_synced_at_jst: string | null;
+  latest_chatgpt_db_published_at_jst: string | null;
+  layers: FreshnessLayer[];
+}
+
+function hoursSince(fromIso: string | null, toIso: string | null): number | null {
+  if (fromIso === null || toIso === null) return null;
+  const from = Date.parse(fromIso);
+  const to = Date.parse(toIso);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  return Number(((to - from) / (60 * 60 * 1000)).toFixed(2));
+}
+
+function computeFreshnessSummary(): FreshnessSummary {
+  const biMeta = readJsonSafe(BI_METADATA_PATH);
+  const latestLocalCollectedAtJst = typeof biMeta?.["latest_collected_at_jst"] === "string" && biMeta["latest_collected_at_jst"] !== "" ? (biMeta["latest_collected_at_jst"] as string) : null;
+
+  // Last commit that touched .data/history, converted from git's ISO-8601
+  // author date to the same "YYYY-MM-DDTHH:MM:SS+09:00" shape as the other
+  // timestamps so hoursSince() can compare them directly.
+  const historyCommitIso = sh("git", ["log", "-1", "--format=%aI", "--", ".data/history"]).out.trim();
+  const latestHistoryCommittedAtJst = historyCommitIso !== "" ? historyCommitIso : null;
+  const historyCommitSha = sh("git", ["log", "-1", "--format=%H", "--", ".data/history"]).out.trim();
+
+  // "Pushed" means that commit is an ancestor of the LOCALLY CACHED
+  // origin/main ref (updated by this script's own `git fetch` above, and by
+  // ops:auto-commit-push's fetch before every push) — not a fresh network
+  // call here, so this stays a fast, read-only check.
+  let latestGithubPushedAtJst: string | null = null;
+  if (historyCommitSha !== "") {
+    const isAncestor = sh("git", ["merge-base", "--is-ancestor", historyCommitSha, "origin/main"]);
+    if (isAncestor.ok) latestGithubPushedAtJst = latestHistoryCommittedAtJst;
+  }
+
+  const biPublishMarker = readJsonSafe(BI_PUBLISH_MARKER_PATH);
+  const latestCloudflarePublishedAtJst = typeof biPublishMarker?.["published_at_jst"] === "string" ? (biPublishMarker["published_at_jst"] as string) : null;
+
+  let latestD1SyncedAtJst: string | null = null;
+  if (existsSync(resolve(SQLITE_PATH))) {
+    try {
+      const db = new Database(resolve(SQLITE_PATH), { readonly: true, fileMustExist: true });
+      try {
+        const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='market_signal_sync_runs'").get();
+        if (tableExists) {
+          const row = db.prepare("SELECT MAX(finished_at) AS finished_at FROM market_signal_sync_runs WHERE status = 'success'").get() as { finished_at: string | null };
+          latestD1SyncedAtJst = row?.finished_at ?? null;
+        }
+      } finally { db.close(); }
+    } catch { /* sqlite file missing/locked — leave null, not a crash */ }
+  }
+
+  const chatgptMarker = readJsonSafe(CHATGPT_PUBLISH_MARKER_PATH);
+  const latestChatgptDbPublishedAtJst = typeof chatgptMarker?.["published_at_jst"] === "string" ? (chatgptMarker["published_at_jst"] as string) : null;
+
+  const layers: FreshnessLayer[] = [
+    { name: "local_collection", at_jst: latestLocalCollectedAtJst, delay_hours_since_collection: 0 },
+    { name: "history_commit", at_jst: latestHistoryCommittedAtJst, delay_hours_since_collection: hoursSince(latestLocalCollectedAtJst, latestHistoryCommittedAtJst) },
+    { name: "github_push", at_jst: latestGithubPushedAtJst, delay_hours_since_collection: hoursSince(latestLocalCollectedAtJst, latestGithubPushedAtJst) },
+    { name: "cloudflare_publish", at_jst: latestCloudflarePublishedAtJst, delay_hours_since_collection: hoursSince(latestLocalCollectedAtJst, latestCloudflarePublishedAtJst) },
+    { name: "d1_sync", at_jst: latestD1SyncedAtJst, delay_hours_since_collection: hoursSince(latestLocalCollectedAtJst, latestD1SyncedAtJst) },
+    { name: "chatgpt_db_publish", at_jst: latestChatgptDbPublishedAtJst, delay_hours_since_collection: hoursSince(latestLocalCollectedAtJst, latestChatgptDbPublishedAtJst) }
+  ];
+
+  return {
+    latest_local_collected_at_jst: latestLocalCollectedAtJst,
+    latest_history_committed_at_jst: latestHistoryCommittedAtJst,
+    latest_github_pushed_at_jst: latestGithubPushedAtJst,
+    latest_cloudflare_published_at_jst: latestCloudflarePublishedAtJst,
+    latest_d1_synced_at_jst: latestD1SyncedAtJst,
+    latest_chatgpt_db_published_at_jst: latestChatgptDbPublishedAtJst,
+    layers
+  };
+}
+
 async function main(): Promise<void> {
   const runId = `automation_healthcheck_${tsId()}`;
   const alerts: string[] = [];
@@ -134,6 +230,8 @@ async function main(): Promise<void> {
     else if (j.last_exit_code !== null && j.last_exit_code !== 0) alerts.push(`launchd_job_last_exit_nonzero: ${j.label} exit=${j.last_exit_code}`);
   }
 
+  const freshness = computeFreshnessSummary();
+
   const healthy = alerts.length === 0;
   const report = {
     run_id: runId,
@@ -146,6 +244,7 @@ async function main(): Promise<void> {
     unexpected_dirty_files: unexpectedDirty,
     stale_lock_files: staleLocks,
     launchd_jobs: jobs,
+    freshness,
     alerts
   };
 
@@ -159,6 +258,13 @@ async function main(): Promise<void> {
   console.log(`unexpected_dirty_files_count=${unexpectedDirty.length}`);
   console.log(`stale_lock_files_count=${staleLocks.length}`);
   for (const j of jobs) console.log(`launchd:${j.label} loaded=${j.loaded} state=${j.state} last_exit_code=${j.last_exit_code} runs=${j.runs}`);
+  console.log(`latest_local_collected_at_jst=${freshness.latest_local_collected_at_jst}`);
+  console.log(`latest_history_committed_at_jst=${freshness.latest_history_committed_at_jst}`);
+  console.log(`latest_github_pushed_at_jst=${freshness.latest_github_pushed_at_jst}`);
+  console.log(`latest_cloudflare_published_at_jst=${freshness.latest_cloudflare_published_at_jst}`);
+  console.log(`latest_d1_synced_at_jst=${freshness.latest_d1_synced_at_jst}`);
+  console.log(`latest_chatgpt_db_published_at_jst=${freshness.latest_chatgpt_db_published_at_jst}`);
+  for (const layer of freshness.layers) console.log(`freshness_layer:${layer.name} at_jst=${layer.at_jst} delay_hours_since_collection=${layer.delay_hours_since_collection}`);
   console.log(`report_json=${jsonPath}`);
 
   if (!healthy) {
