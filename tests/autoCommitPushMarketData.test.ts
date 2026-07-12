@@ -81,4 +81,16 @@ describe("AUTO-COMMIT-PUSH01 safety", () => {
     expect(SCRIPT_SOURCE).toContain("aborted_concurrent_write_detected");
     expect(SCRIPT_SOURCE).toContain("restaggered_files");
   });
+
+  it("regression: the concurrent-write check must not false-positive on every normal run (git status --porcelain still lists a freshly-staged, unchanged file)", () => {
+    // A file that was just `git add`-ed shows up in `git status --porcelain`
+    // as "M  path" (worktree column = space) until it's committed — that is
+    // NOT a re-modification. Only a SECOND status column that is non-space
+    // (e.g. "MM path", meaning the worktree changed again after staging)
+    // is a genuine concurrent write. The check must read the raw two-column
+    // code, not just "does this path appear in git status --porcelain at all".
+    expect(SCRIPT_SOURCE).toContain("worktreeChangedSinceIndexPaths");
+    expect(SCRIPT_SOURCE).toMatch(/const restaggered = worktreeChangedSinceIndexPaths\(\)/u);
+    expect(SCRIPT_SOURCE).not.toMatch(/const restaggered = porcelainPaths\(\)/u);
+  });
 });

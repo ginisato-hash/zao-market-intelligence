@@ -66,6 +66,16 @@ function numstatDeletions(args: string[]): Array<{ path: string; add: number; de
 function porcelainPaths(): string[] {
   return git(["status", "--porcelain"]).out.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => l.replace(/^\S+\s+/u, ""));
 }
+// Raw (untrimmed) 2-char XY status codes: X = index-vs-HEAD, Y = worktree-vs-index.
+// Needed (not porcelainPaths()) to tell "still staged, unchanged since staging"
+// (Y=' ', completely normal and expected right after git add) apart from
+// "changed again after staging" (Y!==' ', a genuine concurrent write) — a
+// path we just staged always reappears in plain `git status --porcelain`
+// output with Y=' ' until it's committed, so testing mere presence there
+// would false-positive on every single normal run.
+function worktreeChangedSinceIndexPaths(): string[] {
+  return git(["status", "--porcelain"]).out.split("\n").filter((l) => l.length > 3).filter((l) => l[1] !== " ").map((l) => l.slice(3));
+}
 
 function finish(report: Record<string, unknown>): void {
   mkdirSync(resolve(REPORT_DIR), { recursive: true });
@@ -194,7 +204,7 @@ function main(): void {
     // write; this only catches an unrelated concurrent writer (e.g. a
     // different job invoked outside its normal lock) touching the same
     // path a second time mid-run.
-    const restaggered = porcelainPaths().filter((p) => staged.includes(p));
+    const restaggered = worktreeChangedSinceIndexPaths().filter((p) => staged.includes(p));
     if (restaggered.length > 0) {
       report.decision = "aborted_concurrent_write_detected";
       report.restaggered_files = restaggered;
