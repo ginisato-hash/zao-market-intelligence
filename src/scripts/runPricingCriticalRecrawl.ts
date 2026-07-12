@@ -49,7 +49,7 @@ import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppen
 import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } from "../services/crawlThrottlePolicy";
 import { buildPriorityCompetitorTargets, buildOwnPropertyTargets, todayJstIso, type RecrawlTarget } from "../services/priorityRecrawlTargets";
 import { isOwnPropertyName } from "../services/ownPropertyTargets";
-import { buildRefreshPlan, todaysSelectedTargets } from "../services/priorityRefreshTiers";
+import { buildRefreshPlan, roundRobinByGroup, todaysSelectedTargets } from "../services/priorityRefreshTiers";
 import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 
 const HISTORY_DIR = ".data/history";
@@ -214,8 +214,8 @@ async function run(): Promise<void> {
   const ownPlan = buildRefreshPlan(ownTargets.targets, todayIso);
   const selectedCompetitorTargets = todaysSelectedTargets(competitorTargets.targets, todayIso);
   const selectedOwnTargets = todaysSelectedTargets(ownTargets.targets, todayIso);
-  const competitorLiveQueue = bookingOnly(selectedCompetitorTargets);
-  const ownLiveQueue = bookingOnly(selectedOwnTargets);
+  const competitorLiveQueue = roundRobinByGroup(bookingOnly(selectedCompetitorTargets), (t) => t.canonical_property_key);
+  const ownLiveQueue = roundRobinByGroup(bookingOnly(selectedOwnTargets), (t) => t.canonical_property_key);
   const selectedCompetitor = competitorLiveQueue.slice(0, MAX_PAGES_PER_BATCH);
   const selectedOwn = ownLiveQueue.slice(0, MAX_PAGES_PER_BATCH);
 

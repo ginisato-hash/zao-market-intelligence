@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRefreshPlan,
   isSelectedToday,
+  roundRobinByGroup,
   tierForCheckin,
   tierForOffset,
   todaysSelectedTargets
@@ -99,5 +100,72 @@ describe("PRICING-CRITICAL02 - §11.1 tiered refresh SLA (stateless, self-healin
     expect(plan.far_term_selected_today.length).toBeLessThanOrEqual(30);
     expect(plan.mid_term_selected_today.length).toBeGreaterThan(0);
     expect(plan.far_term_selected_today.length).toBeGreaterThan(0);
+  });
+});
+
+describe("KIRAKU-BOOKING-FIX01 - roundRobinByGroup (fair page-cap allocation across properties)", () => {
+  // Reproduces the real 喜らく/Kiraku incident: 44 miuraya + 44 kiraku targets
+  // selected for today, miuraya listed first. A flat slice(0, 8) always took
+  // 8 miuraya entries and zero kiraku — kiraku had ZERO Booking history rows,
+  // ever, despite being a correctly registered own-property Booking target.
+  it("interleaves two equally-sized groups so a flat page-cap slice gets a fair split, not all-of-first-group", () => {
+    const items = [
+      ...Array.from({ length: 44 }, (_, i) => ({ canonical_property_key: "miuraya", checkin: `day-${i}` })),
+      ...Array.from({ length: 44 }, (_, i) => ({ canonical_property_key: "kiraku", checkin: `day-${i}` }))
+    ];
+    const rr = roundRobinByGroup(items, (t) => t.canonical_property_key);
+    const first8 = rr.slice(0, 8).map((t) => t.canonical_property_key);
+    expect(first8).toEqual(["miuraya", "kiraku", "miuraya", "kiraku", "miuraya", "kiraku", "miuraya", "kiraku"]);
+    // Every property gets a page every run — not merely "eventually".
+    expect(first8.filter((k) => k === "kiraku")).toHaveLength(4);
+    expect(first8.filter((k) => k === "miuraya")).toHaveLength(4);
+  });
+
+  it("preserves each group's own internal (chronological) order", () => {
+    const items = [
+      { canonical_property_key: "miuraya", checkin: "2026-07-14" },
+      { canonical_property_key: "miuraya", checkin: "2026-07-15" },
+      { canonical_property_key: "kiraku", checkin: "2026-07-14" },
+      { canonical_property_key: "kiraku", checkin: "2026-07-15" }
+    ];
+    const rr = roundRobinByGroup(items, (t) => t.canonical_property_key);
+    const kirakuOrder = rr.filter((t) => t.canonical_property_key === "kiraku").map((t) => t.checkin);
+    expect(kirakuOrder).toEqual(["2026-07-14", "2026-07-15"]);
+  });
+
+  it("an uneven group split (e.g. 3 competitors) still gives every group a turn before any group gets a second page", () => {
+    const items = [
+      ...Array.from({ length: 30 }, (_, i) => ({ canonical_property_key: "hammond", checkin: `d${i}` })),
+      ...Array.from({ length: 30 }, (_, i) => ({ canonical_property_key: "oakhill", checkin: `d${i}` })),
+      ...Array.from({ length: 30 }, (_, i) => ({ canonical_property_key: "yoshidaya", checkin: `d${i}` }))
+    ];
+    const rr = roundRobinByGroup(items, (t) => t.canonical_property_key);
+    const first9 = rr.slice(0, 9).map((t) => t.canonical_property_key);
+    expect(new Set(first9.slice(0, 3))).toEqual(new Set(["hammond", "oakhill", "yoshidaya"]));
+    expect(first9.filter((k) => k === "hammond")).toHaveLength(3);
+    expect(first9.filter((k) => k === "oakhill")).toHaveLength(3);
+    expect(first9.filter((k) => k === "yoshidaya")).toHaveLength(3);
+  });
+
+  it("when one group is exhausted, the remaining groups keep filling subsequent slots (no gaps, no crash)", () => {
+    const items = [
+      { canonical_property_key: "a", checkin: "d0" },
+      { canonical_property_key: "b", checkin: "d0" },
+      { canonical_property_key: "b", checkin: "d1" },
+      { canonical_property_key: "b", checkin: "d2" }
+    ];
+    const rr = roundRobinByGroup(items, (t) => t.canonical_property_key);
+    expect(rr.map((t) => `${t.canonical_property_key}:${t.checkin}`)).toEqual(["a:d0", "b:d0", "b:d1", "b:d2"]);
+  });
+
+  it("total item count is preserved and no item is duplicated or dropped", () => {
+    const items = Array.from({ length: 173 }, (_, i) => ({ canonical_property_key: `g${i % 5}`, checkin: `d${i}` }));
+    const rr = roundRobinByGroup(items, (t) => t.canonical_property_key);
+    expect(rr).toHaveLength(items.length);
+    expect(new Set(rr.map((t) => t.checkin)).size).toBe(items.length);
+  });
+
+  it("empty input returns empty output", () => {
+    expect(roundRobinByGroup([], () => "x")).toEqual([]);
   });
 });

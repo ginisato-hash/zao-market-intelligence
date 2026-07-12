@@ -90,4 +90,33 @@ export function todaysSelectedTargets<T extends { checkin: string }>(targets: re
   return [...plan.near_term, ...plan.mid_term_selected_today, ...plan.far_term_selected_today];
 }
 
+// KIRAKU-BOOKING-FIX01 (2026-07-13): a live-collect queue built from several
+// properties' target lists concatenated in a fixed order, then truncated by a
+// flat `.slice(0, pageCap)`, lets a property listed earlier permanently starve
+// one listed later whenever pageCap is smaller than one property's own
+// near-term date count — exactly what happened to 喜らく/Kiraku (own-property
+// Booking targeting, listed second after 三浦屋/Miuraya in
+// OWN_PROPERTY_TARGETS): it had ZERO Booking history rows, ever, despite being
+// a correctly registered, verified, enabled-for-live target. Re-interleaving
+// round-robin by group BEFORE the page-cap slice guarantees every group gets
+// a turn each run — general fix, not specific to any one property.
+export function roundRobinByGroup<T>(items: readonly T[], groupKeyOf: (item: T) => string): T[] {
+  const buckets = new Map<string, T[]>();
+  const groupOrder: string[] = [];
+  for (const item of items) {
+    const key = groupKeyOf(item);
+    let bucket = buckets.get(key);
+    if (bucket === undefined) { bucket = []; buckets.set(key, bucket); groupOrder.push(key); }
+    bucket.push(item);
+  }
+  const result: T[] = [];
+  for (let i = 0; result.length < items.length; i += 1) {
+    for (const key of groupOrder) {
+      const bucket = buckets.get(key)!;
+      if (i < bucket.length) result.push(bucket[i]!);
+    }
+  }
+  return result;
+}
+
 export type { RecrawlTarget };
