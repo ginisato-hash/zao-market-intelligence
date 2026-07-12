@@ -33,10 +33,32 @@ const TWO_BED_RE = /シングルベッド\s*[2２]\s*台|シングルベッド\s
 const DOUBLE_BED_RE = /ダブルベッド|ダブルサイズベッド|double\s+bed|queen\s+bed|king\s+bed/u;
 const OCCUPANCY_RE = /大人\s*[2２]\s*名|[2２]\s*名様|2\s*adults|two\s+adults/u;
 // A room-name-like phrase ending in a room keyword (bounded length).
-const ROOM_NAME_RE = /[^\s。、,，\n|/]{0,28}?(?:ルーム|ROOM|room|和室|洋室|スイート|suite)/u;
+// Excludes "...バスルーム" (bathroom, a room FEATURE listed in the amenities
+// block — e.g. 共用バスルーム/専用バスルーム, "shared/private bathroom" — not a
+// room TYPE): otherwise, once lastMatch() prefers the match closest to the
+// price (see KIRAKU-BOOKING-FIX01 below), a bathroom amenity mention sitting
+// between the real room name and the price would incorrectly outrank it.
+const ROOM_NAME_RE = /[^\s。、,，\n|/]{0,28}?(?:(?<!バス)ルーム|ROOM|room|和室|洋室|スイート|suite)/u;
 
 function clip(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) : text;
+}
+
+// KIRAKU-BOOKING-FIX01 (2026-07-13): a bounded window necessarily reaches back
+// far enough to sometimes ALSO contain an earlier, unrelated match — e.g. a
+// property-amenity badge ("人気施設・設備 ... ファミリールーム", a generic "this
+// hotel HAS family rooms" tag, not tied to any price) sitting ~200 chars before
+// the actual room card. A plain (non-global) regex .exec() returns the FIRST
+// match scanning left-to-right, i.e. the FARTHEST one from the price — exactly
+// backwards, since the window is built precisely because "the room name
+// immediately precedes the price" (see priceWindow below). Taking the LAST
+// match in the window instead reliably picks the one closest to (and just
+// before) the price. General fix: applies to room name, bed hint, and
+// occupancy hint uniformly, for every property, not a Kiraku-specific patch.
+function lastMatch(re: RegExp, text: string): RegExpMatchArray | null {
+  const global = new RegExp(re, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+  const matches = [...text.matchAll(global)];
+  return matches.length > 0 ? matches[matches.length - 1]! : null;
 }
 
 // Build a bounded text window around the chosen price. Room cards put the room
@@ -73,9 +95,9 @@ export function extractBookingRoomContextAroundPrice(input: {
   const window = priceWindow(body, input.priceRawText, input.contextBeforeAfter).replace(/\s+/gu, " ").trim();
   if (window === "") return { ...EMPTY };
 
-  const bed = TWO_BED_RE.exec(window) ?? DOUBLE_BED_RE.exec(window);
-  const occupancy = OCCUPANCY_RE.exec(window);
-  const roomName = ROOM_NAME_RE.exec(window);
+  const bed = lastMatch(TWO_BED_RE, window) ?? lastMatch(DOUBLE_BED_RE, window);
+  const occupancy = lastMatch(OCCUPANCY_RE, window);
+  const roomName = lastMatch(ROOM_NAME_RE, window);
 
   return {
     primaryRoomName: roomName ? roomName[0].trim() : "",

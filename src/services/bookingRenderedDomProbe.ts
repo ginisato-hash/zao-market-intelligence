@@ -393,13 +393,24 @@ export function classifyBookingRenderedDom(signals: BookingRenderedDomSignals): 
   if (signals.soldOutOrUnavailableDetected && signals.primaryPriceCandidate === null) {
     return "booking_rendered_sold_out_or_unavailable";
   }
+  // KIRAKU-BOOKING-FIX01 (2026-07-13): nightCountDetected (a literal "1泊" text
+  // match) is NOT required here — live verification against 喜らく/ホテル喜らく's
+  // real Booking page found it never renders that label at all (the search
+  // widget shows only the "7月14日(火) — 7月15日(水)" date range, no separate
+  // night-count text), while an otherwise fully-verified, room-confirmed,
+  // correctly-priced observation was being discarded solely because of this
+  // absent, redundant label. checkinDetected + checkoutDetected already confirm
+  // the SPECIFIC target date range is present — two adjacent calendar dates a
+  // day apart IS a 1-night stay, a strictly stronger check than a generic "1泊"
+  // text match. signals.nightCountDetected is kept (still computed, still
+  // reported in the CSV/report for diagnostics) — just no longer a blocking
+  // gate. General fix: this Booking UI variance is not specific to Kiraku.
   if (
     signals.propertyNameDetected &&
     signals.checkinDetected &&
     signals.checkoutDetected &&
     signals.adultCountDetected &&
     signals.roomCountDetected &&
-    signals.nightCountDetected &&
     signals.jpyCurrencyDetected &&
     signals.primaryPriceCandidate !== null
   ) {
