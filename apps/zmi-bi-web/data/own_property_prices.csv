@@ -68,6 +68,7 @@ date,checkin,property_key,property_name,source,own_price_min,own_price_median,ow
 2026-07-13,2026-07-22,kiraku,ホテル喜らく,booking,11810,11810,11810,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T06:00:06+09:00
 2026-06-25,2026-07-22,miuraya,三浦屋,jalan,15120,16800,16800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-25T20:00:05+09:00
 2026-07-12,2026-07-22,miuraya,三浦屋,booking,10418,13023,13023,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T14:00:01+09:00
+2026-07-13,2026-07-23,kiraku,ホテル喜らく,booking,12883,12883,12883,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T08:00:06+09:00
 2026-06-28,2026-07-23,miuraya,三浦屋,jalan,13305,16800,17472,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-28T16:00:06+09:00
 2026-07-12,2026-07-23,miuraya,三浦屋,booking,10418,13023,13023,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T16:00:06+09:00
 2026-06-24,2026-07-24,miuraya,三浦屋,jalan,17800,17800,17800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-24T14:00:06+09:00
@@ -82,6 +83,7 @@ date,checkin,property_key,property_name,source,own_price_min,own_price_median,ow
 2026-06-29,2026-07-29,miuraya,三浦屋,jalan,15928,15928,15928,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-29T14:00:05+09:00
 2026-07-12,2026-07-29,miuraya,三浦屋,booking,11224,11224,15590,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T14:00:01+09:00
 2026-07-12,2026-07-30,miuraya,三浦屋,booking,11565,12472,15590,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T20:00:06+09:00
+2026-07-13,2026-07-31,kiraku,ホテル喜らく,booking,13359,13359,13359,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T08:00:06+09:00
 2026-07-12,2026-07-31,miuraya,三浦屋,booking,13686,13686,19008,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T22:00:06+09:00
 2026-06-29,2026-08-01,miuraya,三浦屋,jalan,19184,21472,21800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-29T12:00:02+09:00
 2026-07-12,2026-08-01,miuraya,三浦屋,booking,17266,17956,22445,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T04:00:06+09:00
@@ -89,7 +91,7 @@ date,checkin,property_key,property_name,source,own_price_min,own_price_median,ow
 2026-07-12,2026-08-03,miuraya,三浦屋,booking,10418,11576,11576,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T16:00:06+09:00
 2026-07-13,2026-08-04,miuraya,三浦屋,booking,11576,11576,11576,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T04:00:06+09:00
 2026-07-13,2026-08-05,miuraya,三浦屋,booking,10418,10418,11576,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T02:00:06+09:00
-2026-07-12,2026-08-06,miuraya,三浦屋,booking,10418,10418,10418,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T08:00:06+09:00
+2026-07-13,2026-08-06,miuraya,三浦屋,booking,10418,10418,11576,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T08:00:06+09:00
 2026-07-13,2026-08-07,miuraya,三浦屋,booking,14098,14098,14098,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T06:00:06+09:00
 2026-06-29,2026-08-08,miuraya,三浦屋,jalan,21472,22528,26800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-29T20:00:06+09:00
 2026-07-12,2026-08-08,miuraya,三浦屋,booking,19103,20130,20130,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-12T23:49:00+09:00
@@ -100,7 +102,7 @@ date,checkin,property_key,property_name,source,own_price_min,own_price_median,ow
 2026-06-28,2026-08-10,miuraya,三浦屋,jalan,21824,23840,24800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-28T04:00:06+09:00
 2026-07-13,2026-08-11,miuraya,三浦屋,booking,17677,22770,22770,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T04:00:06+09:00
 2026-06-28,2026-08-11,miuraya,三浦屋,jalan,21824,24544,24800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-28T06:00:05+09:00
-2026-06-15,2026-08-12,miuraya,三浦屋,booking,21120,21120,21120,probable_two_person_standard_room,assumed_room_only,medium,critical,2026-06-15T20:00:05+09:00
+2026-07-13,2026-08-12,miuraya,三浦屋,booking,17088,21120,21120,confirmed_two_person_standard_room,assumed_room_only,high,critical,2026-07-13T08:00:06+09:00
 2026-06-28,2026-08-12,miuraya,三浦屋,jalan,21824,22528,24800,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-28T06:00:05+09:00
 2026-06-15,2026-08-13,miuraya,三浦屋,booking,23925,23925,23925,probable_two_person_standard_room,assumed_room_only,medium,critical,2026-06-15T20:00:05+09:00
 2026-06-30,2026-08-13,miuraya,三浦屋,jalan,21824,24800,25520,confirmed_two_person_standard_room,confirmed_room_only,high,critical,2026-06-30T00:00:01+09:00
