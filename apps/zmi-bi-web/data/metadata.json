@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-07-15T23:10:06+09:00",
-  "latest_collected_at_jst": "2026-07-15T22:00:05+09:00",
-  "history_rows_total": 18033,
-  "latest_observation_rows": 2130,
-  "unified_rows": 1767,
-  "unified_rows_before_retention": 1767,
+  "generated_at_jst": "2026-07-16T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-07-16T00:00:01+09:00",
+  "history_rows_total": 18084,
+  "latest_observation_rows": 2134,
+  "unified_rows": 1768,
+  "unified_rows_before_retention": 1770,
   "distinct_properties": 29,
-  "distinct_checkins": 130,
+  "distinct_checkins": 129,
   "sources_included": [
     "booking",
     "jalan",
@@ -14,11 +14,10 @@
   ],
   "data_policy": "ZMI history only. All sources unified. No external data.",
   "period_retention_policy": "current_or_next_period_plus_3_previous_periods_and_all_future_periods",
-  "current_period_key_jst": "2026-07_early",
-  "default_period_key": "2026-07_early",
+  "current_period_key_jst": "2026-07_late",
+  "default_period_key": "2026-07_late",
   "retention_previous_periods": 3,
   "retained_period_keys": [
-    "2026-05_late",
     "2026-06_early",
     "2026-06_late",
     "2026-07_early",
@@ -38,27 +37,27 @@
     "2027-02_early",
     "2027-02_late"
   ],
-  "dropped_past_period_keys_count": 0,
-  "dropped_past_rows_count": 0,
+  "dropped_past_period_keys_count": 1,
+  "dropped_past_rows_count": 2,
   "availability_breakdown": {
-    "total": 1767,
-    "available": 1455,
-    "sold_out": 137,
+    "total": 1768,
+    "available": 1460,
+    "sold_out": 135,
     "not_found": 1,
-    "excluded": 174,
-    "ota_unavailable_rate": 0.0861,
-    "data_missing_rate": 0.099,
-    "data_reliability_rate": 0.901
+    "excluded": 172,
+    "ota_unavailable_rate": 0.0846,
+    "data_missing_rate": 0.0979,
+    "data_reliability_rate": 0.9021
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 1889,
+  "price_movement_rows": 1893,
   "dp_pressure_rows": 83,
-  "price_movement_own_property_rows": 2214,
-  "price_movement_latest_collected_at_jst": "2026-07-15T22:00:05+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-07-15T22:00:05+09:00",
+  "price_movement_own_property_rows": 2221,
+  "price_movement_latest_collected_at_jst": "2026-07-16T00:00:01+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-07-16T00:00:01+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 14994,
-  "own_kiraku_price": 16938,
+  "own_miuraya_price": 25000,
+  "own_kiraku_price": 13335,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -73,13 +72,13 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 0.5111,
+      "coverage_90d": 0.5,
       "status": "critical"
     },
     {
       "property": "kiraku",
       "coverage_30d": 1,
-      "coverage_90d": 0.5889,
+      "coverage_90d": 0.5778,
       "status": "critical"
     }
   ],
@@ -87,24 +86,24 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.4556,
+      "coverage_90d": 0.4444,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.4,
-      "status": "warning"
+      "coverage_90d": 0.3889,
+      "status": "critical"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.5222,
+      "coverage_90d": 0.5111,
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 2734,
-  "priority_competitor_vs_own_price_gap": 2734,
+  "competitor_vs_own_price_gap": -2221,
+  "priority_competitor_vs_own_price_gap": -2221,
   "priority_competitor_price_changes_count": 120,
-  "own_property_price_changes_count": 66
+  "own_property_price_changes_count": 67
 }
