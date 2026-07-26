@@ -21,6 +21,7 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-07-24,11393,13
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-07-26,12699,12852,153,0.012,up,2026-07-24T13:35:02+09:00,2026-07-25T13:35:05+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-07-28,11906,11359,-547,-0.0459,down,2026-07-25T13:35:05+09:00,2026-07-26T13:35:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-07-30,14596,13535,-1061,-0.0727,down,2026-07-25T10:00:06+09:00,2026-07-26T10:00:06+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-07-31,15491,17213,1722,0.1112,up,2026-07-25T12:00:06+09:00,2026-07-27T06:00:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-01,18192,16869,-1323,-0.0727,down,2026-07-25T02:00:06+09:00,2026-07-26T10:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-01,24710,22239,-2471,-0.1,down,2026-07-24T10:00:06+09:00,2026-07-26T08:00:03+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-02,14094,13311,-783,-0.0556,down,2026-07-26T00:00:01+09:00,2026-07-27T00:00:01+09:00
@@ -39,6 +40,7 @@ own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-11,24800,21824,-2976,-0.1
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-12,30970,30077,-893,-0.0288,down,2026-07-25T16:00:06+09:00,2026-07-26T18:00:04+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-12,22185,24650,2465,0.1111,up,2026-07-25T04:00:06+09:00,2026-07-26T04:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-12,24800,21824,-2976,-0.12,down,2026-06-25T04:00:01+09:00,2026-06-28T06:00:05+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-13,22185,24650,2465,0.1111,up,2026-07-26T06:00:05+09:00,2026-07-27T06:00:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-14,27688,31732,4044,0.1461,up,2026-07-25T20:00:06+09:00,2026-07-26T20:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-14,24800,21824,-2976,-0.12,down,2026-06-25T08:00:06+09:00,2026-06-29T08:00:05+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-15,26844,26104,-740,-0.0276,down,2026-07-25T18:00:06+09:00,2026-07-26T20:00:06+09:00
