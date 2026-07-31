@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-07-31T23:10:06+09:00",
-  "latest_collected_at_jst": "2026-07-31T22:00:06+09:00",
-  "history_rows_total": 27760,
-  "latest_observation_rows": 2904,
-  "unified_rows": 2298,
-  "unified_rows_before_retention": 2300,
+  "generated_at_jst": "2026-08-01T01:10:06+09:00",
+  "latest_collected_at_jst": "2026-08-01T00:00:02+09:00",
+  "history_rows_total": 27796,
+  "latest_observation_rows": 2908,
+  "unified_rows": 2254,
+  "unified_rows_before_retention": 2302,
   "distinct_properties": 29,
-  "distinct_checkins": 142,
+  "distinct_checkins": 128,
   "sources_included": [
     "booking",
     "jalan",
@@ -14,11 +14,10 @@
   ],
   "data_policy": "ZMI history only. All sources unified. No external data.",
   "period_retention_policy": "current_or_next_period_plus_3_previous_periods_and_all_future_periods",
-  "current_period_key_jst": "2026-07_late",
-  "default_period_key": "2026-07_late",
+  "current_period_key_jst": "2026-08_early",
+  "default_period_key": "2026-08_early",
   "retention_previous_periods": 3,
   "retained_period_keys": [
-    "2026-06_early",
     "2026-06_late",
     "2026-07_early",
     "2026-07_late",
@@ -37,27 +36,27 @@
     "2027-02_early",
     "2027-02_late"
   ],
-  "dropped_past_period_keys_count": 1,
-  "dropped_past_rows_count": 2,
+  "dropped_past_period_keys_count": 2,
+  "dropped_past_rows_count": 48,
   "availability_breakdown": {
-    "total": 2298,
-    "available": 1871,
-    "sold_out": 218,
-    "not_found": 2,
-    "excluded": 207,
-    "ota_unavailable_rate": 0.1044,
-    "data_missing_rate": 0.0909,
-    "data_reliability_rate": 0.9091
+    "total": 2254,
+    "available": 1855,
+    "sold_out": 193,
+    "not_found": 1,
+    "excluded": 205,
+    "ota_unavailable_rate": 0.0942,
+    "data_missing_rate": 0.0914,
+    "data_reliability_rate": 0.9086
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 2609,
+  "price_movement_rows": 2613,
   "dp_pressure_rows": 100,
-  "price_movement_own_property_rows": 3548,
-  "price_movement_latest_collected_at_jst": "2026-07-31T22:00:06+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-07-31T22:00:06+09:00",
+  "price_movement_own_property_rows": 3552,
+  "price_movement_latest_collected_at_jst": "2026-08-01T00:00:02+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-08-01T00:00:02+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 22185,
-  "own_kiraku_price": 16422,
+  "own_kiraku_price": 18872,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -71,14 +70,14 @@
   "own_property_coverage_status": [
     {
       "property": "miuraya",
-      "coverage_30d": 1,
-      "coverage_90d": 0.4889,
+      "coverage_30d": 0.9667,
+      "coverage_90d": 0.4778,
       "status": "critical"
     },
     {
       "property": "kiraku",
-      "coverage_30d": 1,
-      "coverage_90d": 0.6,
+      "coverage_30d": 0.9667,
+      "coverage_90d": 0.5889,
       "status": "critical"
     }
   ],
@@ -91,19 +90,19 @@
     },
     {
       "property": "oakhill",
-      "coverage_30d": 1,
-      "coverage_90d": 0.5111,
-      "status": "warning"
+      "coverage_30d": 0.9667,
+      "coverage_90d": 0.5,
+      "status": "critical"
     },
     {
       "property": "yoshidaya",
-      "coverage_30d": 1,
-      "coverage_90d": 0.6,
-      "status": "warning"
+      "coverage_30d": 0.9667,
+      "coverage_90d": 0.5889,
+      "status": "critical"
     }
   ],
-  "competitor_vs_own_price_gap": -839,
-  "priority_competitor_vs_own_price_gap": -839,
+  "competitor_vs_own_price_gap": 1252,
+  "priority_competitor_vs_own_price_gap": 1252,
   "priority_competitor_price_changes_count": 127,
   "own_property_price_changes_count": 63
 }
