@@ -1,7 +1,7 @@
 {
-  "generated_at_jst": "2026-08-06T13:37:49+09:00",
-  "latest_collected_at_jst": "2026-08-06T13:35:06+09:00",
-  "history_rows_total": 30632,
+  "generated_at_jst": "2026-08-06T15:10:06+09:00",
+  "latest_collected_at_jst": "2026-08-06T14:00:06+09:00",
+  "history_rows_total": 30668,
   "latest_observation_rows": 3070,
   "unified_rows": 2380,
   "unified_rows_before_retention": 2428,
@@ -51,12 +51,12 @@
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
   "price_movement_rows": 2755,
   "dp_pressure_rows": 108,
-  "price_movement_own_property_rows": 3936,
-  "price_movement_latest_collected_at_jst": "2026-08-06T13:35:06+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-08-06T13:35:06+09:00",
+  "price_movement_own_property_rows": 3940,
+  "price_movement_latest_collected_at_jst": "2026-08-06T14:00:06+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-08-06T14:00:06+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 16548,
-  "own_kiraku_price": 17947,
+  "own_miuraya_price": 22185,
+  "own_kiraku_price": 15086,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -101,8 +101,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 5061,
-  "priority_competitor_vs_own_price_gap": 5061,
-  "priority_competitor_price_changes_count": 135,
-  "own_property_price_changes_count": 64
+  "competitor_vs_own_price_gap": 3145,
+  "priority_competitor_vs_own_price_gap": 3145,
+  "priority_competitor_price_changes_count": 134,
+  "own_property_price_changes_count": 63
 }
