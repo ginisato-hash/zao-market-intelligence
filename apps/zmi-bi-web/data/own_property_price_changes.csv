@@ -33,15 +33,15 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-08,21107,22
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-08,23945,26605,2660,0.1111,up,2026-08-06T13:35:06+09:00,2026-08-07T13:35:07+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-09,24800,21824,-2976,-0.12,down,2026-06-26T02:00:05+09:00,2026-06-28T04:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-09,24650,22185,-2465,-0.1,down,2026-08-07T13:35:07+09:00,2026-08-08T13:35:05+09:00
-own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-10,25793,24565,-1228,-0.0476,down,2026-08-07T06:00:05+09:00,2026-08-08T06:00:04+09:00
-own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-10,25636,23072,-2564,-0.1,down,2026-08-07T13:35:07+09:00,2026-08-08T13:35:05+09:00
+own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-10,24565,24395,-170,-0.0069,down,2026-08-08T06:00:04+09:00,2026-08-09T13:35:06+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-10,23072,25636,2564,0.1111,up,2026-08-08T13:35:05+09:00,2026-08-09T13:35:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-10,24800,21824,-2976,-0.12,down,2026-06-26T02:00:05+09:00,2026-06-28T04:00:06+09:00
-own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-11,28739,29920,1181,0.0411,up,2026-08-07T08:00:04+09:00,2026-08-08T08:00:03+09:00
-own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-11,24650,22185,-2465,-0.1,down,2026-08-07T13:35:07+09:00,2026-08-08T13:35:05+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-11,22185,24650,2465,0.1111,up,2026-08-08T13:35:05+09:00,2026-08-09T13:35:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-11,24800,21824,-2976,-0.12,down,2026-06-25T04:00:01+09:00,2026-06-28T06:00:05+09:00
-own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-12,30345,25993,-4352,-0.1434,down,2026-08-07T02:00:03+09:00,2026-08-08T08:00:03+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-12,22185,24650,2465,0.1111,up,2026-08-08T13:35:05+09:00,2026-08-09T13:35:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-12,24800,21824,-2976,-0.12,down,2026-06-25T04:00:01+09:00,2026-06-28T06:00:05+09:00
-own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-14,22185,24650,2465,0.1111,up,2026-08-07T02:00:03+09:00,2026-08-08T12:00:05+09:00
+own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-13,26835,25615,-1220,-0.0455,down,2026-08-08T10:00:06+09:00,2026-08-09T13:35:06+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-13,22185,24650,2465,0.1111,up,2026-08-08T02:00:05+09:00,2026-08-09T13:35:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-14,24800,21824,-2976,-0.12,down,2026-06-25T08:00:06+09:00,2026-06-29T08:00:05+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-15,21219,20040,-1179,-0.0556,down,2026-08-07T12:00:05+09:00,2026-08-08T12:00:05+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-16,15921,14492,-1429,-0.0898,down,2026-08-07T08:00:04+09:00,2026-08-08T14:00:06+09:00
@@ -50,7 +50,6 @@ own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-16,15576,20010,4434,0.284
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-18,12606,11906,-700,-0.0555,down,2026-08-07T12:00:05+09:00,2026-08-08T16:00:04+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-20,11758,13015,1257,0.1069,up,2026-08-07T18:00:06+09:00,2026-08-08T18:00:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-21,15086,16269,1183,0.0784,up,2026-08-07T16:00:06+09:00,2026-08-08T20:00:06+09:00
-own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-21,16371,18190,1819,0.1111,up,2026-08-07T06:00:05+09:00,2026-08-08T12:00:05+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-22,17248,18686,1438,0.0834,up,2026-08-07T18:00:06+09:00,2026-08-08T20:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-22,17952,23055,5103,0.2843,up,2026-06-28T18:00:05+09:00,2026-07-19T04:00:02+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,jalan,2026-08-23,17982,17820,-162,-0.009,down,2026-07-19T00:00:02+09:00,2026-07-20T02:00:06+09:00
