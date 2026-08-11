@@ -37,8 +37,21 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  APPEND_ONLY_PREFIXES,
+  TRUSTED_MARKET_DATA_PREFIXES,
+  evaluateTrustedMarketDataCommit,
+  isTrustedMarketDataPath,
+  observationShardPaths,
+  type FileSizeEntry,
+  type NumstatEntry
+} from "../services/marketDataCommitPolicy";
 
-const ALLOWED_PREFIXES = [".data/history/", "apps/zmi-bi-web/data/"];
+// AUTO-COMMIT-PUSH03 (2026-08-12): .data/market-observations/ joined the
+// trusted set. The allowlist, the append-only deletion guard, an observation
+// schema check, and a file-size bound all live in marketDataCommitPolicy.ts
+// so the boundary is unit-testable rather than inlined here.
+const STAGE_PATHS = [...TRUSTED_MARKET_DATA_PREFIXES].map((p) => p.replace(/\/$/u, ""));
 const REPORT_DIR = ".data/reports/automation";
 const LOCK_PATH = ".data/locks/auto_commit_push.lock";
 const LOCK_STALE_MS = 30 * 60 * 1000; // 30m — this script should always finish in well under a minute.
@@ -55,13 +68,29 @@ function git(args: string[]): CmdResult {
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 function isAllowed(path: string): boolean {
-  return ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return isTrustedMarketDataPath(path);
 }
-function numstatDeletions(args: string[]): Array<{ path: string; add: number; del: number }> {
+function numstatEntries(args: string[]): NumstatEntry[] {
   return git(args).out.split("\n").filter(Boolean).map((l) => {
     const [add, del, path] = l.split("\t");
     return { path: path ?? "", add: Number(add ?? 0), del: Number(del ?? 0) };
-  }).filter((r) => r.del > 0);
+  });
+}
+
+// Header line of a staged file as it will be COMMITTED (index content, not the
+// worktree) — schema validation must judge exactly what goes to the remote.
+function stagedHeaderLine(path: string): string | null {
+  const r = git(["show", `:${path}`]);
+  if (!r.ok) return null;
+  const first = r.out.split(/\r?\n/u)[0];
+  return first === undefined || first === "" ? null : first;
+}
+
+function stagedFileSizes(paths: readonly string[]): FileSizeEntry[] {
+  return paths.map((path) => {
+    const r = git(["cat-file", "-s", `:${path}`]);
+    return { path, bytes: r.ok ? Number(r.out.trim() || "0") : 0 };
+  });
 }
 function porcelainPaths(): string[] {
   return git(["status", "--porcelain"]).out.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => l.replace(/^\S+\s+/u, ""));
@@ -172,26 +201,41 @@ function main(): void {
       return;
     }
 
-    const unstagedDeletions = numstatDeletions(["diff", "--numstat", "--", ".data/history/"]);
+    // Append-only guard across EVERY append-only store (.data/history AND
+    // .data/market-observations) — a deletion in the observation store is
+    // exactly as disqualifying as one in history.
+    const unstagedDeletions = numstatEntries(["diff", "--numstat", "--", ...APPEND_ONLY_PREFIXES]).filter((e) => e.del > 0);
     if (unstagedDeletions.length > 0) {
-      report.decision = "aborted_history_deletion_detected";
-      report.history_deletions = unstagedDeletions;
+      report.decision = "aborted_append_only_deletion_detected";
+      report.append_only_deletions = unstagedDeletions;
       finish(report);
       process.exitCode = 1;
       return;
     }
 
-    git(["add", "--", ".data/history", "apps/zmi-bi-web/data"]);
+    git(["add", "--", ...STAGE_PATHS]);
     const staged = git(["diff", "--cached", "--name-only"]).out.split("\n").map((l) => l.trim()).filter(Boolean);
     report.staged_files = staged;
 
-    const unexpectedStaged = staged.filter((p) => !isAllowed(p));
-    const stagedDeletions = numstatDeletions(["diff", "--cached", "--numstat", "--", ".data/history/"]);
-    if (unexpectedStaged.length > 0 || stagedDeletions.length > 0) {
-      report.decision = unexpectedStaged.length > 0 ? "aborted_unexpected_staged_files" : "aborted_staged_history_deletion_detected";
-      report.unexpected_staged_files = unexpectedStaged;
-      report.staged_history_deletions = stagedDeletions;
-      git(["restore", "--staged", "--", ".data/history", "apps/zmi-bi-web/data"]);
+    // All four trusted-market-data rules, applied to exactly what would be
+    // committed (index content): path allowlist, append-only, observation
+    // schema (header presence + columns + order), and file-size bound.
+    const observationShards = observationShardPaths(staged);
+    const verdict = evaluateTrustedMarketDataCommit({
+      paths: staged,
+      numstat: numstatEntries(["diff", "--cached", "--numstat", "--", ...APPEND_ONLY_PREFIXES]),
+      observationHeaders: new Map(observationShards.map((p) => [p, stagedHeaderLine(p)])),
+      fileSizes: stagedFileSizes(staged)
+    });
+    report.observation_shards_staged = observationShards;
+    report.commit_policy_decision = verdict.decision;
+    if (!verdict.ok) {
+      report.decision = verdict.decision;
+      report.unexpected_staged_files = verdict.forbidden;
+      report.staged_append_only_violations = verdict.appendOnlyViolations;
+      report.observation_schema_problems = verdict.schemaProblems;
+      report.oversized_staged_files = verdict.oversized;
+      git(["restore", "--staged", "--", ...STAGE_PATHS]);
       finish(report);
       process.exitCode = 1;
       return;
@@ -208,14 +252,14 @@ function main(): void {
     if (restaggered.length > 0) {
       report.decision = "aborted_concurrent_write_detected";
       report.restaggered_files = restaggered;
-      git(["restore", "--staged", "--", ".data/history", "apps/zmi-bi-web/data"]);
+      git(["restore", "--staged", "--", ...STAGE_PATHS]);
       finish(report);
       process.exitCode = 1;
       return;
     }
 
     const historyStat = git(["diff", "--cached", "--stat", "--", ".data/history/"]).out.trim();
-    const commit = git(["commit", "-m", `Auto-commit market data (${jstNow()})\n\nAutomated by ops:auto-commit-push (AUTO-COMMIT-PUSH01) after a scheduled\ncollection run appended new observations. Data-only: .data/history + apps/zmi-bi-web/data.\n`]);
+    const commit = git(["commit", "-m", `Auto-commit market data (${jstNow()})\n\nAutomated by ops:auto-commit-push after a scheduled collection run appended\nnew observations. Data-only: .data/history + apps/zmi-bi-web/data +\n.data/market-observations.\n`]);
     report.commit_ok = commit.ok;
     report.commit_output = commit.out;
     report.history_stat = historyStat;

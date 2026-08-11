@@ -46,10 +46,21 @@ import { appendMarketObservations } from "../services/marketObservationAppend";
 import { buildAdjacentTransitionPairs, generateBinaryTransition, generateNumericInventoryTransition, generatePriceTransition } from "../services/marketObservationTransitions";
 import { assessDataQuality } from "../services/marketObservationQuality";
 import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } from "../services/crawlThrottlePolicy";
+import {
+  acquireCollectorLock,
+  createRunDeadline,
+  releaseCollectorLock,
+  type RunDeadline
+} from "../services/collectorRunLock";
 
 const DEBUG_ROOT = ".data/debug/core-competitor-repeated-observation";
 const OUT_DIR = ".data/reports/market-observation";
 const OBSERVATIONS_DIR = ".data/market-observations";
+// PART B1 production-schedule guards. launchd has no "skip if still running"
+// key for calendar jobs, so overlap exclusion and the wall-clock budget are
+// both enforced in-process (see collectorRunLock.ts).
+const LOCK_PATH = ".data/locks/core_competitor_observation.lock";
+const RUN_TIMEOUT_MS = Number(process.env["ZMI_CORE_COMPETITOR_TIMEOUT_MS"] ?? "") || 45 * 60 * 1000;
 const USER_AGENT = "Mozilla/5.0 (compatible; zao-market-intelligence-market-observation/0.1; low-volume bounded)";
 // Fixed, identical every run (§10) — the SAME horizon length regardless of
 // when the script fires, never "today D+90, this evening D+30". Overridable
@@ -120,11 +131,13 @@ async function collectBookingObservations(input: {
   stayDates: readonly string[];
   runId: string;
   debugPath: string;
-}): Promise<{ rows: MarketObservationRow[]; requestCount: number; rateLimitEvents: number; parseFailures: number }> {
+  deadline: RunDeadline;
+}): Promise<{ rows: MarketObservationRow[]; requestCount: number; rateLimitEvents: number; parseFailures: number; deadlineHit: boolean }> {
   const rows: MarketObservationRow[] = [];
   let requestCount = 0;
   let rateLimitEvents = 0;
   let parseFailures = 0;
+  let deadlineHit = false;
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
   let consecutiveBlocks = 0;
@@ -132,6 +145,8 @@ async function collectBookingObservations(input: {
   try {
     for (const competitor of input.competitors) {
       for (const stayDate of input.stayDates) {
+        // Cooperative budget check BEFORE starting a new request, never mid-flight.
+        if (input.deadline.exceeded()) { deadlineHit = true; break; }
         requestCount += 1;
         if (requestCount > 1) await sleep(jitterDelayMs());
         const target = { canonicalPropertyName: competitor.propertyName, slug: competitor.bookingSlug };
@@ -222,7 +237,7 @@ async function collectBookingObservations(input: {
     await context.close().catch(() => undefined);
     await browser.close().catch(() => undefined);
   }
-  return { rows, requestCount, rateLimitEvents, parseFailures };
+  return { rows, requestCount, rateLimitEvents, parseFailures, deadlineHit };
 }
 
 async function collectJalanObservations(input: {
@@ -230,15 +245,18 @@ async function collectJalanObservations(input: {
   stayDates: readonly string[];
   runId: string;
   debugPath: string;
-}): Promise<{ rows: MarketObservationRow[]; requestCount: number; parseFailures: number }> {
+  deadline: RunDeadline;
+}): Promise<{ rows: MarketObservationRow[]; requestCount: number; parseFailures: number; deadlineHit: boolean }> {
   const rows: MarketObservationRow[] = [];
   let requestCount = 0;
   let parseFailures = 0;
+  let deadlineHit = false;
   ensureJalanDebugDirs(input.debugPath);
   const browser = await chromium.launch({ headless: true });
   try {
     for (const competitor of input.competitors) {
       for (const stayDate of input.stayDates) {
+        if (input.deadline.exceeded()) { deadlineHit = true; break; }
         requestCount += 1;
         if (requestCount > 1) await sleep(jitterDelayMs());
         const checkout = checkoutForOneNight(stayDate);
@@ -366,7 +384,7 @@ async function collectJalanObservations(input: {
   } finally {
     await browser.close().catch(() => undefined);
   }
-  return { rows, requestCount, parseFailures };
+  return { rows, requestCount, parseFailures, deadlineHit };
 }
 
 async function run(): Promise<void> {
@@ -392,74 +410,112 @@ async function run(): Promise<void> {
     return;
   }
 
-  const debugPath = resolve(DEBUG_ROOT, ts());
-  mkdirSync(debugPath, { recursive: true });
-  mkdirSync(resolve(OUT_DIR), { recursive: true });
-
-  const booking = await collectBookingObservations({ competitors: CORE_COMPETITORS, stayDates, runId, debugPath: resolve(debugPath, "booking") });
-  const jalan = await collectJalanObservations({ competitors: CORE_COMPETITORS, stayDates, runId, debugPath: resolve(debugPath, "jalan") });
-  const allRows = [...booking.rows, ...jalan.rows];
-  const { kept, suppressedCount } = suppressRetryDuplicates(allRows);
-  const completedAt = jstIso();
-
-  const manifest = buildRunManifest({
-    runId,
-    startedAt,
-    completedAt,
-    source: "booking+jalan",
-    propertiesRequested: CORE_COMPETITORS.length,
-    stayDatesRequested: stayDates.length,
-    rows: kept,
-    failedCount: kept.filter((r) => r.availabilityStatus === "COLLECTION_FAILED").length,
-    parseFailureCount: booking.parseFailures + jalan.parseFailures,
-    duplicatesSuppressed: suppressedCount,
-    requestCount: booking.requestCount + jalan.requestCount,
-    rateLimitEvents: booking.rateLimitEvents
-  });
-
-  console.log(`observations_collected=${kept.length}`);
-  console.log(`duplicates_suppressed=${suppressedCount}`);
-  console.log(`request_count=${manifest.requestCount}`);
-  console.log(`rate_limit_events=${manifest.rateLimitEvents}`);
-  console.log(`parse_failures=${manifest.parseFailures}`);
-
-  for (const competitor of CORE_COMPETITORS) {
-    const rows = kept.filter((r) => r.propertyId === competitor.propertyId);
-    const pairs = buildAdjacentTransitionPairs(rows);
-    const numeric = pairs.map(generateNumericInventoryTransition).filter((t) => t !== null).length;
-    const binary = pairs.map(generateBinaryTransition).filter((t) => t !== null).length;
-    const price = pairs.map(generatePriceTransition).filter((t) => t !== null).length;
-    console.log(
-      `${competitor.propertyId}_observations=${rows.length} ${competitor.propertyId}_numeric_transitions=${numeric} ${competitor.propertyId}_binary_transitions=${binary} ${competitor.propertyId}_price_transitions=${price}`
-    );
-  }
-
-  const quality = stayDates.map((stayDate) => assessDataQuality({ stayDate, rows: kept, expectedCompetitorCount: CORE_COMPETITORS.length, nowIso: completedAt }));
-  const insufficientCount = quality.filter((q) => q.tier === "INSUFFICIENT").length;
-  console.log(`stay_dates_insufficient_quality=${insufficientCount}/${stayDates.length}`);
-
-  const manifestPath = resolve(OUT_DIR, `${runId}_manifest.json`);
-  writeFileSync(manifestPath, `${JSON.stringify({ manifest, quality }, null, 2)}\n`, "utf8");
-  console.log(`manifest_path=${manifestPath}`);
-
-  if (!appendMode) {
-    console.log(`decision=core_competitor_observation_preview_ready`);
+  // Overlap prevention (B1): a still-running previous firing must never be
+  // joined by the next one, or the outbound request rate silently doubles.
+  const lock = acquireCollectorLock({ lockPath: LOCK_PATH, runId });
+  if (!lock.acquired) {
+    console.log(`decision=core_competitor_observation_aborted_lock_held`);
+    console.log(`lock_held_age_ms=${lock.heldByAgeMs ?? "unknown"}`);
+    console.log(`lock_owner=${(lock.ownerRaw ?? "").trim()}`);
+    process.exitCode = 1;
     return;
   }
+  if (lock.staleLockReclaimed) console.log(`stale_lock_reclaimed=true`);
 
-  if (process.env["ZMI_APPEND_MARKET_OBSERVATIONS"] === "1") {
-    const result = appendMarketObservations({ observationsDir: OBSERVATIONS_DIR, runId, rows: kept });
-    console.log(`append_decision=${result.decision}`);
-    console.log(`rows_written=${result.rowsWritten}`);
-    console.log(`rows_skipped_duplicate=${result.rowsSkippedDuplicate}`);
-    console.log(`rows_conflict=${result.rowsConflict}`);
-    console.log(`shards_written=${JSON.stringify(result.shardsWritten)}`);
-  } else {
-    console.log(`append_skipped=true`);
-    console.log(`note=set ZMI_APPEND_MARKET_OBSERVATIONS=1 to append observations`);
+  try {
+    const deadline = createRunDeadline({ timeoutMs: RUN_TIMEOUT_MS });
+    console.log(`run_timeout_ms=${RUN_TIMEOUT_MS}`);
+
+    const debugPath = resolve(DEBUG_ROOT, ts());
+    mkdirSync(debugPath, { recursive: true });
+    mkdirSync(resolve(OUT_DIR), { recursive: true });
+
+    const booking = await collectBookingObservations({ competitors: CORE_COMPETITORS, stayDates, runId, debugPath: resolve(debugPath, "booking"), deadline });
+    const jalan = await collectJalanObservations({ competitors: CORE_COMPETITORS, stayDates, runId, debugPath: resolve(debugPath, "jalan"), deadline });
+    const deadlineHit = booking.deadlineHit || jalan.deadlineHit;
+    if (deadlineHit) console.log(`run_deadline_exceeded=true`);
+    const allRows = [...booking.rows, ...jalan.rows];
+    const { kept, suppressedCount } = suppressRetryDuplicates(allRows);
+    const completedAt = jstIso();
+
+    const manifest = buildRunManifest({
+      runId,
+      startedAt,
+      completedAt,
+      source: "booking+jalan",
+      propertiesRequested: CORE_COMPETITORS.length,
+      stayDatesRequested: stayDates.length,
+      rows: kept,
+      failedCount: kept.filter((r) => r.availabilityStatus === "COLLECTION_FAILED").length,
+      parseFailureCount: booking.parseFailures + jalan.parseFailures,
+      duplicatesSuppressed: suppressedCount,
+      requestCount: booking.requestCount + jalan.requestCount,
+      rateLimitEvents: booking.rateLimitEvents
+    });
+
+    console.log(`observations_collected=${kept.length}`);
+    console.log(`duplicates_suppressed=${suppressedCount}`);
+    console.log(`request_count=${manifest.requestCount}`);
+    console.log(`rate_limit_events=${manifest.rateLimitEvents}`);
+    console.log(`parse_failures=${manifest.parseFailures}`);
+
+    for (const competitor of CORE_COMPETITORS) {
+      const rows = kept.filter((r) => r.propertyId === competitor.propertyId);
+      const pairs = buildAdjacentTransitionPairs(rows);
+      const numeric = pairs.map(generateNumericInventoryTransition).filter((t) => t !== null).length;
+      const binary = pairs.map(generateBinaryTransition).filter((t) => t !== null).length;
+      const price = pairs.map(generatePriceTransition).filter((t) => t !== null).length;
+      console.log(
+        `${competitor.propertyId}_observations=${rows.length} ${competitor.propertyId}_numeric_transitions=${numeric} ${competitor.propertyId}_binary_transitions=${binary} ${competitor.propertyId}_price_transitions=${price}`
+      );
+    }
+
+    const quality = stayDates.map((stayDate) => assessDataQuality({ stayDate, rows: kept, expectedCompetitorCount: CORE_COMPETITORS.length, nowIso: completedAt }));
+    const insufficientCount = quality.filter((q) => q.tier === "INSUFFICIENT").length;
+    console.log(`stay_dates_insufficient_quality=${insufficientCount}/${stayDates.length}`);
+
+    const manifestPath = resolve(OUT_DIR, `${runId}_manifest.json`);
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          manifest,
+          quality,
+          schedule_guards: {
+            run_timeout_ms: RUN_TIMEOUT_MS,
+            run_deadline_exceeded: deadlineHit,
+            stale_lock_reclaimed: lock.staleLockReclaimed,
+            lock_path: LOCK_PATH
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    console.log(`manifest_path=${manifestPath}`);
+
+    if (!appendMode) {
+      console.log(`decision=core_competitor_observation_preview_ready`);
+      return;
+    }
+
+    if (process.env["ZMI_APPEND_MARKET_OBSERVATIONS"] === "1") {
+      const result = appendMarketObservations({ observationsDir: OBSERVATIONS_DIR, runId, rows: kept });
+      console.log(`append_decision=${result.decision}`);
+      console.log(`rows_written=${result.rowsWritten}`);
+      console.log(`rows_skipped_duplicate=${result.rowsSkippedDuplicate}`);
+      console.log(`rows_conflict=${result.rowsConflict}`);
+      console.log(`shards_written=${JSON.stringify(result.shardsWritten)}`);
+    } else {
+      console.log(`append_skipped=true`);
+      console.log(`note=set ZMI_APPEND_MARKET_OBSERVATIONS=1 to append observations`);
+    }
+
+    console.log(`decision=core_competitor_observation_append_ready`);
+  } finally {
+    releaseCollectorLock(LOCK_PATH);
   }
-
-  console.log(`decision=core_competitor_observation_append_ready`);
 }
 
 run().catch((e) => {

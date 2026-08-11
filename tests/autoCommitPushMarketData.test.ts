@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { APPEND_ONLY_PREFIXES, TRUSTED_MARKET_DATA_PREFIXES } from "../src/services/marketDataCommitPolicy";
 
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/runAutoCommitPushMarketData.ts"), "utf8");
 const PACKAGE_JSON = readFileSync(resolve(__dirname, "../package.json"), "utf8");
@@ -12,10 +13,15 @@ describe("AUTO-COMMIT-PUSH01 safety", () => {
     expect(PACKAGE_JSON).toContain("runAutoCommitPushMarketData.ts");
   });
 
-  it("only ever stages .data/history and apps/zmi-bi-web/data", () => {
-    expect(SCRIPT_SOURCE).toContain('".data/history", "apps/zmi-bi-web/data"');
+  it("only ever stages the trusted market-data prefixes, never the whole tree", () => {
+    // AUTO-COMMIT-PUSH03: the literal path list moved into
+    // marketDataCommitPolicy.ts (TRUSTED_MARKET_DATA_PREFIXES) so the boundary
+    // is unit-testable; the script derives STAGE_PATHS from it.
+    expect(SCRIPT_SOURCE).toContain("TRUSTED_MARKET_DATA_PREFIXES");
+    expect(SCRIPT_SOURCE).toMatch(/git\(\["add",\s*"--",\s*\.\.\.STAGE_PATHS\]\)/u);
     expect(SCRIPT_SOURCE).not.toMatch(/git",\s*\["add",\s*"\."\]/u);
     expect(SCRIPT_SOURCE).not.toContain('"add", "-A"');
+    expect(TRUSTED_MARKET_DATA_PREFIXES).toEqual([".data/history/", "apps/zmi-bi-web/data/", ".data/market-observations/"]);
   });
 
   it("aborts (does not commit) when any file outside the allowed scope is dirty", () => {
@@ -23,11 +29,30 @@ describe("AUTO-COMMIT-PUSH01 safety", () => {
     expect(SCRIPT_SOURCE).toContain("forbidden_dirty_files");
   });
 
-  it("aborts (does not commit) when history shows a deletion, both before and after staging", () => {
-    expect(SCRIPT_SOURCE).toContain("aborted_history_deletion_detected");
-    expect(SCRIPT_SOURCE).toContain("aborted_staged_history_deletion_detected");
+  it("aborts (does not commit) when ANY append-only store shows a deletion, both before and after staging", () => {
+    // Was history-only; now covers every APPEND_ONLY_PREFIXES store, so a
+    // deletion inside .data/market-observations aborts exactly like one in
+    // .data/history.
+    expect(SCRIPT_SOURCE).toContain("aborted_append_only_deletion_detected");
+    expect(SCRIPT_SOURCE).toContain("APPEND_ONLY_PREFIXES");
     // Checked once against the working tree diff and again against the staged diff.
-    expect((SCRIPT_SOURCE.match(/numstatDeletions/gu) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect((SCRIPT_SOURCE.match(/numstatEntries/gu) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(APPEND_ONLY_PREFIXES).toContain(".data/market-observations/");
+    expect(APPEND_ONLY_PREFIXES).toContain(".data/history/");
+    // Derived BI exports are regenerated, so a shrinking row count there is
+    // legitimate and must NOT be treated as an append-only violation.
+    expect(APPEND_ONLY_PREFIXES).not.toContain("apps/zmi-bi-web/data/");
+  });
+
+  it("schema-validates and size-bounds staged market-observation shards against the index, not the worktree", () => {
+    expect(SCRIPT_SOURCE).toContain("evaluateTrustedMarketDataCommit");
+    expect(SCRIPT_SOURCE).toContain("observationShardPaths");
+    // `git show :path` / `git cat-file -s :path` read INDEX content — what
+    // would actually be committed — not the working tree.
+    expect(SCRIPT_SOURCE).toMatch(/git\(\["show",\s*`:\$\{path\}`\]\)/u);
+    expect(SCRIPT_SOURCE).toMatch(/git\(\["cat-file",\s*"-s",\s*`:\$\{path\}`\]\)/u);
+    // The verdict (not a locally re-implemented check) decides the abort.
+    expect(SCRIPT_SOURCE).toMatch(/report\.decision\s*=\s*verdict\.decision/u);
   });
 
   it("never force-pushes, resets, or runs git clean", () => {

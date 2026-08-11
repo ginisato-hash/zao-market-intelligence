@@ -6,18 +6,48 @@
   <key>Label</key>
   <string>com.yuge.zmi.core-competitor-observation</string>
 
-  <!-- Market Observation Data Plane upgrade (§9/§10): twice-daily repeated
-       observation of the 3 CORE competitors (HAMMOND / 吉田屋 / ONSEN & STAY
-       OAKHILL) over a FIXED, identical D+1..D+14 horizon every run, so an AM
-       pass and a PM pass are directly comparable inventory/price snapshots.
-       04:50 and 16:50 JST were chosen to avoid every existing job's slot:
-       market-refresh-rotating (even hours on :00), bi-web-publish (odd hours
-       on :10), automation-healthcheck (:25 every hour), health-check
-       (08:30), db-update-dry-run (08:45), pricing-critical-recrawl (13:35),
-       booking-market-recrawl (Tue/Fri 14:35). Writes ONLY to the NEW,
-       additive .data/market-observations store (marketObservationSchema.ts)
-       — never .data/history, never Beds24/PMS/RMS/Refine pricing.
-       THIS IS A TEMPLATE ONLY — not installed. Install with:
+  <!-- Market Observation Data Plane, twice-daily production schedule
+       (ZMI-MKT-OBS02 PART B). Repeated observation of the 3 CORE competitors
+       (HAMMOND / 吉田屋 / ONSEN & STAY OAKHILL) over a FIXED, identical
+       D+1..D+14 horizon and identical search context on every firing, so the
+       morning and afternoon passes are directly comparable inventory/price
+       snapshots rather than an asymmetric pair.
+
+       04:50 and 16:50 JST avoid every existing job's slot:
+         market-refresh-rotating   even hours :00
+         bi-web-publish            odd hours  :10
+         automation-healthcheck    every hour :25
+         health-check              08:30
+         db-update-dry-run         08:45
+         pricing-critical-recrawl  13:35
+         booking-market-recrawl    Tue/Fri 14:35
+
+       Writes ONLY to the additive .data/market-observations store
+       (zao_market_observation_v1) and then commits via the trusted-path
+       committer, which schema-validates and size-bounds observation shards and
+       enforces append-only. Never .data/history rewrites, never Beds24 /
+       PMS / RMS / Refine pricing.
+
+       Collector contract (mirrors runBookingMarketRecrawlPipeline.ts):
+         - overlap prevention: in-process lock at
+           .data/locks/core_competitor_observation.lock, abandoned-lock
+           reclamation after 1h. launchd has no "skip if the previous
+           invocation is still running" key for calendar jobs (ThrottleInterval
+           only rate-limits respawns), so exclusion MUST be in-process.
+         - wall-clock budget: ZMI_CORE_COMPETITOR_TIMEOUT_MS (default 45m),
+           checked cooperatively between requests so an overrun stops issuing
+           NEW requests instead of colliding with the next firing. macOS ships
+           no GNU `timeout`, so this cannot live in the plist.
+         - rate-limit handling: shared crawlThrottlePolicy (jitter, exponential
+           backoff, early stop on repeated blocks).
+         - run manifest: .data/reports/market-observation/<run_id>_manifest.json
+           (requests, failures, parse failures, duplicates suppressed,
+           rate-limit events, schedule guards).
+         - restart policy: RunAtLoad false + KeepAlive false — a missed firing
+           is picked up by the next scheduled one; this job must never respawn
+           in a loop against external OTAs.
+
+       Install:
          cp ops/launchd/com.yuge.zmi.core-competitor-observation.plist.template \
             ~/Library/LaunchAgents/com.yuge.zmi.core-competitor-observation.plist
          launchctl bootstrap gui/$(id -u) \
@@ -27,7 +57,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; COLLECT_LIVE=1 ZMI_APPEND_MARKET_OBSERVATIONS=1 npm run market-observation:core-competitor:append &gt;&gt; .data/logs/core-competitor-observation.log 2&gt;&amp;1</string>
+    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; { COLLECT_LIVE=1 ZMI_APPEND_MARKET_OBSERVATIONS=1 npm run market-observation:core-competitor:append; npm run ops:auto-commit-push; } &gt;&gt; .data/logs/core-competitor-observation.log 2&gt;&amp;1</string>
   </array>
 
   <key>WorkingDirectory</key>
@@ -45,7 +75,24 @@
   <key>StandardErrorPath</key>
   <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/core-competitor-observation.err.log</string>
 
+  <!-- Never respawn against an external OTA; never fire on load//reboot. -->
   <key>RunAtLoad</key>
   <false/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <!-- Grace period between SIGTERM and SIGKILL if launchd has to stop the job
+       (e.g. logout) — long enough for the in-flight page to close and the run
+       manifest to be written. -->
+  <key>ExitTimeOut</key>
+  <integer>120</integer>
+
+  <!-- Bounded background crawler: stay off the interactive path. -->
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
 </dict>
 </plist>
