@@ -47,6 +47,17 @@
            is picked up by the next scheduled one; this job must never respawn
            in a loop against external OTAs.
 
+       Logging note: output goes to StandardOutPath/StandardErrorPath ONLY, with
+       no shell-level `>> .data/logs/...` redirect. Under macOS TCC, launchd
+       itself can open those files, but a launchd-spawned zsh cannot open a log
+       file inside ~/Documents unless that exact file already carries a
+       com.apple.macl grant for the responsible process — a file pre-created by
+       any other process fails with "operation not permitted" and the whole job
+       exits 1 before doing any work (observed on the first install here). The
+       market-refresh-rotating job likewise uses plist-level paths only. The
+       benign "shell-init: getcwd: Operation not permitted" line every ZMI
+       launchd job prints is unrelated and does not stop execution.
+
        Install:
          cp ops/launchd/com.yuge.zmi.core-competitor-observation.plist.template \
             ~/Library/LaunchAgents/com.yuge.zmi.core-competitor-observation.plist
@@ -57,7 +68,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; { COLLECT_LIVE=1 ZMI_APPEND_MARKET_OBSERVATIONS=1 npm run market-observation:core-competitor:append; npm run ops:auto-commit-push; } &gt;&gt; .data/logs/core-competitor-observation.log 2&gt;&amp;1</string>
+    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; { COLLECT_LIVE=1 ZMI_APPEND_MARKET_OBSERVATIONS=1 npm run market-observation:core-competitor:append; npm run ops:auto-commit-push; }</string>
   </array>
 
   <key>WorkingDirectory</key>
