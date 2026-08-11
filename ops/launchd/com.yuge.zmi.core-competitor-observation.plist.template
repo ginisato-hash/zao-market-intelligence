@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuge.zmi.core-competitor-observation</string>
+
+  <!-- Market Observation Data Plane upgrade (§9/§10): twice-daily repeated
+       observation of the 3 CORE competitors (HAMMOND / 吉田屋 / ONSEN & STAY
+       OAKHILL) over a FIXED, identical D+1..D+14 horizon every run, so an AM
+       pass and a PM pass are directly comparable inventory/price snapshots.
+       04:50 and 16:50 JST were chosen to avoid every existing job's slot:
+       market-refresh-rotating (even hours on :00), bi-web-publish (odd hours
+       on :10), automation-healthcheck (:25 every hour), health-check
+       (08:30), db-update-dry-run (08:45), pricing-critical-recrawl (13:35),
+       booking-market-recrawl (Tue/Fri 14:35). Writes ONLY to the NEW,
+       additive .data/market-observations store (marketObservationSchema.ts)
+       — never .data/history, never Beds24/PMS/RMS/Refine pricing.
+       THIS IS A TEMPLATE ONLY — not installed. Install with:
+         cp ops/launchd/com.yuge.zmi.core-competitor-observation.plist.template \
+            ~/Library/LaunchAgents/com.yuge.zmi.core-competitor-observation.plist
+         launchctl bootstrap gui/$(id -u) \
+            ~/Library/LaunchAgents/com.yuge.zmi.core-competitor-observation.plist
+       -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /Users/gini/Documents/ZMI/zao-market-intelligence &amp;&amp; COLLECT_LIVE=1 ZMI_APPEND_MARKET_OBSERVATIONS=1 npm run market-observation:core-competitor:append &gt;&gt; .data/logs/core-competitor-observation.log 2&gt;&amp;1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>50</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/core-competitor-observation.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/gini/Documents/ZMI/zao-market-intelligence/.data/logs/core-competitor-observation.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

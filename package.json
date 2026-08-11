@@ -195,6 +195,8 @@
     "market:priority-competitor-recrawl:preview": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --preview --group=competitor",
     "market:priority-competitor-recrawl:append": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --append --group=competitor",
     "market:own-property-recrawl:preview": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --preview --group=own",
+    "market-observation:core-competitor:preview": "node --import tsx src/scripts/runCoreCompetitorRepeatedObservation.ts --preview",
+    "market-observation:core-competitor:append": "node --import tsx src/scripts/runCoreCompetitorRepeatedObservation.ts --append",
     "market:own-property-recrawl:append": "node --import tsx src/scripts/runPricingCriticalRecrawl.ts --append --group=own",
     "target:booking-low-confidence": "node --import tsx src/scripts/runBookingLowConfidenceTargeting.ts",
     "review:booking-verified-target-gap": "node --import tsx src/scripts/runBookingVerifiedTargetGapReview.ts",

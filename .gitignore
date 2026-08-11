@@ -46,6 +46,10 @@ jspm_packages/
 !.data/history/
 !.data/history/zao_signals_*.csv
 .data/history/.backup/
+!.data/market-observations/
+!.data/market-observations/mkt_obs_*.csv
+.data/market-observations/.backup/
+.data/market-observations/.tmp/
 .data/debug/
 .data/screenshots/
 .data/reports/
