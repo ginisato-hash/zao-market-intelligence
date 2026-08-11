@@ -30,6 +30,7 @@ import {
 import { collectTarget, ensureJalanDebugDirs } from "./probeJalanBoundedCollectionImproved";
 import { type JalanProbeTarget } from "../services/jalanBoundedCollectionProbe";
 import { CORE_COMPETITORS, type CoreCompetitorTarget } from "../services/coreCompetitorTargets";
+import { extractJalanProductRecords, buildJalanProductKey } from "../collectors/jalanProductBlockExtractor";
 import { buildRoomProductKey, buildRatePlanKey } from "../services/productIdentityStabilization";
 import { extractInventoryScarcitySignal } from "../services/inventoryScarcityExtraction";
 import {
@@ -112,24 +113,6 @@ function jalanStatusToAvailability(status: string): ObservationAvailabilityStatu
     default:
       return "UNKNOWN";
   }
-}
-
-// Audit finding (§2/§19): Jalan's shared block extractor captures one
-// combined block per PLAN section (spanning every room type listed under
-// it), not one per room x plan pair — so candidate.room_name/room_or_plan_name
-// can come back as a garbled run-on of page furniture + multiple room names.
-// Every live-captured Jalan plan card consistently wraps its OWN room type in
-// a "【room name】" bracket, though, immediately before that room's own price
-// — the same bracket format used for the plan header itself. Preferring the
-// FIRST bracket in the selected block (closest to the top, where the priced
-// room card starts) recovers a clean, human-readable room name without
-// touching the shared browser-evaluation extractor. Falls back to the
-// existing (garbled) fields when no bracket is present — never worse than
-// today, only better when the pattern matches.
-const JALAN_ROOM_NAME_BRACKET_RE = /【([^】]{2,40})】/u;
-function cleanJalanRoomName(blockText: string, fallback: string): string {
-  const m = JALAN_ROOM_NAME_BRACKET_RE.exec(blockText ?? "");
-  return m ? m[1]!.trim() : fallback;
 }
 
 async function collectBookingObservations(input: {
@@ -285,57 +268,99 @@ async function collectJalanObservations(input: {
           reportPath: resolve(OUT_DIR, `${input.runId}_jalan.json`),
           csvPath: resolve(OUT_DIR, `${input.runId}_jalan.csv`)
         });
-        const { row, candidate } = runResult;
-        const availability = jalanStatusToAvailability(row.availability_status);
-        if (availability === "COLLECTION_FAILED" && candidate.error_reason?.startsWith("navigation_or_collection_failed") !== true) {
-          parseFailures += 1;
+        const { row, bodyText } = runResult;
+        const pageAvailability = jalanStatusToAvailability(row.availability_status);
+        const observedAtJst = jstIso();
+
+        // PART A: one observation per (room product x rate plan), each field
+        // read from that product's OWN row segment. Replaces the previous
+        // one-row-per-date shape, which had to pick a single "representative"
+        // product out of a page listing many and consequently mixed one
+        // room's name with another's price and a third's scarcity badge.
+        const products = extractJalanProductRecords(bodyText);
+        if (products.length === 0) {
+          // No parseable product rows. Distinguish an honest page-level
+          // sold-out / not-listed / navigation failure (recorded as such, with
+          // no product identity) from a genuine parse failure on a page that
+          // DID render content — never silently drop the cell either way.
+          if (pageAvailability === "AVAILABLE" && bodyText.trim() !== "") parseFailures += 1;
+          const partial = {
+            propertyId: competitor.propertyId,
+            sourcePlatform: "jalan" as const,
+            stayDate,
+            roomProductKey: "",
+            ratePlanKey: "",
+            searchAdults: 2,
+            searchChildren: 0,
+            searchRooms: 1,
+            lengthOfStay: 1,
+            currency: "JPY",
+            observedPrice: null,
+            availabilityStatus: pageAvailability === "AVAILABLE" ? ("PARSE_FAILED" as const) : pageAvailability,
+            inventoryCount: null,
+            inventoryCountSemantics: "UNKNOWN" as const,
+            inventoryScope: "UNKNOWN" as const
+          };
+          rows.push({
+            observationId: buildObservationId({ ...partial, collectorRunId: input.runId }),
+            observationHash: buildObservationHash(partial),
+            ...partial,
+            propertyName: competitor.propertyName,
+            observedAtJst,
+            roomTypeName: "",
+            ratePlanName: "",
+            sourceQuality: "LOW",
+            rawEvidenceHash: hashRawEvidence(bodyText || target.target_url),
+            collectorRunId: input.runId
+          });
+          continue;
         }
 
-        const scarcity = extractInventoryScarcitySignal(candidate.selected_block_text);
-        const cleanRoomName = cleanJalanRoomName(candidate.selected_block_text, row.room_name || row.room_or_plan_name || "");
-        const roomProductKey = buildRoomProductKey({ roomTypeName: cleanRoomName });
-        const ratePlanKey = buildRatePlanKey({ ratePlanName: row.plan_name });
-
-        // Honest observed price: source_primary_price is the RAW extracted
-        // price even when the OLD DP-usability gate excludes it for an
-        // ambiguous meal basis (normalized_total_price would be null there)
-        // — this NEW schema's whole purpose is to keep that raw observation
-        // instead of discarding it (§16: ZMI observes, Refine decides).
-        const observedPrice = row.source_primary_price ?? row.normalized_total_price;
-
-        const partial = {
-          propertyId: competitor.propertyId,
-          sourcePlatform: "jalan" as const,
-          stayDate,
-          roomProductKey,
-          ratePlanKey,
-          searchAdults: 2,
-          searchChildren: 0,
-          searchRooms: 1,
-          lengthOfStay: 1,
-          currency: "JPY",
-          observedPrice,
-          availabilityStatus: availability,
-          inventoryCount: scarcity.inventoryCount,
-          inventoryCountSemantics: scarcity.inventoryCountSemantics,
-          inventoryScope: scarcity.inventoryScope
-        };
-        const observationId = buildObservationId({ ...partial, collectorRunId: input.runId });
-        const observationHash = buildObservationHash(partial);
-        const sourceQuality: ObservationSourceQuality = candidate.extraction_confidence === "high" ? "HIGH" : candidate.extraction_confidence === "medium" ? "MEDIUM" : "LOW";
-
-        rows.push({
-          observationId,
-          observationHash,
-          ...partial,
-          propertyName: competitor.propertyName,
-          observedAtJst: jstIso(),
-          roomTypeName: cleanRoomName,
-          ratePlanName: row.plan_name || "",
-          sourceQuality,
-          rawEvidenceHash: hashRawEvidence(candidate.selected_block_text || target.target_url),
-          collectorRunId: input.runId
-        });
+        for (const product of products) {
+          const roomProductKey = buildJalanProductKey({
+            roomName: product.roomName,
+            planName: product.planName,
+            mealBasis: product.mealBasis,
+            searchAdults: 2,
+            searchChildren: 0,
+            searchRooms: 1,
+            lengthOfStay: 1
+          });
+          const partial = {
+            propertyId: competitor.propertyId,
+            sourcePlatform: "jalan" as const,
+            stayDate,
+            roomProductKey,
+            ratePlanKey: buildRatePlanKey({ ratePlanName: product.planName }),
+            searchAdults: 2,
+            searchChildren: 0,
+            searchRooms: 1,
+            lengthOfStay: 1,
+            currency: "JPY",
+            // The RAW observed total, kept even when the older DP-usability
+            // gate would have discarded it for meal basis — that gate was
+            // hiding real observations (§16: ZMI observes, Refine decides).
+            observedPrice: product.totalPriceTaxIncluded,
+            availabilityStatus: "AVAILABLE" as const,
+            inventoryCount: product.inventoryCount,
+            inventoryCountSemantics: product.inventoryCountSemantics,
+            inventoryScope: product.inventoryScope
+          };
+          rows.push({
+            observationId: buildObservationId({ ...partial, collectorRunId: input.runId }),
+            observationHash: buildObservationHash(partial),
+            ...partial,
+            propertyName: competitor.propertyName,
+            observedAtJst,
+            roomTypeName: product.roomName,
+            ratePlanName: product.planName,
+            // A product row carrying its own price AND its own scarcity badge
+            // is the strongest read available from a text-scraped source.
+            sourceQuality: product.inventoryCount !== null ? "HIGH" : "MEDIUM",
+            rawEvidenceHash: hashRawEvidence(product.rawRowText),
+            collectorRunId: input.runId
+          });
+        }
       }
     }
   } finally {

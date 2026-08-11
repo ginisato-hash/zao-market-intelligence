@@ -133,7 +133,7 @@ export async function collectTarget(input: {
   debugPath: string;
   reportPath: string;
   csvPath: string;
-}): Promise<{ pageResult: PageResult; row: JalanImprovedPreviewRow; candidate: JalanImprovedExtractionCandidate }> {
+}): Promise<{ pageResult: PageResult; row: JalanImprovedPreviewRow; candidate: JalanImprovedExtractionCandidate; bodyText: string }> {
   let attempt = 0;
   let lastError: unknown;
   while (attempt <= 1) {
@@ -158,7 +158,7 @@ async function collectTargetOnce(input: {
   csvPath: string;
   attemptCount: number;
   retryUsed: boolean;
-}): Promise<{ pageResult: PageResult; row: JalanImprovedPreviewRow; candidate: JalanImprovedExtractionCandidate }> {
+}): Promise<{ pageResult: PageResult; row: JalanImprovedPreviewRow; candidate: JalanImprovedExtractionCandidate; bodyText: string }> {
   const page = await input.browser.newPage({
     userAgent: "Mozilla/5.0 (compatible; zao-market-intelligence-auto03b/0.1; bounded manual verification)"
   });
@@ -264,7 +264,7 @@ async function collectTargetOnce(input: {
     };
     writeJson(targetJsonPath, { target: input.target, pageResult, row, candidate });
     writeJson(evidenceJsonPath, { target: input.target, evidence_flags: row.evidence_flags });
-    return { pageResult, row, candidate };
+    return { pageResult, row, candidate, bodyText };
   } finally {
     await page.close();
   }
@@ -418,7 +418,7 @@ function buildThrownFailure(input: {
   error: unknown;
   attemptCount: number;
   retryUsed: boolean;
-}): { pageResult: PageResult; row: JalanImprovedPreviewRow; candidate: JalanImprovedExtractionCandidate } {
+}): { pageResult: PageResult; row: JalanImprovedPreviewRow; candidate: JalanImprovedExtractionCandidate; bodyText: string } {
   const name = safeName(input.target);
   const targetJsonPath = resolve(input.debugPath, "classification_decisions", `${name}.json`);
   const errorMessage = input.error instanceof Error ? input.error.message : "unknown_error";
@@ -479,7 +479,7 @@ function buildThrownFailure(input: {
   };
   writeJson(targetJsonPath, { target: input.target, pageResult, row, candidate });
   writeJson(resolve(input.debugPath, "errors", `${name}.json`), { target: input.target, error: errorMessage });
-  return { pageResult, row, candidate };
+  return { pageResult, row, candidate, bodyText: "" };
 }
 
 function normalizeStatus(status: string): ProbeAvailabilityStatus {
