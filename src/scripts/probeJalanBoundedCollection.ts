@@ -13,7 +13,7 @@ import {
   collectVisibleJalanPlanBlockTexts,
   extractJalanPlanBlocks
 } from "../collectors/jalanPlanBlockExtractor";
-import { selectAcceptedJalanPriceCandidate } from "../collectors/jalanAcceptedPricePolicy";
+import { selectAcceptedJalanPriceCandidateLayered } from "../collectors/jalanAcceptedPricePolicy";
 import { chooseJalanNavigationCandidate, collectJalanLinkCandidates } from "../collectors/jalanLinkInspector";
 import {
   buildFutureAuto04xPlan,
@@ -280,7 +280,7 @@ function extractCandidateFromState(input: {
     rooms: 1,
     nights: 1
   });
-  const selection = selectAcceptedJalanPriceCandidate(extraction.candidates, "cheapest_total_tax_included_safe_plan");
+  const selection = selectAcceptedJalanPriceCandidateLayered(extraction.candidates);
   const selected = selection.selectedCandidate;
   if (selected !== undefined && selected.priceValue !== undefined) {
     return {

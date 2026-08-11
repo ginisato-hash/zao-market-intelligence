@@ -219,3 +219,29 @@ export function isSafePlanCandidate(candidate: JalanPlanBlockCandidate): boolean
     candidate.rejectionReason === undefined
   );
 }
+
+// OAKHILL root-cause fix (Market Observation Upgrade): every production caller
+// used the plain "cheapest_total_tax_included_safe_plan" policy, which has no
+// meal-basis preference — on a page listing several room types, it can select
+// a MORE expensive, meal-basis-AMBIGUOUS room card over a CHEAPER,
+// EXPLICITLY room-only-labeled one that was also on the page (confirmed live:
+// ONSEN & STAY OAKHILL's page selected "デラックス和洋室" ¥34,200 — no meal-basis
+// text near that card — while a "素泊まりプラン" ¥18,300 card existed
+// elsewhere). The ambiguous pick then correctly gets excluded downstream as
+// unknown_meal_basis, so the property shows priced=0 despite Jalan actually
+// having a usable, cheaper, confirmed room-only price available that day.
+// `cheapest_confirmed_room_only_two_person_standard_total_tax_included_safe_plan`
+// already existed in this module for exactly this case but no caller used it.
+// This helper tries that strict policy FIRST and falls back to the existing
+// plain policy only when no confirmed room-only + two-person-standard
+// candidate exists — additive, no regression for pages where it doesn't
+// apply. General fix: every Jalan target benefits, not just OAKHILL.
+export function selectAcceptedJalanPriceCandidateLayered(candidates: JalanPlanBlockCandidate[]): JalanAcceptedPriceSelection {
+  const strict = selectAcceptedJalanPriceCandidate(
+    candidates,
+    "cheapest_confirmed_room_only_two_person_standard_total_tax_included_safe_plan"
+  );
+  if (strict.selectedCandidate !== undefined) return strict;
+  const fallback = selectAcceptedJalanPriceCandidate(candidates, "cheapest_total_tax_included_safe_plan");
+  return { ...fallback, reason: `${fallback.reason};fallback_from_confirmed_room_only_two_person_standard` };
+}

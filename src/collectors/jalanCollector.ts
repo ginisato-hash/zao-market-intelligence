@@ -23,7 +23,7 @@ import {
   planBlockCandidateToEvidence,
   type JalanPlanBlockDebugSummary
 } from "./jalanPlanBlockExtractor";
-import { selectAcceptedJalanPriceCandidate } from "./jalanAcceptedPricePolicy";
+import { selectAcceptedJalanPriceCandidate, selectAcceptedJalanPriceCandidateLayered } from "./jalanAcceptedPricePolicy";
 
 export interface JalanCollectorOptions {
   screenshotStorage: ScreenshotStorage;
@@ -100,10 +100,7 @@ export class JalanCollector {
             rooms: input.rooms ?? 1,
             nights: input.nights
           });
-          const selection = selectAcceptedJalanPriceCandidate(
-            extraction.candidates,
-            "cheapest_total_tax_included_safe_plan"
-          );
+          const selection = selectAcceptedJalanPriceCandidateLayered(extraction.candidates);
           planBlockExtraction = buildPlanBlockDebugSummary(extraction);
           acceptedPricePolicy = buildAcceptedPricePolicyDebug(selection);
           evidence =
