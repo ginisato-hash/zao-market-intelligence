@@ -24,6 +24,7 @@ import {
   type MarketSignalHandoffRow
 } from "../services/marketSignalHandoffContract";
 import type { MarketObservationRow } from "../services/marketObservationSchema";
+import { summarizeHandoffValidation, validateHandoffArtifact } from "../services/marketSignalHandoffValidation";
 
 const OBSERVATIONS_DIR = ".data/market-observations";
 const OUT_DIR = ".data/market-observation-handoff";
@@ -159,6 +160,11 @@ function run(): void {
     totals: summarizeHandoffRows(signals)
   };
 
+  // §11 sanity audit of the artifact we are about to publish, derived from its
+  // own published values so a generator bug cannot validate itself.
+  const findings = validateHandoffArtifact(artifact, Date.now());
+  const validation = summarizeHandoffValidation(findings);
+
   mkdirSync(resolve(OUT_DIR), { recursive: true });
   const dateStamp = nowIso.slice(0, 10);
   const outPath = resolve(OUT_DIR, `market_signal_handoff_${dateStamp}.json`);
@@ -181,7 +187,13 @@ function run(): void {
   console.log(`parse_failures=${artifact.totals.parse_failures}`);
   console.log(`quality_tiers=${JSON.stringify(qualityByStayDate.reduce<Record<string, number>>((acc, q) => ({ ...acc, [q.tier]: (acc[q.tier] ?? 0) + 1 }), {}))}`);
   console.log(`artifact_path=${outPath}`);
-  console.log(`decision=market_signal_handoff_ready`);
+  console.log(`validation_findings_total=${validation.total}`);
+  console.log(`validation_findings_fatal=${validation.fatal}`);
+  console.log(`validation_findings_review=${validation.review}`);
+  console.log(`validation_by_code=${JSON.stringify(validation.byCode)}`);
+  for (const f of findings.slice(0, 10)) console.log(`  finding: ${f.code} :: ${f.detail}`);
+  console.log(`decision=${validation.fatal > 0 ? "market_signal_handoff_validation_failed" : "market_signal_handoff_ready"}`);
+  if (validation.fatal > 0) process.exitCode = 1;
 }
 
 run();
