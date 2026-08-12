@@ -110,35 +110,40 @@ export function validateHandoffArtifact(artifact: MarketSignalHandoffArtifact, n
     }
   }
 
-  // Cross-product binding: within a single stay_date+source+property, two
-  // DIFFERENT room products must not report byte-identical price endpoints AND
-  // identical scarcity endpoints under different keys — that is the signature of
-  // one product's values having been copied across rows.
-  const byGroup = new Map<string, MarketSignalHandoffRow[]>();
+  // Cross-product binding, scoped to the actual historical failure mode: the
+  // old plan-level extractor copied ONE product's price/scarcity across every
+  // room listed under the SAME rate plan. So the signature is two or more
+  // DIFFERENT room products, within one (property, source, stay_date, RATE
+  // PLAN), reporting identical price AND identical scarcity endpoints.
+  //
+  // Grouping by rate plan matters: without it this check fires constantly on
+  // legitimate data. Verified against the real 2026-08-12 12h pair, where all
+  // 65 cross-plan hits were genuine coincidences — the same 和室13畳 priced
+  // identically under a senior-discount and a student-discount plan (which
+  // SHOULD share that one room's remaining count), and two different HAMMOND
+  // rooms that simply cost the same. Scoped to a single plan, the same dataset
+  // yields zero findings, so a hit is now actionable rather than noise.
+  const byPlanGroup = new Map<string, MarketSignalHandoffRow[]>();
   for (const row of artifact.signals) {
-    const g = [row.identity.property_id, row.identity.source, row.identity.stay_date].join("|");
-    const bucket = byGroup.get(g);
-    if (bucket === undefined) byGroup.set(g, [row]);
+    const g = [row.identity.property_id, row.identity.source, row.identity.stay_date, row.identity.rate_plan_key].join("|");
+    const bucket = byPlanGroup.get(g);
+    if (bucket === undefined) byPlanGroup.set(g, [row]);
     else bucket.push(row);
   }
-  for (const [g, rows] of byGroup) {
-    const fingerprint = new Map<string, string[]>();
+  for (const [g, rows] of byPlanGroup) {
+    const fingerprint = new Map<string, Set<string>>();
     for (const r of rows) {
-      // Only a numeric scarcity fingerprint is distinctive enough to accuse;
-      // identical prices alone are common and legitimate (same rate across rooms).
+      // A numeric scarcity fingerprint is required: identical prices alone are
+      // common and legitimate, so price equality by itself never accuses.
       if (r.scarcity.inventory_count_t0 === null || r.scarcity.inventory_count_t1 === null) continue;
       const fp = [r.price.competitor_price_t0, r.price.competitor_price_t1, r.scarcity.inventory_count_t0, r.scarcity.inventory_count_t1].join("/");
-      const list = fingerprint.get(fp);
-      if (list === undefined) fingerprint.set(fp, [r.identity.room_product_key]);
-      else list.push(r.identity.room_product_key);
+      const set = fingerprint.get(fp);
+      if (set === undefined) fingerprint.set(fp, new Set([r.identity.room_product_key]));
+      else set.add(r.identity.room_product_key);
     }
     for (const [fp, keys] of fingerprint) {
-      const distinct = new Set(keys);
-      // >1 distinct product sharing an identical (price,price,inv,inv) tuple is
-      // reported for review, not asserted as a defect: real pages can legitimately
-      // price two rooms identically with equal remaining counts.
-      if (distinct.size > 1) {
-        findings.push({ code: "cross_product_binding", detail: `${g}: ${distinct.size} products share ${fp}` });
+      if (keys.size > 1) {
+        findings.push({ code: "cross_product_binding", detail: `${g}: ${keys.size} rooms in one plan share ${fp}` });
       }
     }
   }

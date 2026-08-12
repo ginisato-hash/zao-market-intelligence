@@ -181,12 +181,35 @@ describe("§11 — each check fires on the corruption it exists to catch", () =>
     expect(validateHandoffArtifact(a, NOW).map((f) => f.code)).toContain("forbidden_pickup_terminology");
   });
 
-  it("cross_product_binding: two different products sharing identical price+scarcity endpoints", () => {
+  it("cross_product_binding: two rooms in the SAME plan sharing identical price+scarcity endpoints", () => {
+    // The historical failure mode: one product's values copied across every
+    // room listed under one rate plan.
     const a = artifact([
       signal({ room: "room:twin", p0: 26000, p1: 24000, i0: 3, i1: 1 }),
       signal({ room: "room:deluxe", p0: 26000, p1: 24000, i0: 3, i1: 1 })
     ]);
     expect(validateHandoffArtifact(a, NOW).map((f) => f.code)).toContain("cross_product_binding");
+  });
+
+  it("REGRESSION: identical pricing across DIFFERENT rate plans is NOT flagged", () => {
+    // Verified against the real 2026-08-12 12h pair: 吉田屋's 和室13畳 was priced
+    // identically under a senior-discount and a student-discount plan, and
+    // correctly shared that one room's remaining count. Two HAMMOND rooms also
+    // simply cost the same. Grouping the check by rate plan removed all 65 such
+    // false positives while still catching the real within-plan copying above.
+    const a = artifact([
+      { ...signal({ room: "room:和室13畳", p0: 25300, p1: 25300, i0: 2, i1: 2 }), identity: { ...signal().identity, room_product_key: "room:和室13畳", rate_plan_key: "text:senior" } },
+      { ...signal({ room: "room:和室13畳", p0: 25300, p1: 25300, i0: 2, i1: 2 }), identity: { ...signal().identity, room_product_key: "room:和室13畳", rate_plan_key: "text:student" } }
+    ]);
+    expect(validateHandoffArtifact(a, NOW).map((f) => f.code)).not.toContain("cross_product_binding");
+  });
+
+  it("price equality alone never accuses — a scarcity fingerprint is required", () => {
+    const a = artifact([
+      signal({ room: "room:twin", p0: 26000, p1: 24000, i0: null, i1: null, semantics: "BINARY_AVAILABILITY", scope: "UNKNOWN" }),
+      signal({ room: "room:deluxe", p0: 26000, p1: 24000, i0: null, i1: null, semantics: "BINARY_AVAILABILITY", scope: "UNKNOWN" })
+    ]);
+    expect(validateHandoffArtifact(a, NOW).map((f) => f.code)).not.toContain("cross_product_binding");
   });
 });
 
