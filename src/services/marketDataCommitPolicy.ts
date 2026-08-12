@@ -153,7 +153,10 @@ export function evaluateTrustedMarketDataCommit(input: {
   const base = { forbidden, appendOnlyViolations: violations, schemaProblems, oversized };
   if (forbidden.length > 0) return { ok: false, decision: "aborted_unexpected_paths", ...base };
   if (violations.length > 0) return { ok: false, decision: "aborted_append_only_violation", ...base };
-  if (schemaProblems.length > 0) return { ok: false, decision: "aborted_observation_schema_invalid", ...base };
+  // Size before schema: an oversized blob cannot be read or trusted in the
+  // first place, so reporting it as a schema problem would name the symptom
+  // instead of the cause.
   if (oversized.length > 0) return { ok: false, decision: "aborted_file_too_large", ...base };
+  if (schemaProblems.length > 0) return { ok: false, decision: "aborted_observation_schema_invalid", ...base };
   return { ok: true, decision: "trusted_market_data_ok", ...base };
 }

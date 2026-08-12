@@ -175,6 +175,29 @@ describe("PART B2 — combined verdict", () => {
     expect(verdict.oversized).toEqual([]);
   });
 
+  it("REGRESSION: an oversized shard is reported as too large, not as a schema problem", () => {
+    // Live failure 2026-08-12: once the shard passed 1MB, reading its header
+    // through spawnSync's default maxBuffer hit ENOBUFS, which surfaced as a
+    // bogus "empty_or_missing_header" and blocked the commit. Failing closed
+    // was right, but the reason was wrong. Size is now judged BEFORE schema so
+    // an unreadable/oversized blob names its real cause.
+    const verdict = evaluateTrustedMarketDataCommit(
+      okInput({
+        observationHeaders: new Map<string, string | null>([[OBS_SHARD, null]]),
+        fileSizes: [{ path: OBS_SHARD, bytes: MAX_TRUSTED_FILE_BYTES + 1 }]
+      })
+    );
+    expect(verdict.decision).toBe("aborted_file_too_large");
+    // The schema finding is still reported for diagnostics.
+    expect(verdict.schemaProblems).toHaveLength(1);
+  });
+
+  it("a multi-megabyte but in-bounds shard is accepted (header read must not be buffer-limited)", () => {
+    const verdict = evaluateTrustedMarketDataCommit(okInput({ fileSizes: [{ path: OBS_SHARD, bytes: 8 * 1024 * 1024 }] }));
+    expect(verdict.ok).toBe(true);
+    expect(verdict.decision).toBe("trusted_market_data_ok");
+  });
+
   it("reports the most severe problem first: untrusted path outranks everything else", () => {
     const verdict = evaluateTrustedMarketDataCommit(
       okInput({

@@ -49,10 +49,21 @@ describe("AUTO-COMMIT-PUSH01 safety", () => {
     expect(SCRIPT_SOURCE).toContain("observationShardPaths");
     // `git show :path` / `git cat-file -s :path` read INDEX content — what
     // would actually be committed — not the working tree.
-    expect(SCRIPT_SOURCE).toMatch(/git\(\["show",\s*`:\$\{path\}`\]\)/u);
+    expect(SCRIPT_SOURCE).toMatch(/gitBlob\(\["show",\s*`:\$\{path\}`\]\)/u);
     expect(SCRIPT_SOURCE).toMatch(/git\(\["cat-file",\s*"-s",\s*`:\$\{path\}`\]\)/u);
     // The verdict (not a locally re-implemented check) decides the abort.
     expect(SCRIPT_SOURCE).toMatch(/report\.decision\s*=\s*verdict\.decision/u);
+  });
+
+  it("REGRESSION: reads staged blobs with an explicit maxBuffer, not spawnSync's 1MB default", () => {
+    // Live failure 2026-08-12: `git show :path` streams the WHOLE blob, so once
+    // the observation shard passed 1MB the read died with ENOBUFS and the
+    // committer aborted every run with a bogus empty-header error.
+    expect(SCRIPT_SOURCE).toContain("gitBlob");
+    expect(SCRIPT_SOURCE).toMatch(/maxBuffer:\s*MAX_TRUSTED_FILE_BYTES/u);
+    // The header read must use the bounded reader, never the plain one.
+    expect(SCRIPT_SOURCE).toMatch(/gitBlob\(\["show",\s*`:\$\{path\}`\]\)/u);
+    expect(SCRIPT_SOURCE).not.toMatch(/=\s*git\(\["show",\s*`:\$\{path\}`\]\)/u);
   });
 
   it("never force-pushes, resets, or runs git clean", () => {

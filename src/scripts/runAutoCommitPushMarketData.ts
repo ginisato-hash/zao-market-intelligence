@@ -39,6 +39,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { resolve } from "node:path";
 import {
   APPEND_ONLY_PREFIXES,
+  MAX_TRUSTED_FILE_BYTES,
   TRUSTED_MARKET_DATA_PREFIXES,
   evaluateTrustedMarketDataCommit,
   isTrustedMarketDataPath,
@@ -67,6 +68,19 @@ function git(args: string[]): CmdResult {
   const r = spawnSync("git", args, { encoding: "utf8" });
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
+
+// `git show :path` streams the WHOLE blob, and spawnSync's default maxBuffer is
+// only 1MB — so reading a staged observation shard's header this way started
+// failing with ENOBUFS the moment the shard grew past 1MB (three production
+// runs), which surfaced as a bogus "empty_or_missing_header" and blocked the
+// commit. Fail-closed was the right behaviour, but the reason was wrong. Bound
+// the buffer by the same constant the policy already enforces as a hard size
+// limit: anything that could legitimately be committed fits, and anything that
+// does not is rejected on SIZE (its real problem) before schema is judged.
+function gitBlob(args: string[]): CmdResult {
+  const r = spawnSync("git", args, { encoding: "utf8", maxBuffer: MAX_TRUSTED_FILE_BYTES + 1024 * 1024 });
+  return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
 function isAllowed(path: string): boolean {
   return isTrustedMarketDataPath(path);
 }
@@ -80,7 +94,7 @@ function numstatEntries(args: string[]): NumstatEntry[] {
 // Header line of a staged file as it will be COMMITTED (index content, not the
 // worktree) — schema validation must judge exactly what goes to the remote.
 function stagedHeaderLine(path: string): string | null {
-  const r = git(["show", `:${path}`]);
+  const r = gitBlob(["show", `:${path}`]);
   if (!r.ok) return null;
   const first = r.out.split(/\r?\n/u)[0];
   return first === undefined || first === "" ? null : first;
