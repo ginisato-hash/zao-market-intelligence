@@ -60,6 +60,79 @@ const BUCKET_RANGES = { short: [1, 14], mid: [15, 90], long: [91, 240] } as cons
 const WINTER_RANGE = ["2026-12-19", "2027-03-15"] as const;
 const COOLDOWN_HOURS = 24;
 
+// ---------------------------------------------------------------------------
+// Phase ZMI-RMS-FAIRNESS-V1 — Booking RMS-critical anti-starvation.
+//
+// Root cause this fixes (measured 2026-08-16 over the live handoff history):
+// 443 of 1,344 RMS-critical Booking cells (33%) received ZERO service in 7
+// days while 284 cells received >=4 refreshes, holding stay-date aggregate
+// freshness at 17.9% even though Booking already collects ~290.9 usable
+// observations/day against a ~280/day requirement. Aggregate throughput was
+// never the constraint — DISTRIBUTION was.
+//
+// Why the old planner could starve a cell forever: buildRotatingPlan called
+// scoreTarget with a hard-coded collectedRecently=false, so every candidate
+// received the same +15 "not_collected_recently" bonus and priority_score was
+// a pure function of (stay_date attributes, tier). A cell last served 25h ago
+// and a cell never served in 7 days scored IDENTICALLY. The only starvation
+// defence was a property-level round-robin, which cannot rescue a
+// (property, stay_date) cell whose DATE never scores high enough to reach the
+// per-run cap.
+//
+// Fix: rank RMS-critical Booking candidates into explicit service-state bands
+// BEFORE the existing score/interleave/rotate logic runs, so a never-served or
+// overdue cell always outranks a recently-served one. Bands are ordered, and
+// the proven roundRobinByGroup interleave + day/slot rotation is applied
+// WITHIN each band, preserving property diversity without letting it override
+// starvation priority.
+//
+// This changes only WHO gets served. Caps, cadence, source split, cooldown,
+// request volume, room-basis semantics and the 48h freshness contract are all
+// untouched.
+// ---------------------------------------------------------------------------
+
+// RMS pricing horizon (lead days) whose stay-date aggregate freshness the
+// Kiraku RMS actually consumes. Matches the 56-date freshness measurement.
+export const RMS_CRITICAL_LEAD_DAYS = 56;
+
+// Hard service deadline: a critical cell older than this is OVERDUE. Under the
+// locked aggregate-mean semantic a uniform service interval T yields a mean
+// constituent age of T/2, so T=96h sits exactly on the 48h threshold. 84h is
+// the tightest deadline sustainable against the real 36/run Booking cap and
+// leaves genuine headroom (~42h mean age) instead of a knife edge.
+export const DEFAULT_SERVICE_DEADLINE_HOURS = 84;
+
+// A critical cell within this fraction of its deadline is DUE_SOON.
+const DUE_SOON_FRACTION = 0.75;
+
+export type ServiceState = "never_served" | "overdue" | "due_soon" | "fresh";
+
+// Band ranks. Lower rank is selected first. Non-critical work (research lane,
+// long-horizon, jalan) always ranks last so it consumes only leftover capacity.
+export const SERVICE_BAND_RANK: Record<ServiceState, number> = {
+  never_served: 0,
+  overdue: 1,
+  due_soon: 2,
+  fresh: 3
+};
+export const NON_CRITICAL_BAND_RANK = 4;
+
+// Classify a cell's service state from its last observation.
+// A missing last-observed time is NEVER_SERVED — never "fresh" (no
+// missing-means-zero, per the standing UNKNOWN-is-not-zero rule).
+export function classifyServiceState(
+  lastIso: string | undefined,
+  nowIso: string,
+  deadlineHours: number
+): ServiceState {
+  if (lastIso === undefined || lastIso === "") return "never_served";
+  const ageH = hoursBetween(lastIso, nowIso);
+  if (!Number.isFinite(ageH) || ageH < 0) return "never_served";
+  if (ageH >= deadlineHours) return "overdue";
+  if (ageH >= deadlineHours * DUE_SOON_FRACTION) return "due_soon";
+  return "fresh";
+}
+
 export interface RotatingDemandConfig {
   public_holidays: Record<string, string>;
   long_weekend_dates: ReadonlySet<string>;
@@ -83,6 +156,13 @@ export interface RotatingTarget {
   priority_score: number;
   reason_codes: string[];
   estimated_page_count: number;
+  // Phase ZMI-RMS-FAIRNESS-V1 service-state fields. rms_critical is true only
+  // for Booking cells inside the RMS pricing horizon; everything else is
+  // research/rotation work and lands in the non-critical band.
+  rms_critical: boolean;
+  service_state: ServiceState;
+  service_age_hours: number | null;
+  band_rank: number;
 }
 
 export const MAX_TARGETS_PER_PROPERTY_PER_RUN = 2;
@@ -115,6 +195,15 @@ export interface RotatingPlan {
   ordinary_weekday_near_term_selected_count: number;
   forced_checkin_candidate_count: number;
   forced_checkin_selected_count: number;
+  // Phase ZMI-RMS-FAIRNESS-V1 service-fairness diagnostics.
+  service_deadline_hours: number;
+  rms_critical_lead_days: number;
+  rms_critical_candidate_count: number;
+  rms_critical_selected_count: number;
+  candidates_by_service_state: Record<ServiceState, number>;
+  selected_by_service_state: Record<ServiceState, number>;
+  selected_non_critical_count: number;
+  max_selected_service_age_hours: number | null;
 }
 
 function parseYmd(iso: string): Date {
@@ -278,9 +367,13 @@ export function buildRotatingPlan(input: {
   caps?: RotatingCaps;
   nearTermDenseDays?: number;
   forcedDates?: readonly string[];
+  serviceDeadlineHours?: number;
+  rmsCriticalLeadDays?: number;
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
   const denseDays = input.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
+  const deadlineHours = input.serviceDeadlineHours ?? DEFAULT_SERVICE_DEADLINE_HOURS;
+  const criticalLeadDays = input.rmsCriticalLeadDays ?? RMS_CRITICAL_LEAD_DAYS;
   const slot = buildSlot(input.runDateIso, input.slotHourJst);
   const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: input.forcedDates ?? [] });
 
@@ -300,6 +393,15 @@ export function buildRotatingPlan(input: {
       }
       const offset = offsetDays(input.runDateIso, stayDate);
       const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false, { offset, forced, nearTermDenseDays: denseDays });
+      // Phase ZMI-RMS-FAIRNESS-V1: classify service state so never-served and
+      // overdue RMS-critical cells outrank recently-served ones. Only Booking
+      // cells inside the RMS pricing horizon are critical; Jalan and the
+      // long-horizon research lane keep their existing behaviour.
+      const isCritical = target.source === "booking" && offset >= 1 && offset <= criticalLeadDays;
+      const serviceState = classifyServiceState(lastIso, input.nowIso, deadlineHours);
+      const ageH = lastIso === undefined ? null : hoursBetween(lastIso, input.nowIso);
+      const bandRank = isCritical ? SERVICE_BAND_RANK[serviceState] : NON_CRITICAL_BAND_RANK;
+      const serviceReasons = isCritical ? [...reasons, `service_${serviceState}`, "rms_critical"] : reasons;
       candidates.push({
         source: target.source,
         property_slug: target.property_slug,
@@ -309,8 +411,12 @@ export function buildRotatingPlan(input: {
         bucket,
         tier: target.tier,
         priority_score: score,
-        reason_codes: reasons,
-        estimated_page_count: 1
+        reason_codes: serviceReasons,
+        estimated_page_count: 1,
+        rms_critical: isCritical,
+        service_state: serviceState,
+        service_age_hours: ageH !== null && Number.isFinite(ageH) ? ageH : null,
+        band_rank: bandRank
       });
     }
   }
@@ -345,10 +451,9 @@ export function buildRotatingPlan(input: {
   // General fix: no property-specific exception, same mechanism (and the same
   // roundRobinByGroup helper) proven in priorityRefreshTiers.ts's own
   // starvation fix.
-  function interleaveAndRotate(source: "booking" | "jalan"): RotatingTarget[] {
-    const sourceCandidates = candidates.filter((c) => c.source === source);
-    const interleaved = roundRobinByGroup(sourceCandidates, (c) => c.property_slug);
-    const groupCount = new Set(sourceCandidates.map((c) => c.property_slug)).size;
+  function interleaveAndRotate(pool: readonly RotatingTarget[]): RotatingTarget[] {
+    const interleaved = roundRobinByGroup([...pool], (c) => c.property_slug);
+    const groupCount = new Set(pool.map((c) => c.property_slug)).size;
     if (groupCount === 0) return interleaved;
     const dayOffset = epochDay(input.runDateIso) % groupCount;
     const offsetInGroups = (dayOffset + slot.slot_index) % groupCount;
@@ -359,7 +464,26 @@ export function buildRotatingPlan(input: {
     // shifts which group's turn comes first, without needing any conversion.
     return rotate(interleaved, offsetInGroups);
   }
-  const rotated = [...interleaveAndRotate("booking"), ...interleaveAndRotate("jalan")];
+
+  // Phase ZMI-RMS-FAIRNESS-V1: order by service band FIRST, then apply the
+  // proven per-property interleave+rotation WITHIN each band. A never-served or
+  // overdue RMS-critical cell therefore always precedes a recently-served one,
+  // while property diversity (and its own starvation fix) is preserved inside
+  // the band. Non-critical research work keeps its existing behaviour and is
+  // appended last, so it consumes only leftover capacity.
+  const criticalByBand = new Map<number, RotatingTarget[]>();
+  const nonCritical: RotatingTarget[] = [];
+  for (const c of candidates) {
+    if (!c.rms_critical) { nonCritical.push(c); continue; }
+    const arr = criticalByBand.get(c.band_rank);
+    if (arr === undefined) criticalByBand.set(c.band_rank, [c]); else arr.push(c);
+  }
+  const rotated: RotatingTarget[] = [];
+  for (const rank of [...criticalByBand.keys()].sort((a, b) => a - b)) {
+    rotated.push(...interleaveAndRotate(criticalByBand.get(rank)!));
+  }
+  rotated.push(...interleaveAndRotate(nonCritical.filter((c) => c.source === "booking")));
+  rotated.push(...interleaveAndRotate(nonCritical.filter((c) => c.source === "jalan")));
 
   // Bucket soft targets: short 35% / mid 40% / long(+winter) 25% of total cap.
   const bucketSoftMax: Record<RotatingBucket, number> = {
@@ -460,12 +584,28 @@ export function buildRotatingPlan(input: {
     ordinary_weekday_near_term_candidate_count: candidates.filter(isOrdinaryWeekdayNearTerm).length,
     ordinary_weekday_near_term_selected_count: selected.filter(isOrdinaryWeekdayNearTerm).length,
     forced_checkin_candidate_count: candidates.filter(isForced).length,
-    forced_checkin_selected_count: selected.filter(isForced).length
+    forced_checkin_selected_count: selected.filter(isForced).length,
+    service_deadline_hours: deadlineHours,
+    rms_critical_lead_days: criticalLeadDays,
+    rms_critical_candidate_count: candidates.filter((c) => c.rms_critical).length,
+    rms_critical_selected_count: selected.filter((c) => c.rms_critical).length,
+    candidates_by_service_state: countServiceStates(candidates),
+    selected_by_service_state: countServiceStates(selected.filter((c) => c.rms_critical)),
+    selected_non_critical_count: selected.filter((c) => !c.rms_critical).length,
+    max_selected_service_age_hours: selected
+      .filter((c) => c.rms_critical && c.service_age_hours !== null)
+      .reduce<number | null>((mx, c) => (mx === null || c.service_age_hours! > mx ? c.service_age_hours! : mx), null)
   };
 }
 
 function keyOf(t: RotatingTarget): string {
   return `${t.source}|${t.property_slug}|${t.stay_date}`;
+}
+
+function countServiceStates(list: readonly RotatingTarget[]): Record<ServiceState, number> {
+  const out: Record<ServiceState, number> = { never_served: 0, overdue: 0, due_soon: 0, fresh: 0 };
+  for (const t of list) if (t.rms_critical) out[t.service_state] += 1;
+  return out;
 }
 
 function rotate<T>(arr: readonly T[], by: number): T[] {
@@ -484,4 +624,13 @@ function withinHours(pastIso: string, nowIso: string, hours: number): boolean {
   const past = parseYmd(pastIso.slice(0, 10)).getTime() + hourMs(pastIso);
   const now = parseYmd(nowIso.slice(0, 10)).getTime() + hourMs(nowIso);
   return now - past < hours * 60 * 60 * 1000 && now - past >= 0;
+}
+
+// Elapsed hours between two ISO timestamps, using the same date+hour parsing as
+// withinHours so cooldown and service-state agree on what "age" means.
+function hoursBetween(pastIso: string, nowIso: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}/u.test(pastIso) || !/^\d{4}-\d{2}-\d{2}/u.test(nowIso)) return Number.NaN;
+  const past = parseYmd(pastIso.slice(0, 10)).getTime() + hourMs(pastIso);
+  const now = parseYmd(nowIso.slice(0, 10)).getTime() + hourMs(nowIso);
+  return (now - past) / (60 * 60 * 1000);
 }

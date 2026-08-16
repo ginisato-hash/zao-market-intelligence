@@ -29,6 +29,10 @@ function target(over: Partial<RotatingTarget>): RotatingTarget {
     priority_score: 10,
     reason_codes: ["weekend"],
     estimated_page_count: 1,
+    rms_critical: false,
+    service_state: "never_served",
+    service_age_hours: null,
+    band_rank: 4,
     ...over
   };
 }
