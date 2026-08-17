@@ -52,7 +52,6 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-19,9917,105
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-20,10826,12028,1202,0.111,up,2026-08-16T13:35:05+09:00,2026-08-17T13:35:07+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-21,13889,17687,3798,0.2735,up,2026-08-16T00:00:02+09:00,2026-08-17T13:35:07+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-22,19768,45680,25912,1.3108,up,2026-08-15T12:00:07+09:00,2026-08-16T18:00:05+09:00
-own_property,miuraya,三浦屋 / Miuraya,booking,2026-08-22,20315,18284,-2031,-0.1,down,2026-08-15T08:00:07+09:00,2026-08-16T10:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-08-22,17952,23055,5103,0.2843,up,2026-06-28T18:00:05+09:00,2026-07-19T04:00:02+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,jalan,2026-08-23,17982,17820,-162,-0.009,down,2026-07-19T00:00:02+09:00,2026-07-20T02:00:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-08-24,11240,10349,-891,-0.0793,down,2026-08-14T14:00:07+09:00,2026-08-15T14:00:05+09:00
@@ -85,6 +84,7 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-19,26775,24
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-20,24905,22415,-2490,-0.1,down,2026-08-14T12:00:06+09:00,2026-08-17T04:00:07+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-21,30330,27297,-3033,-0.1,down,2026-08-14T12:00:06+09:00,2026-08-17T06:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-21,24140,21726,-2414,-0.1,down,2026-08-11T12:00:06+09:00,2026-08-17T00:00:07+09:00
+own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-25,18530,16065,-2465,-0.133,down,2026-08-03T20:00:04+09:00,2026-08-17T14:00:07+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-10-10,28275,32500,4225,0.1494,up,2026-07-19T06:00:06+09:00,2026-07-31T18:00:05+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-10-11,27492,31600,4108,0.1494,up,2026-07-19T14:00:06+09:00,2026-07-31T20:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-10-24,26883,30900,4017,0.1494,up,2026-07-19T08:00:06+09:00,2026-07-31T02:00:06+09:00
