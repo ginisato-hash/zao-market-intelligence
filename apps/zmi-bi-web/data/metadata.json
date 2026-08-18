@@ -1,7 +1,7 @@
 {
-  "generated_at_jst": "2026-08-18T23:10:00+09:00",
-  "latest_collected_at_jst": "2026-08-18T22:00:00+09:00",
-  "history_rows_total": 37571,
+  "generated_at_jst": "2026-08-19T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-08-19T00:00:01+09:00",
+  "history_rows_total": 37586,
   "latest_observation_rows": 3842,
   "unified_rows": 2729,
   "unified_rows_before_retention": 3017,
@@ -50,8 +50,8 @@
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
   "price_movement_rows": 3468,
   "dp_pressure_rows": 116,
-  "price_movement_own_property_rows": 4771,
-  "price_movement_latest_collected_at_jst": "2026-08-18T22:00:00+09:00",
+  "price_movement_own_property_rows": 4773,
+  "price_movement_latest_collected_at_jst": "2026-08-19T00:00:01+09:00",
   "dp_pressure_latest_collected_at_jst": "2026-08-18T22:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 14183,
@@ -70,13 +70,13 @@
     {
       "property": "miuraya",
       "coverage_30d": 0.9333,
-      "coverage_90d": 0.5556,
+      "coverage_90d": 0.5444,
       "status": "critical"
     },
     {
       "property": "kiraku",
       "coverage_30d": 0.9667,
-      "coverage_90d": 0.5556,
+      "coverage_90d": 0.5444,
       "status": "critical"
     }
   ],
@@ -84,19 +84,19 @@
     {
       "property": "hammond",
       "coverage_30d": 0.9667,
-      "coverage_90d": 0.5667,
+      "coverage_90d": 0.5556,
       "status": "critical"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6222,
+      "coverage_90d": 0.6111,
       "status": "warning"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6333,
+      "coverage_90d": 0.6222,
       "status": "warning"
     }
   ],
