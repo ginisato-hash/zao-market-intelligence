@@ -119,4 +119,42 @@ export function roundRobinByGroup<T>(items: readonly T[], groupKeyOf: (item: T) 
   return result;
 }
 
+// OWN-PRICE-COVERAGE-01 (2026-08-19): `near_term` above is, by design, "always
+// full every run" -- it carries no rotation of its own, unlike mid_term/
+// far_term's isSelectedToday cycling. A caller whose downstream page cap is
+// smaller than one property's own near_term+mid+far selected-today count (see
+// runPricingCriticalRecrawl.ts's MAX_PAGES_PER_BATCH, split across own
+// properties via roundRobinByGroup) always keeps that property's earliest
+// dates and permanently starves the rest -- this is a DIFFERENT failure mode
+// than KIRAKU-BOOKING-FIX01 above (which only guarantees fairness ACROSS
+// properties sharing one cap; it does nothing for a single property's OWN
+// date list being longer than its share of that cap).
+//
+// Rotates each group's own item list independently by an
+// epochDay(todayIso)-based offset, so which dates sit at the FRONT of a
+// property's own list -- and therefore survive a downstream truncation --
+// itself advances with the calendar date. Self-healing (no stored state),
+// same idiom as isSelectedToday/KIRAKU-BOOKING-FIX01's day rotation.
+// Cross-property interleave fairness is unaffected: callers already apply
+// roundRobinByGroup AFTER this, unchanged.
+export function rotateWithinGroup<T>(items: readonly T[], groupKeyOf: (item: T) => string, todayIso: string): T[] {
+  const buckets = new Map<string, T[]>();
+  const groupOrder: string[] = [];
+  for (const item of items) {
+    const key = groupKeyOf(item);
+    let bucket = buckets.get(key);
+    if (bucket === undefined) { bucket = []; buckets.set(key, bucket); groupOrder.push(key); }
+    bucket.push(item);
+  }
+  const today = epochDay(todayIso);
+  const out: T[] = [];
+  for (const key of groupOrder) {
+    const bucket = buckets.get(key)!;
+    if (bucket.length === 0) continue;
+    const offset = ((today % bucket.length) + bucket.length) % bucket.length;
+    out.push(...bucket.slice(offset), ...bucket.slice(0, offset));
+  }
+  return out;
+}
+
 export type { RecrawlTarget };

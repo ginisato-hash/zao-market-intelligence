@@ -12,6 +12,7 @@
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
 import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
 import { epochDay, roundRobinByGroup } from "./priorityRefreshTiers";
+import { isOwnPropertyName } from "./ownPropertyTargets";
 
 export type RotatingBucket = "short" | "mid" | "long";
 
@@ -94,6 +95,26 @@ const COOLDOWN_HOURS = 24;
 // RMS pricing horizon (lead days) whose stay-date aggregate freshness the
 // Kiraku RMS actually consumes. Matches the 56-date freshness measurement.
 export const RMS_CRITICAL_LEAD_DAYS = 56;
+
+// OWN-PRICE-COVERAGE-01 (2026-08-19): Kiraku RMS V3 reads its OWN Booking
+// listing price (rms_own_price_position, via a completely separate ingestion
+// path -- syncMarketHistoryDirectory + buildRmsMarketMetrics in the Kiraku-RMS
+// repo, fed by this repo's zao_signals_*.csv history) over a 74-day stay-date
+// horizon -- 18 days beyond RMS_CRITICAL_LEAD_DAYS. A cell in that 57..90-day
+// gap gets NON_CRITICAL_BAND_RANK here regardless of how long it has gone
+// unserved, exactly the pre-fairness-fix starvation this phase exists to
+// prevent -- just for a narrower set of cells (Kiraku/Miuraya's own Booking
+// listings) than RMS_CRITICAL_LEAD_DAYS was scoped to when it was measured
+// off aggregate competitor freshness alone.
+//
+// This is intentionally a SEPARATE constant/flag, not a widened
+// RMS_CRITICAL_LEAD_DAYS: extending the shared competitor threshold would
+// hand every competitor cell out to D+90 the same never_served/overdue
+// priority boost, which is a broadening of competitor discovery this fix must
+// not do. Own-property identity reuses the existing, single canonical
+// isOwnPropertyName() boundary (ownPropertyTargets.ts) -- never redefined
+// here -- so competitor cells are completely unaffected by this constant.
+export const OWN_PROPERTY_CRITICAL_LEAD_DAYS = 90;
 
 // Hard service deadline: a critical cell older than this is OVERDUE. Under the
 // locked aggregate-mean semantic a uniform service interval T yields a mean
@@ -198,6 +219,7 @@ export interface RotatingPlan {
   // Phase ZMI-RMS-FAIRNESS-V1 service-fairness diagnostics.
   service_deadline_hours: number;
   rms_critical_lead_days: number;
+  own_property_critical_lead_days: number;
   rms_critical_candidate_count: number;
   rms_critical_selected_count: number;
   candidates_by_service_state: Record<ServiceState, number>;
@@ -369,11 +391,13 @@ export function buildRotatingPlan(input: {
   forcedDates?: readonly string[];
   serviceDeadlineHours?: number;
   rmsCriticalLeadDays?: number;
+  ownPropertyCriticalLeadDays?: number;
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
   const denseDays = input.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
   const deadlineHours = input.serviceDeadlineHours ?? DEFAULT_SERVICE_DEADLINE_HOURS;
   const criticalLeadDays = input.rmsCriticalLeadDays ?? RMS_CRITICAL_LEAD_DAYS;
+  const ownCriticalLeadDays = input.ownPropertyCriticalLeadDays ?? OWN_PROPERTY_CRITICAL_LEAD_DAYS;
   const slot = buildSlot(input.runDateIso, input.slotHourJst);
   const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: input.forcedDates ?? [] });
 
@@ -397,7 +421,18 @@ export function buildRotatingPlan(input: {
       // overdue RMS-critical cells outrank recently-served ones. Only Booking
       // cells inside the RMS pricing horizon are critical; Jalan and the
       // long-horizon research lane keep their existing behaviour.
-      const isCritical = target.source === "booking" && offset >= 1 && offset <= criticalLeadDays;
+      // Phase OWN-PRICE-COVERAGE-01: Kiraku/Miuraya's own Booking cells get a
+      // WIDER critical horizon (their own downstream own-price consumer needs
+      // more lead days than the shared competitor threshold) -- gated on the
+      // same isOwnPropertyName() boundary everywhere else in this codebase, so
+      // no competitor cell is ever affected by this widened window.
+      const isCriticalCompetitor = target.source === "booking" && offset >= 1 && offset <= criticalLeadDays;
+      const isCriticalOwnProperty =
+        target.source === "booking" &&
+        isOwnPropertyName(target.canonical_property_name) &&
+        offset >= 1 &&
+        offset <= ownCriticalLeadDays;
+      const isCritical = isCriticalCompetitor || isCriticalOwnProperty;
       const serviceState = classifyServiceState(lastIso, input.nowIso, deadlineHours);
       const ageH = lastIso === undefined ? null : hoursBetween(lastIso, input.nowIso);
       const bandRank = isCritical ? SERVICE_BAND_RANK[serviceState] : NON_CRITICAL_BAND_RANK;
@@ -587,6 +622,7 @@ export function buildRotatingPlan(input: {
     forced_checkin_selected_count: selected.filter(isForced).length,
     service_deadline_hours: deadlineHours,
     rms_critical_lead_days: criticalLeadDays,
+    own_property_critical_lead_days: ownCriticalLeadDays,
     rms_critical_candidate_count: candidates.filter((c) => c.rms_critical).length,
     rms_critical_selected_count: selected.filter((c) => c.rms_critical).length,
     candidates_by_service_state: countServiceStates(candidates),

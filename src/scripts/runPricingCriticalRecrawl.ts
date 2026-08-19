@@ -49,7 +49,7 @@ import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppen
 import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } from "../services/crawlThrottlePolicy";
 import { buildPriorityCompetitorTargets, buildOwnPropertyTargets, todayJstIso, type RecrawlTarget } from "../services/priorityRecrawlTargets";
 import { isOwnPropertyName } from "../services/ownPropertyTargets";
-import { buildRefreshPlan, roundRobinByGroup, todaysSelectedTargets } from "../services/priorityRefreshTiers";
+import { buildRefreshPlan, roundRobinByGroup, rotateWithinGroup, todaysSelectedTargets } from "../services/priorityRefreshTiers";
 import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 
 const HISTORY_DIR = ".data/history";
@@ -215,7 +215,15 @@ async function run(): Promise<void> {
   const selectedCompetitorTargets = todaysSelectedTargets(competitorTargets.targets, todayIso);
   const selectedOwnTargets = todaysSelectedTargets(ownTargets.targets, todayIso);
   const competitorLiveQueue = roundRobinByGroup(bookingOnly(selectedCompetitorTargets), (t) => t.canonical_property_key);
-  const ownLiveQueue = roundRobinByGroup(bookingOnly(selectedOwnTargets), (t) => t.canonical_property_key);
+  // OWN-PRICE-COVERAGE-01: own properties' own date lists rotate by calendar day
+  // BEFORE the cross-property interleave, so a per-property page-cap share (see
+  // MAX_PAGES_PER_BATCH below) doesn't always keep the same D+1..D+4 prefix and
+  // starve every later date forever -- see rotateWithinGroup's own doc comment.
+  // Competitor targeting is untouched (no broadening of competitor discovery).
+  const ownLiveQueue = roundRobinByGroup(
+    rotateWithinGroup(bookingOnly(selectedOwnTargets), (t) => t.canonical_property_key, todayIso),
+    (t) => t.canonical_property_key
+  );
   const selectedCompetitor = competitorLiveQueue.slice(0, MAX_PAGES_PER_BATCH);
   const selectedOwn = ownLiveQueue.slice(0, MAX_PAGES_PER_BATCH);
 
