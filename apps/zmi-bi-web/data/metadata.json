@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-08-23T05:10:01+09:00",
-  "latest_collected_at_jst": "2026-08-23T04:00:01+09:00",
-  "history_rows_total": 39913,
-  "latest_observation_rows": 4224,
-  "unified_rows": 3010,
-  "unified_rows_before_retention": 3298,
+  "generated_at_jst": "2026-08-23T07:10:00+09:00",
+  "latest_collected_at_jst": "2026-08-23T06:00:00+09:00",
+  "history_rows_total": 39964,
+  "latest_observation_rows": 4228,
+  "unified_rows": 3012,
+  "unified_rows_before_retention": 3300,
   "distinct_properties": 29,
   "distinct_checkins": 169,
   "sources_included": [
@@ -39,24 +39,24 @@
   "dropped_past_period_keys_count": 3,
   "dropped_past_rows_count": 288,
   "availability_breakdown": {
-    "total": 3010,
-    "available": 2488,
-    "sold_out": 197,
+    "total": 3012,
+    "available": 2492,
+    "sold_out": 196,
     "not_found": 1,
-    "excluded": 324,
-    "ota_unavailable_rate": 0.0734,
-    "data_missing_rate": 0.108,
-    "data_reliability_rate": 0.892
+    "excluded": 323,
+    "ota_unavailable_rate": 0.0729,
+    "data_missing_rate": 0.1076,
+    "data_reliability_rate": 0.8924
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 3734,
+  "price_movement_rows": 3737,
   "dp_pressure_rows": 124,
-  "price_movement_own_property_rows": 5085,
-  "price_movement_latest_collected_at_jst": "2026-08-23T04:00:01+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-08-23T04:00:01+09:00",
+  "price_movement_own_property_rows": 5093,
+  "price_movement_latest_collected_at_jst": "2026-08-23T06:00:00+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-08-23T06:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 15759,
-  "own_kiraku_price": 16848,
+  "own_miuraya_price": 13357,
+  "own_kiraku_price": 11227,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -101,8 +101,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 527,
-  "priority_competitor_vs_own_price_gap": 527,
-  "priority_competitor_price_changes_count": 189,
-  "own_property_price_changes_count": 102
+  "competitor_vs_own_price_gap": 33248,
+  "priority_competitor_vs_own_price_gap": 33248,
+  "priority_competitor_price_changes_count": 192,
+  "own_property_price_changes_count": 104
 }
