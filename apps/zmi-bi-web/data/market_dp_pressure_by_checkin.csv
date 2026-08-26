@@ -83,7 +83,7 @@ checkin,movement_sample_count,weighted_sample_count,price_up_count,price_down_co
 2026-09-05,21,17.8,2,6,2,0,11,-3.28,-0.1843,neutral,"up=2,down=6,sold_out=2,newly_available=0,weighted=17.80 (inventory/DP pressure proxy)",2026-08-26T10:00:00+09:00
 2026-09-06,17,15.08,3,1,2,0,11,2.72,0.1804,neutral,"up=3,down=1,sold_out=2,newly_available=0,weighted=15.08 (inventory/DP pressure proxy)",2026-08-26T12:00:01+09:00
 2026-09-07,15,12.44,0,2,0,0,13,-2,-0.1608,neutral,"up=0,down=2,sold_out=0,newly_available=0,weighted=12.44 (inventory/DP pressure proxy)",2026-08-26T08:00:01+09:00
-2026-09-08,15,11.8,4,0,0,0,11,3.36,0.2847,moderate_upward_pressure,"up=4,down=0,sold_out=0,newly_available=0,weighted=11.80 (inventory/DP pressure proxy)",2026-08-26T10:00:00+09:00
+2026-09-08,16,12.8,4,0,0,0,12,3.36,0.2625,moderate_upward_pressure,"up=4,down=0,sold_out=0,newly_available=0,weighted=12.80 (inventory/DP pressure proxy)",2026-08-26T20:00:01+09:00
 2026-09-09,15,13.72,2,1,0,0,12,1,0.0729,neutral,"up=2,down=1,sold_out=0,newly_available=0,weighted=13.72 (inventory/DP pressure proxy)",2026-08-26T14:00:03+09:00
 2026-09-10,15,13.08,3,3,1,0,8,1,0.0765,neutral,"up=3,down=3,sold_out=1,newly_available=0,weighted=13.08 (inventory/DP pressure proxy)",2026-08-26T12:00:01+09:00
 2026-09-11,17,15.08,2,2,0,0,13,0,0,neutral,"up=2,down=2,sold_out=0,newly_available=0,weighted=15.08 (inventory/DP pressure proxy)",2026-08-26T18:00:01+09:00
