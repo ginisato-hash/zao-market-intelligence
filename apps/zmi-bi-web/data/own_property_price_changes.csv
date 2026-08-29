@@ -99,13 +99,14 @@ own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-21,41038,32589,-8449,-0
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-22,38582,27574,-11008,-0.2853,down,2026-08-25T06:00:00+09:00,2026-08-28T18:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-23,12829,12845,16,0.0012,up,2026-08-26T12:00:01+09:00,2026-08-29T20:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-23,31602,21192,-10410,-0.3294,down,2026-08-26T14:00:03+09:00,2026-08-30T02:00:01+09:00
-own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-24,12470,11397,-1073,-0.086,down,2026-08-22T00:00:00+09:00,2026-08-26T16:00:01+09:00
+own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-24,11397,11717,320,0.0281,up,2026-08-26T16:00:01+09:00,2026-08-30T06:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-24,17510,21275,3765,0.215,up,2026-08-25T18:00:01+09:00,2026-08-29T10:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-25,18207,13931,-4276,-0.2349,down,2026-08-25T06:00:00+09:00,2026-08-28T18:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-25,16524,28091,11567,0.7,up,2026-08-25T12:00:01+09:00,2026-08-29T00:00:02+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-26,18614,15979,-2635,-0.1416,down,2026-08-26T10:00:00+09:00,2026-08-30T00:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-26,20655,25096,4441,0.215,up,2026-08-25T06:00:00+09:00,2026-08-28T18:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-27,14358,15905,1547,0.1077,up,2026-08-25T08:00:01+09:00,2026-08-28T20:00:01+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-27,15759,17965,2206,0.14,up,2026-08-26T16:00:01+09:00,2026-08-30T06:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-28,12240,12485,245,0.02,up,2026-08-20T20:00:00+09:00,2026-08-29T14:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-09-29,12240,12111,-129,-0.0105,down,2026-08-21T00:00:01+09:00,2026-08-27T16:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-09-29,17510,15759,-1751,-0.1,down,2026-08-21T04:00:01+09:00,2026-08-27T14:00:04+09:00
@@ -115,6 +116,7 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-04,17020,16
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-05,16848,17185,337,0.02,up,2026-08-21T00:00:01+09:00,2026-08-27T20:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-10-05,21600,19440,-2160,-0.1,down,2026-08-21T04:00:01+09:00,2026-08-27T16:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-07,16848,16678,-170,-0.0101,down,2026-08-23T00:00:01+09:00,2026-08-29T18:00:01+09:00
+own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-08,16848,16688,-160,-0.0095,down,2026-08-21T02:00:01+09:00,2026-08-30T06:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-10,25520,22431,-3089,-0.121,down,2026-08-23T08:00:01+09:00,2026-08-27T04:00:01+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-10-10,28275,32500,4225,0.1494,up,2026-07-19T06:00:06+09:00,2026-07-31T18:00:05+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-10-10,26370,29300,2930,0.1111,up,2026-08-25T08:00:01+09:00,2026-08-28T20:00:01+09:00
