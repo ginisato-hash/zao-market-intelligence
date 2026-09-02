@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-09-02T11:10:01+09:00",
-  "latest_collected_at_jst": "2026-09-02T10:00:01+09:00",
-  "history_rows_total": 45537,
-  "latest_observation_rows": 4628,
-  "unified_rows": 2973,
-  "unified_rows_before_retention": 3549,
+  "generated_at_jst": "2026-09-02T13:37:42+09:00",
+  "latest_collected_at_jst": "2026-09-02T13:35:01+09:00",
+  "history_rows_total": 45602,
+  "latest_observation_rows": 4629,
+  "unified_rows": 2974,
+  "unified_rows_before_retention": 3550,
   "distinct_properties": 29,
   "distinct_checkins": 163,
   "sources_included": [
@@ -38,8 +38,8 @@
   "dropped_past_period_keys_count": 4,
   "dropped_past_rows_count": 576,
   "availability_breakdown": {
-    "total": 2973,
-    "available": 2413,
+    "total": 2974,
+    "available": 2414,
     "sold_out": 213,
     "not_found": 1,
     "excluded": 346,
@@ -48,14 +48,14 @@
     "data_reliability_rate": 0.8833
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 4106,
+  "price_movement_rows": 4107,
   "dp_pressure_rows": 136,
-  "price_movement_own_property_rows": 5853,
-  "price_movement_latest_collected_at_jst": "2026-09-02T10:00:01+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-09-02T10:00:01+09:00",
+  "price_movement_own_property_rows": 5865,
+  "price_movement_latest_collected_at_jst": "2026-09-02T13:35:01+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-09-02T13:35:01+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 14183,
-  "own_kiraku_price": 14272,
+  "own_miuraya_price": 21726,
+  "own_kiraku_price": 37077,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -100,8 +100,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 4237,
-  "priority_competitor_vs_own_price_gap": 4237,
-  "priority_competitor_price_changes_count": 209,
+  "competitor_vs_own_price_gap": -11581,
+  "priority_competitor_vs_own_price_gap": -11581,
+  "priority_competitor_price_changes_count": 211,
   "own_property_price_changes_count": 145
 }
