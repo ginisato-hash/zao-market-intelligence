@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-09-06T05:10:00+09:00",
-  "latest_collected_at_jst": "2026-09-06T04:00:01+09:00",
-  "history_rows_total": 47315,
-  "latest_observation_rows": 4739,
-  "unified_rows": 3046,
-  "unified_rows_before_retention": 3622,
+  "generated_at_jst": "2026-09-06T07:10:01+09:00",
+  "latest_collected_at_jst": "2026-09-06T06:00:01+09:00",
+  "history_rows_total": 47366,
+  "latest_observation_rows": 4746,
+  "unified_rows": 3051,
+  "unified_rows_before_retention": 3627,
   "distinct_properties": 29,
-  "distinct_checkins": 166,
+  "distinct_checkins": 167,
   "sources_included": [
     "booking",
     "jalan",
@@ -38,24 +38,24 @@
   "dropped_past_period_keys_count": 4,
   "dropped_past_rows_count": 576,
   "availability_breakdown": {
-    "total": 3046,
-    "available": 2458,
-    "sold_out": 226,
+    "total": 3051,
+    "available": 2462,
+    "sold_out": 227,
     "not_found": 1,
     "excluded": 361,
-    "ota_unavailable_rate": 0.0842,
-    "data_missing_rate": 0.1188,
-    "data_reliability_rate": 0.8812
+    "ota_unavailable_rate": 0.0844,
+    "data_missing_rate": 0.1186,
+    "data_reliability_rate": 0.8814
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 4205,
+  "price_movement_rows": 4210,
   "dp_pressure_rows": 138,
-  "price_movement_own_property_rows": 6093,
-  "price_movement_latest_collected_at_jst": "2026-09-06T04:00:01+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-09-06T02:00:01+09:00",
+  "price_movement_own_property_rows": 6100,
+  "price_movement_latest_collected_at_jst": "2026-09-06T06:00:01+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-09-06T06:00:01+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 14183,
-  "own_kiraku_price": 11541,
+  "own_miuraya_price": 22590,
+  "own_kiraku_price": 12170,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -70,7 +70,7 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 0.9889,
+      "coverage_90d": 1,
       "status": "warning"
     },
     {
@@ -84,13 +84,13 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.5889,
+      "coverage_90d": 0.6,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6444,
+      "coverage_90d": 0.6556,
       "status": "warning"
     },
     {
@@ -100,8 +100,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 8760,
-  "priority_competitor_vs_own_price_gap": 8760,
-  "priority_competitor_price_changes_count": 216,
+  "competitor_vs_own_price_gap": 4242,
+  "priority_competitor_vs_own_price_gap": 4242,
+  "priority_competitor_price_changes_count": 214,
   "own_property_price_changes_count": 147
 }
