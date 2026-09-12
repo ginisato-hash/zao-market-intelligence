@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-09-12T09:10:00+09:00",
-  "latest_collected_at_jst": "2026-09-12T08:00:01+09:00",
-  "history_rows_total": 50573,
-  "latest_observation_rows": 5057,
-  "unified_rows": 3234,
-  "unified_rows_before_retention": 3810,
+  "generated_at_jst": "2026-09-12T11:10:00+09:00",
+  "latest_collected_at_jst": "2026-09-12T10:00:00+09:00",
+  "history_rows_total": 50624,
+  "latest_observation_rows": 5063,
+  "unified_rows": 3238,
+  "unified_rows_before_retention": 3814,
   "distinct_properties": 29,
   "distinct_checkins": 173,
   "sources_included": [
@@ -38,21 +38,21 @@
   "dropped_past_period_keys_count": 4,
   "dropped_past_rows_count": 576,
   "availability_breakdown": {
-    "total": 3234,
-    "available": 2590,
-    "sold_out": 268,
+    "total": 3238,
+    "available": 2594,
+    "sold_out": 269,
     "not_found": 1,
-    "excluded": 375,
-    "ota_unavailable_rate": 0.0938,
-    "data_missing_rate": 0.1163,
-    "data_reliability_rate": 0.8837
+    "excluded": 374,
+    "ota_unavailable_rate": 0.094,
+    "data_missing_rate": 0.1158,
+    "data_reliability_rate": 0.8842
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 4498,
+  "price_movement_rows": 4504,
   "dp_pressure_rows": 143,
-  "price_movement_own_property_rows": 6508,
-  "price_movement_latest_collected_at_jst": "2026-09-12T08:00:01+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-09-12T08:00:01+09:00",
+  "price_movement_own_property_rows": 6514,
+  "price_movement_latest_collected_at_jst": "2026-09-12T10:00:00+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-09-12T10:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 20430,
   "own_kiraku_price": 12852,
@@ -96,7 +96,7 @@
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6444,
+      "coverage_90d": 0.6556,
       "status": "warning"
     }
   ],
