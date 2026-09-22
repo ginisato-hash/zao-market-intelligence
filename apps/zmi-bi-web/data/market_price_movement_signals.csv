@@ -3081,7 +3081,7 @@ jalan,ル・ベール蔵王,2026-09-27,2026-07-31T14:00:06+09:00,2026-08-08T02:0
 jalan,吉田屋,2026-09-27,2026-07-29T22:00:07+09:00,2026-07-31T08:00:06+09:00,34,available,available,,,,,not_comparable,none,confirmed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯リゾート ルーセントタカミヤ,2026-09-27,,2026-09-01T14:00:01+09:00,,unknown,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯舎 創,2026-09-27,2026-08-19T12:00:01+09:00,2026-08-25T02:00:01+09:00,134,available,available,,,,,not_comparable,none,confirmed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,深山荘 高見屋,2026-09-27,2026-09-18T02:00:01+09:00,2026-09-20T08:00:00+09:00,54,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,深山荘 高見屋,2026-09-27,2026-09-20T08:00:00+09:00,2026-09-23T00:00:01+09:00,64,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,源泉湯宿 蔵王プラザホテル,2026-09-27,2026-08-14T20:00:05+09:00,2026-09-10T00:00:01+09:00,628,available,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王・和歌（うた）の宿 わかまつや,2026-09-27,,2026-08-12T20:00:04+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王アストリアホテル,2026-09-27,2026-08-14T18:00:04+09:00,2026-08-19T04:00:01+09:00,106,available,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -3117,7 +3117,7 @@ jalan,たかみや瑠璃倶楽,2026-09-28,2026-09-21T12:00:00+09:00,2026-09-22T1
 jalan,ペンションぷうたろう,2026-09-28,,2026-09-13T14:00:01+09:00,,unknown,available,,19800,,,unknown,none,confirmed_room_only,confirmed_two_person_standard_room,high,high,1,0,19800,false,inventory_dp_pressure_proxy
 jalan,吉田屋,2026-09-28,,2026-09-08T00:00:01+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯舎 創,2026-09-28,,2026-09-13T16:00:01+09:00,,unknown,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,深山荘 高見屋,2026-09-28,2026-09-19T04:00:01+09:00,2026-09-21T06:00:01+09:00,50,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,深山荘 高見屋,2026-09-28,2026-09-21T06:00:01+09:00,2026-09-23T00:00:01+09:00,42,available,available,,,,,not_comparable,none,confirmed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,源泉湯宿 蔵王プラザホテル,2026-09-28,,2026-09-10T10:00:01+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王アストリアホテル,2026-09-28,,2026-09-10T16:00:01+09:00,,unknown,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王四季のホテル,2026-09-28,2026-09-16T20:00:01+09:00,2026-09-18T06:00:01+09:00,34,available,available,,,,,unknown,none,confirmed_room_only,confirmed_two_person_standard_room,high,high,1,0,35640,false,inventory_dp_pressure_proxy
@@ -3179,7 +3179,7 @@ booking,蔵王四季のホテル,2026-09-30,2026-09-13T20:00:01+09:00,2026-09-19
 booking,蔵王国際ホテル,2026-09-30,2026-09-19T10:00:00+09:00,2026-09-22T08:00:00+09:00,70,available,available,33000,33000,0,0,same_price_available,noise,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,33000,false,inventory_dp_pressure_proxy
 booking,蔵王温泉 高砂屋旅館,2026-09-30,2026-09-18T18:00:02+09:00,2026-09-21T16:00:00+09:00,70,sold_out,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ONSEN & STAY OAKHILL,2026-09-30,,2026-09-12T12:00:01+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,たかみや瑠璃倶楽,2026-09-30,2026-09-16T08:00:01+09:00,2026-09-17T20:00:01+09:00,36,available,available,,,,,not_comparable,none,confirmed_room_only,confirmed_two_person_standard_room,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,たかみや瑠璃倶楽,2026-09-30,2026-09-17T20:00:01+09:00,2026-09-23T00:00:01+09:00,124,available,available,,,,,not_comparable,none,confirmed_room_only,confirmed_two_person_standard_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンション木いちご,2026-09-30,,2026-09-07T14:00:01+09:00,,unknown,available,,,,,not_comparable,none,confirmed_room_only,excluded_large_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,吉田屋,2026-09-30,2026-09-07T04:00:01+09:00,2026-09-08T06:00:01+09:00,26,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2026-09-30,2026-09-20T04:00:01+09:00,2026-09-21T04:00:01+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -3254,7 +3254,7 @@ jalan,深山荘 高見屋,2026-10-02,2026-09-18T16:00:01+09:00,2026-09-20T06:00:
 jalan,源泉湯宿 蔵王プラザホテル,2026-10-02,2026-08-14T22:00:06+09:00,2026-09-11T06:00:00+09:00,656,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王アストリアホテル,2026-10-02,,2026-08-14T20:00:05+09:00,,unknown,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王四季のホテル,2026-10-02,2026-09-17T10:00:02+09:00,2026-09-20T20:00:00+09:00,82,available,available,,,,,unknown,none,confirmed_room_only,confirmed_two_person_standard_room,high,high,1,0,37620,false,inventory_dp_pressure_proxy
-jalan,蔵王国際ホテル,2026-10-02,2026-09-17T00:00:01+09:00,2026-09-20T08:00:00+09:00,80,available,available,,,,,not_comparable,none,confirmed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,蔵王国際ホテル,2026-10-02,2026-09-20T08:00:00+09:00,2026-09-23T00:00:01+09:00,64,available,available,,,,,not_comparable,none,confirmed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王温泉 高砂屋旅館,2026-10-02,,2026-09-12T22:00:01+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,HAMMOND,2026-10-03,2026-09-16T08:00:01+09:00,2026-09-19T18:00:01+09:00,82,available,available,22919,22919,0,0,same_price_available,noise,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,22919,false,inventory_dp_pressure_proxy
 booking,JURIN,2026-10-03,2026-09-17T02:00:03+09:00,2026-09-20T14:00:01+09:00,84,available,available,40590,40590,0,0,same_price_available,noise,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,40590,false,inventory_dp_pressure_proxy
@@ -3386,7 +3386,7 @@ booking,蔵王四季のホテル,2026-10-06,2026-09-14T08:00:01+09:00,2026-09-17
 booking,蔵王国際ホテル,2026-10-06,2026-08-25T06:00:00+09:00,2026-08-31T12:00:01+09:00,150,available,available,35640,,5280,0.1481,price_up_available,strong,assumed_room_only,probable_two_person_standard_room,medium,medium,0.36,0.36,40920,false,inventory_dp_pressure_proxy
 booking,蔵王温泉 高砂屋旅館,2026-10-06,2026-09-19T18:00:01+09:00,2026-09-22T12:00:00+09:00,66,sold_out,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ONSEN & STAY OAKHILL,2026-10-06,,2026-09-12T14:00:03+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,たかみや瑠璃倶楽,2026-10-06,2026-09-18T16:00:01+09:00,2026-09-22T00:00:01+09:00,80,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,たかみや瑠璃倶楽,2026-10-06,2026-09-22T00:00:01+09:00,2026-09-23T00:00:01+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンションぷうたろう,2026-10-06,,2026-09-13T14:00:01+09:00,,unknown,available,,22000,,,unknown,none,confirmed_room_only,confirmed_two_person_standard_room,high,high,1,0,22000,false,inventory_dp_pressure_proxy
 jalan,名湯舎 創,2026-10-06,,2026-09-14T06:00:01+09:00,,unknown,available,,,,,not_comparable,none,confirmed_room_only,excluded_single_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2026-10-06,2026-09-20T08:00:00+09:00,2026-09-21T08:00:00+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -3687,7 +3687,7 @@ booking,蔵王温泉 高砂屋旅館,2026-10-15,2026-09-19T00:00:00+09:00,2026-0
 jalan,たかみや瑠璃倶楽,2026-10-15,2026-09-16T22:00:01+09:00,2026-09-18T06:00:01+09:00,32,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2026-10-15,2026-09-17T12:00:01+09:00,2026-09-20T20:00:00+09:00,80,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王四季のホテル,2026-10-15,,2026-09-17T10:00:02+09:00,,unknown,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,蔵王国際ホテル,2026-10-15,2026-09-20T14:00:01+09:00,2026-09-21T18:00:01+09:00,28,available,available,,,,,not_comparable,none,confirmed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,蔵王国際ホテル,2026-10-15,2026-09-21T18:00:01+09:00,2026-09-23T00:00:01+09:00,30,available,available,,,,,not_comparable,none,confirmed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,HAMMOND,2026-10-16,2026-09-18T02:00:01+09:00,2026-09-20T18:00:01+09:00,64,available,available,13860,16335,2475,0.1786,price_up_available,strong,assumed_room_only,confirmed_two_person_standard_room,high,high,1,1,16335,false,inventory_dp_pressure_proxy
 booking,JURIN,2026-10-16,2026-09-18T16:00:01+09:00,2026-09-22T08:00:00+09:00,88,available,available,38610,38610,0,0,same_price_available,noise,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,38610,false,inventory_dp_pressure_proxy
 booking,ＫＫＲ蔵王 白銀荘,2026-10-16,2026-09-18T10:00:01+09:00,2026-09-21T22:00:01+09:00,84,available,available,23700,23700,0,0,same_price_available,noise,assumed_room_only,probable_two_person_standard_room,medium,medium,0.36,0,23700,false,inventory_dp_pressure_proxy
@@ -4606,7 +4606,7 @@ jalan,ペンションぷうたろう,2026-12-26,2026-09-18T08:00:01+09:00,2026-0
 jalan,ペンション木いちご,2026-12-26,2026-09-21T10:00:01+09:00,2026-09-22T12:00:00+09:00,26,available,available,,,,,not_comparable,none,confirmed_room_only,excluded_large_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンション櫻,2026-12-26,2026-09-20T16:00:01+09:00,2026-09-21T18:00:01+09:00,26,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,吉田屋,2026-12-26,2026-07-12T10:00:06+09:00,2026-09-08T10:00:01+09:00,1392,sold_out,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,名湯リゾート ルーセントタカミヤ,2026-12-26,2026-09-20T14:00:01+09:00,2026-09-21T16:00:00+09:00,26,available,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,名湯リゾート ルーセントタカミヤ,2026-12-26,2026-09-21T16:00:00+09:00,2026-09-23T00:00:01+09:00,32,available,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯舎 創,2026-12-26,,2026-08-24T18:00:01+09:00,,unknown,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2026-12-26,2026-09-21T22:00:01+09:00,2026-09-22T22:00:00+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,源泉湯宿 蔵王プラザホテル,2026-12-26,,2026-09-11T12:00:00+09:00,,unknown,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -4660,7 +4660,7 @@ jalan,蔵王温泉 高砂屋旅館,2026-12-30,2026-09-17T20:00:01+09:00,2026-09-
 jalan,こけしの宿 招仙閣,2026-12-31,2026-09-20T06:00:00+09:00,2026-09-21T18:00:01+09:00,36,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,たかみや瑠璃倶楽,2026-12-31,2026-09-20T16:00:01+09:00,2026-09-21T16:00:00+09:00,24,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンションぷうたろう,2026-12-31,2026-09-12T20:00:00+09:00,2026-09-14T22:00:01+09:00,50,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,ペンション木いちご,2026-12-31,2026-09-20T20:00:00+09:00,2026-09-22T00:00:01+09:00,28,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,ペンション木いちご,2026-12-31,2026-09-22T00:00:01+09:00,2026-09-23T00:00:01+09:00,24,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンション櫻,2026-12-31,2026-09-21T14:00:00+09:00,2026-09-22T14:00:01+09:00,24,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯リゾート ルーセントタカミヤ,2026-12-31,2026-09-20T22:00:01+09:00,2026-09-22T06:00:00+09:00,32,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯舎 創,2026-12-31,,2026-08-25T02:00:01+09:00,,unknown,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -4722,7 +4722,7 @@ jalan,蔵王温泉 高砂屋旅館,2027-01-10,2026-09-13T04:00:00+09:00,2026-09-
 jalan,こけしの宿 招仙閣,2027-01-11,2026-08-17T00:00:07+09:00,2026-09-18T08:00:01+09:00,776,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,たかみや瑠璃倶楽,2027-01-11,2026-09-21T00:00:01+09:00,2026-09-22T02:15:03+09:00,26.25,available,available,,,,,not_comparable,none,confirmed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンションぷうたろう,2027-01-11,2026-09-10T10:00:01+09:00,2026-09-15T04:00:01+09:00,114,available,available,,,,,not_comparable,none,confirmed_room_only,excluded_single_room,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,ペンション木いちご,2027-01-11,2026-09-17T22:00:01+09:00,2026-09-20T18:00:01+09:00,68,available,available,,,,,not_comparable,none,confirmed_room_only,excluded_large_room,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,ペンション木いちご,2027-01-11,2026-09-20T18:00:01+09:00,2026-09-23T00:00:01+09:00,54,available,available,,,,,not_comparable,none,confirmed_room_only,excluded_large_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,ペンション櫻,2027-01-11,2026-09-20T12:00:00+09:00,2026-09-22T16:00:01+09:00,52,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯リゾート ルーセントタカミヤ,2027-01-11,2026-09-19T00:00:00+09:00,2026-09-21T08:00:00+09:00,56,available,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2027-01-11,2026-09-17T08:00:01+09:00,2026-09-22T06:00:00+09:00,118,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -4765,7 +4765,7 @@ jalan,ペンション木いちご,2027-02-06,2026-09-18T10:00:01+09:00,2026-09-2
 jalan,ペンション櫻,2027-02-06,2026-08-30T20:00:01+09:00,2026-09-04T22:00:01+09:00,122,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯リゾート ルーセントタカミヤ,2027-02-06,2026-08-25T22:00:01+09:00,2026-09-02T08:00:01+09:00,178,sold_out,available,,,,,not_comparable,none,meal_included,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2027-02-06,2026-09-17T16:00:01+09:00,2026-09-22T14:00:01+09:00,118,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,蔵王四季のホテル,2027-02-06,2026-09-20T22:00:01+09:00,2026-09-21T22:00:01+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,蔵王四季のホテル,2027-02-06,2026-09-21T22:00:01+09:00,2026-09-23T00:00:01+09:00,26,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王国際ホテル,2027-02-06,2026-09-07T16:00:01+09:00,2026-09-11T20:00:01+09:00,100,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王温泉 高砂屋旅館,2027-02-06,2026-09-13T16:00:01+09:00,2026-09-14T16:00:01+09:00,24,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,たかみや瑠璃倶楽,2027-02-11,2026-09-14T14:00:01+09:00,2026-09-21T06:00:01+09:00,160,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -4774,7 +4774,7 @@ jalan,ペンション木いちご,2027-02-11,2026-09-17T06:00:01+09:00,2026-09-2
 jalan,ペンション櫻,2027-02-11,2026-08-30T20:00:01+09:00,2026-09-05T02:00:01+09:00,126,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,名湯リゾート ルーセントタカミヤ,2027-02-11,2026-08-26T00:00:01+09:00,2026-09-02T14:00:01+09:00,182,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,深山荘 高見屋,2027-02-11,2026-09-12T22:00:01+09:00,2026-09-22T16:00:01+09:00,234,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-jalan,蔵王四季のホテル,2027-02-11,2026-09-21T00:00:01+09:00,2026-09-22T00:00:01+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+jalan,蔵王四季のホテル,2027-02-11,2026-09-22T00:00:01+09:00,2026-09-23T00:00:01+09:00,24,available,available,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王国際ホテル,2027-02-11,2026-09-07T22:00:01+09:00,2026-09-11T22:00:01+09:00,96,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,蔵王温泉 高砂屋旅館,2027-02-11,2026-09-13T16:00:01+09:00,2026-09-14T16:00:01+09:00,24,sold_out,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 jalan,たかみや瑠璃倶楽,2027-02-13,2026-09-14T20:00:01+09:00,2026-09-21T06:00:01+09:00,154,available,sold_out,,,,,not_comparable,none,unknown_meal_basis,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
