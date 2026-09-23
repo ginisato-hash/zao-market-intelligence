@@ -1,7 +1,7 @@
 {
-  "generated_at_jst": "2026-09-23T23:10:00+09:00",
-  "latest_collected_at_jst": "2026-09-23T22:00:00+09:00",
-  "history_rows_total": 57116,
+  "generated_at_jst": "2026-09-24T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-09-24T00:00:01+09:00",
+  "history_rows_total": 57131,
   "latest_observation_rows": 5448,
   "unified_rows": 3088,
   "unified_rows_before_retention": 4067,
@@ -49,9 +49,9 @@
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
   "price_movement_rows": 4838,
   "dp_pressure_rows": 159,
-  "price_movement_own_property_rows": 7401,
-  "price_movement_latest_collected_at_jst": "2026-09-23T22:00:00+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-09-23T22:00:00+09:00",
+  "price_movement_own_property_rows": 7404,
+  "price_movement_latest_collected_at_jst": "2026-09-24T00:00:01+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-09-24T00:00:01+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 14183,
   "own_kiraku_price": 13754,
@@ -69,13 +69,13 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     },
     {
       "property": "kiraku",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     }
   ],
@@ -83,19 +83,19 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.5889,
+      "coverage_90d": 0.5778,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6444,
+      "coverage_90d": 0.6333,
       "status": "warning"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6333,
+      "coverage_90d": 0.6222,
       "status": "warning"
     }
   ],
