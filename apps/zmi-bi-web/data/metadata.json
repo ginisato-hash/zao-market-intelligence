@@ -1,7 +1,7 @@
 {
-  "generated_at_jst": "2026-09-27T23:10:00+09:00",
-  "latest_collected_at_jst": "2026-09-27T22:00:00+09:00",
-  "history_rows_total": 59110,
+  "generated_at_jst": "2026-09-28T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-09-28T00:00:00+09:00",
+  "history_rows_total": 59125,
   "latest_observation_rows": 5619,
   "unified_rows": 3183,
   "unified_rows_before_retention": 4162,
@@ -38,19 +38,19 @@
   "dropped_past_rows_count": 979,
   "availability_breakdown": {
     "total": 3183,
-    "available": 2488,
-    "sold_out": 308,
+    "available": 2487,
+    "sold_out": 309,
     "not_found": 0,
     "excluded": 387,
-    "ota_unavailable_rate": 0.1102,
+    "ota_unavailable_rate": 0.1105,
     "data_missing_rate": 0.1216,
     "data_reliability_rate": 0.8784
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
   "price_movement_rows": 4999,
   "dp_pressure_rows": 162,
-  "price_movement_own_property_rows": 7649,
-  "price_movement_latest_collected_at_jst": "2026-09-27T22:00:00+09:00",
+  "price_movement_own_property_rows": 7651,
+  "price_movement_latest_collected_at_jst": "2026-09-28T00:00:00+09:00",
   "dp_pressure_latest_collected_at_jst": "2026-09-27T22:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 23760,
@@ -69,13 +69,13 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     },
     {
       "property": "kiraku",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     }
   ],
@@ -83,19 +83,19 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.6222,
+      "coverage_90d": 0.6111,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6333,
+      "coverage_90d": 0.6222,
       "status": "warning"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6556,
+      "coverage_90d": 0.6444,
       "status": "warning"
     }
   ],
