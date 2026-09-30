@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-09-30T23:10:00+09:00",
+  "generated_at_jst": "2026-10-01T01:10:00+09:00",
   "latest_collected_at_jst": "2026-09-30T20:00:00+09:00",
   "history_rows_total": 60426,
   "latest_observation_rows": 5707,
-  "unified_rows": 3226,
+  "unified_rows": 2854,
   "unified_rows_before_retention": 4205,
-  "distinct_properties": 29,
-  "distinct_checkins": 170,
+  "distinct_properties": 28,
+  "distinct_checkins": 155,
   "sources_included": [
     "booking",
     "jalan",
@@ -14,11 +14,10 @@
   ],
   "data_policy": "ZMI history only. All sources unified. No external data.",
   "period_retention_policy": "current_or_next_period_plus_3_previous_periods_and_all_future_periods",
-  "current_period_key_jst": "2026-09_late",
-  "default_period_key": "2026-09_late",
+  "current_period_key_jst": "2026-10_early",
+  "default_period_key": "2026-10_early",
   "retention_previous_periods": 3,
   "retained_period_keys": [
-    "2026-08_early",
     "2026-08_late",
     "2026-09_early",
     "2026-09_late",
@@ -34,17 +33,17 @@
     "2027-02_late",
     "2027-03_early"
   ],
-  "dropped_past_period_keys_count": 5,
-  "dropped_past_rows_count": 979,
+  "dropped_past_period_keys_count": 6,
+  "dropped_past_rows_count": 1351,
   "availability_breakdown": {
-    "total": 3226,
-    "available": 2498,
-    "sold_out": 316,
+    "total": 2854,
+    "available": 2181,
+    "sold_out": 313,
     "not_found": 0,
-    "excluded": 412,
-    "ota_unavailable_rate": 0.1123,
-    "data_missing_rate": 0.1277,
-    "data_reliability_rate": 0.8723
+    "excluded": 360,
+    "ota_unavailable_rate": 0.1255,
+    "data_missing_rate": 0.1261,
+    "data_reliability_rate": 0.8739
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
   "price_movement_rows": 5078,
@@ -83,7 +82,7 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.6,
+      "coverage_90d": 0.5889,
       "status": "warning"
     },
     {
@@ -95,7 +94,7 @@
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6444,
+      "coverage_90d": 0.6333,
       "status": "warning"
     }
   ],
