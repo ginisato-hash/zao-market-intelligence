@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-10-04T13:37:41+09:00",
-  "latest_collected_at_jst": "2026-10-04T13:35:00+09:00",
-  "history_rows_total": 62064,
-  "latest_observation_rows": 5841,
-  "unified_rows": 2954,
-  "unified_rows_before_retention": 4305,
+  "generated_at_jst": "2026-10-04T15:10:00+09:00",
+  "latest_collected_at_jst": "2026-10-04T14:00:00+09:00",
+  "history_rows_total": 62115,
+  "latest_observation_rows": 5847,
+  "unified_rows": 2959,
+  "unified_rows_before_retention": 4310,
   "distinct_properties": 28,
   "distinct_checkins": 155,
   "sources_included": [
@@ -36,23 +36,23 @@
   "dropped_past_period_keys_count": 6,
   "dropped_past_rows_count": 1351,
   "availability_breakdown": {
-    "total": 2954,
-    "available": 2239,
-    "sold_out": 342,
+    "total": 2959,
+    "available": 2242,
+    "sold_out": 344,
     "not_found": 0,
     "excluded": 373,
-    "ota_unavailable_rate": 0.1325,
-    "data_missing_rate": 0.1263,
-    "data_reliability_rate": 0.8737
+    "ota_unavailable_rate": 0.133,
+    "data_missing_rate": 0.1261,
+    "data_reliability_rate": 0.8739
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 5201,
+  "price_movement_rows": 5207,
   "dp_pressure_rows": 166,
-  "price_movement_own_property_rows": 8031,
-  "price_movement_latest_collected_at_jst": "2026-10-04T13:35:00+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-10-04T13:35:00+09:00",
+  "price_movement_own_property_rows": 8035,
+  "price_movement_latest_collected_at_jst": "2026-10-04T14:00:00+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-10-04T14:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 28400,
+  "own_miuraya_price": 24960,
   "own_kiraku_price": 30471,
   "own_property_price_status": [
     {
@@ -82,7 +82,7 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.5778,
+      "coverage_90d": 0.5889,
       "status": "warning"
     },
     {
@@ -98,8 +98,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -12605,
-  "priority_competitor_vs_own_price_gap": -12605,
-  "priority_competitor_price_changes_count": 243,
+  "competitor_vs_own_price_gap": -9895,
+  "priority_competitor_vs_own_price_gap": -9895,
+  "priority_competitor_price_changes_count": 242,
   "own_property_price_changes_count": 164
 }
