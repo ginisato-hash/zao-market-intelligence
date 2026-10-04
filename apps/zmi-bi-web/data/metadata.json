@@ -1,8 +1,8 @@
 {
-  "generated_at_jst": "2026-10-04T23:10:00+09:00",
-  "latest_collected_at_jst": "2026-10-04T22:00:00+09:00",
-  "history_rows_total": 62283,
-  "latest_observation_rows": 5871,
+  "generated_at_jst": "2026-10-05T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-10-05T00:00:01+09:00",
+  "history_rows_total": 62298,
+  "latest_observation_rows": 5873,
   "unified_rows": 2974,
   "unified_rows_before_retention": 4325,
   "distinct_properties": 28,
@@ -46,10 +46,10 @@
     "data_reliability_rate": 0.8749
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 5230,
+  "price_movement_rows": 5232,
   "dp_pressure_rows": 167,
-  "price_movement_own_property_rows": 8052,
-  "price_movement_latest_collected_at_jst": "2026-10-04T22:00:00+09:00",
+  "price_movement_own_property_rows": 8054,
+  "price_movement_latest_collected_at_jst": "2026-10-05T00:00:01+09:00",
   "dp_pressure_latest_collected_at_jst": "2026-10-04T22:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 27324,
@@ -82,19 +82,19 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.6,
+      "coverage_90d": 0.5889,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6667,
+      "coverage_90d": 0.6556,
       "status": "warning"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6556,
+      "coverage_90d": 0.6444,
       "status": "warning"
     }
   ],
