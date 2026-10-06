@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-10-06T23:10:00+09:00",
-  "latest_collected_at_jst": "2026-10-06T22:00:00+09:00",
-  "history_rows_total": 63271,
-  "latest_observation_rows": 5992,
-  "unified_rows": 3030,
-  "unified_rows_before_retention": 4381,
+  "generated_at_jst": "2026-10-07T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-10-07T00:00:01+09:00",
+  "history_rows_total": 63286,
+  "latest_observation_rows": 5993,
+  "unified_rows": 3031,
+  "unified_rows_before_retention": 4382,
   "distinct_properties": 28,
   "distinct_checkins": 156,
   "sources_included": [
@@ -36,8 +36,8 @@
   "dropped_past_period_keys_count": 6,
   "dropped_past_rows_count": 1351,
   "availability_breakdown": {
-    "total": 3030,
-    "available": 2278,
+    "total": 3031,
+    "available": 2279,
     "sold_out": 369,
     "not_found": 0,
     "excluded": 383,
@@ -46,13 +46,13 @@
     "data_reliability_rate": 0.8736
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 5340,
+  "price_movement_rows": 5341,
   "dp_pressure_rows": 170,
-  "price_movement_own_property_rows": 8161,
-  "price_movement_latest_collected_at_jst": "2026-10-06T22:00:00+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-10-06T22:00:00+09:00",
+  "price_movement_own_property_rows": 8165,
+  "price_movement_latest_collected_at_jst": "2026-10-07T00:00:01+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-10-07T00:00:01+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 19440,
+  "own_miuraya_price": 25200,
   "own_kiraku_price": 15179,
   "own_property_price_status": [
     {
@@ -68,13 +68,13 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     },
     {
       "property": "kiraku",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     }
   ],
@@ -82,24 +82,24 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.6,
+      "coverage_90d": 0.5889,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6444,
+      "coverage_90d": 0.6333,
       "status": "warning"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6444,
+      "coverage_90d": 0.6333,
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 1501,
-  "priority_competitor_vs_own_price_gap": 1501,
+  "competitor_vs_own_price_gap": -1379,
+  "priority_competitor_vs_own_price_gap": -1379,
   "priority_competitor_price_changes_count": 233,
   "own_property_price_changes_count": 159
 }
