@@ -64,7 +64,7 @@ function allDates(from: string, to: string): string[] {
   return kirakuWinterSalesDates().filter((d) => d >= from && d <= to);
 }
 
-function plan(opts: { hour?: number; scope?: WinterSalesScope; last?: Map<string, string>; attempted?: Set<string>; caps?: typeof CAPS3; runDate?: string } = {}): RotatingPlan {
+function plan(opts: { starvedLimit?: number; hour?: number; scope?: WinterSalesScope; last?: Map<string, string>; attempted?: Set<string>; caps?: typeof CAPS3; runDate?: string } = {}): RotatingPlan {
   const hour = opts.hour ?? 8;
   const runDate = opts.runDate ?? RUN_DATE;
   return buildRotatingPlan({
@@ -75,6 +75,7 @@ function plan(opts: { hour?: number; scope?: WinterSalesScope; last?: Map<string
     config: CONFIG,
     lastCollectedAt: opts.last ?? new Map(),
     caps: opts.caps ?? CAPS3,
+    nearTermStarvedLimitFraction: opts.starvedLimit ?? 1, // 既定は backpressure 無効 (専用テストで有効化)
     ...(opts.scope !== undefined ? { winterScope: opts.scope } : {}),
     ...(opts.attempted !== undefined ? { winterTransitionAttempted: opts.attempted } : {})
   });
@@ -242,6 +243,7 @@ describe("winter lane quota and global caps", () => {
     expect(w.slots_per_day).toBe(12);
     expect(w.booking_cap_per_run).toBe(36);
     expect(w.lane_budget_per_run).toBe(Math.floor(36 * WINTER_LANE_MAX_BOOKING_SHARE));
+    expect(WINTER_LANE_MAX_BOOKING_SHARE).toBe(0.4); // 自動採用基準で選ばれた最小 share
     // all WARM: 102 dates x 24/72 = 34 pages/day per comparable => ceil(34/12) = 3
     expect(w.required_pages_per_day_by_property[HAMMOND]).toBe(34);
     expect(w.quota_raw_by_property[HAMMOND]).toBe(3);
@@ -255,7 +257,7 @@ describe("winter lane quota and global caps", () => {
     const scope = scopeOf(kirakuWinterSalesDates().map((d) => ({ d })));
     const p = plan({ scope });
     expect(p.winter_lane.required_pages_per_day).toBeGreaterThan(102);
-    expect(Object.values(p.winter_lane.quota_by_property).reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(18);
+    expect(Object.values(p.winter_lane.quota_by_property).reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(p.winter_lane.lane_budget_per_run);
     expect(p.selected.filter((t) => t.source === "booking").length).toBeLessThanOrEqual(CAPS3.booking_pages_per_run);
     expect(p.selected.length).toBeLessThanOrEqual(CAPS3.total_pages_per_run);
   });
@@ -279,12 +281,12 @@ describe("winter lane quota and global caps", () => {
     expect(regularBooking.every((t) => !t.reason_codes.includes("winter_sales_lane"))).toBe(true);
   });
   it("anti-starvation: WARM keeps a protected floor even when ACTIVE demand saturates the quota", () => {
-    // ほぼ全日 SELLABLE (12/20 だけ WARM) + 小さい cap (multiplier 1 => lane budget 6)。
+    // ほぼ全日 SELLABLE (12/20 だけ WARM) + 小さい cap (multiplier 2)。
     const scope = scopeOf(kirakuWinterSalesDates().filter((d) => d > "2026-12-20").map((d) => ({ d })));
-    const p = plan({ scope, caps: scaledRotatingCaps(1) });
+    const p = plan({ scope, caps: scaledRotatingCaps(2) });
     expect(winterOf(p).some((t) => t.winter_lane === "WARM")).toBe(true);
     expect(winterOf(p).some((t) => t.winter_lane === "ACTIVE")).toBe(true);
-    expect(winterOf(p).length).toBeLessThanOrEqual(6);
+    expect(winterOf(p).length).toBeLessThanOrEqual(p.winter_lane.lane_budget_per_run);
   });
   it("is deterministic", () => {
     const scope = scopeOf(allDates("2027-01-01", "2027-03-31").map((d) => ({ d })));
@@ -347,6 +349,51 @@ describe("transition (newly_sellable) priority and bounded cooldown override", (
     // 近い日から決定的に。
     const dates = winterOf(p).filter((t) => t.property_slug === HAMMOND).map((t) => t.stay_date);
     expect(dates).toEqual([...dates].sort());
+  });
+});
+
+describe("urgency-based allocation and near-term backpressure", () => {
+  const ALL = scopeOf(kirakuWinterSalesDates().map((d) => ({ d })));
+  const regularBooking = (p: RotatingPlan) => p.selected.filter((t) => t.source === "booking" && t.winter_lane === undefined);
+
+  it("order: TRANSITION/ACTIVE are seeded before regular RMS-critical; WARM after regular never_served/overdue; unused capacity is returned", () => {
+    const p = plan({ scope: ALL });
+    expect(p.selected.slice(0, 3).every((t) => t.winter_lane === "ACTIVE" || t.winter_lane === "TRANSITION")).toBe(true);
+    // 全日 WARM でも冬季が上限に達しない分は通常レーンへ: booking は cap まで埋まる。
+    const w = plan();
+    expect(w.selected.filter((t) => t.source === "booking").length).toBe(CAPS3.booking_pages_per_run);
+    expect(regularBooking(w).length).toBe(CAPS3.booking_pages_per_run - winterOf(w).length);
+  });
+  it("winter share is a ceiling: lane never exceeds floor(cap x share) even if more cells are due", () => {
+    for (const share of [0.25, 0.33, 0.4, 0.5]) {
+      const p = buildRotatingPlan({
+        runDateIso: RUN_DATE, nowIso: `${RUN_DATE}T08:00:00+09:00`, slotHourJst: 8, liveTargets: liveTargets(), config: CONFIG,
+        lastCollectedAt: new Map(), caps: CAPS3, winterScope: ALL, winterLaneMaxBookingShare: share, nearTermStarvedLimitFraction: 1
+      });
+      expect(winterOf(p).length).toBeLessThanOrEqual(Math.floor(CAPS3.booking_pages_per_run * share));
+    }
+  });
+  it("backpressure: when near-term starvation exceeds the limit, WARM and far ACTIVE are suppressed; TRANSITION and near ACTIVE stay", () => {
+    const AT = "2026-10-07T06:00:00+09:00";
+    const scope = scopeOf([{ d: "2026-10-30" }, { d: "2027-01-15", newly: true, at: AT }, ...allDates("2027-02-01", "2027-02-10").map((d) => ({ d }))]);
+    // starvedLimit 0 => cold start (全 critical セルが never_served) は必ず超過。
+    const pressed = plan({ scope, starvedLimit: 0 });
+    expect(pressed.winter_lane.backpressure_active).toBe(true);
+    expect(winterOf(pressed).some((t) => t.winter_lane === "WARM")).toBe(false);
+    expect(winterOf(pressed).some((t) => t.winter_lane === "ACTIVE" && t.stay_date >= "2027-02-01")).toBe(false);
+    expect(winterOf(pressed).some((t) => t.winter_lane === "TRANSITION")).toBe(true);
+    const free = plan({ scope });
+    expect(free.winter_lane.backpressure_active).toBe(false);
+    expect(winterOf(free).some((t) => t.winter_lane === "WARM")).toBe(true);
+    // 抑制された分は通常レーンへ返る (booking cap は埋まる)。
+    expect(pressed.selected.filter((t) => t.source === "booking").length).toBe(CAPS3.booking_pages_per_run);
+  });
+  it("block/cooldown invariants: 24h cooldown still excludes non-transition winter cells; per-run caps unchanged under pressure", () => {
+    const last = new Map<string, string>();
+    for (const d of kirakuWinterSalesDates()) for (const s of [HAMMOND, KIRAKU]) last.set(`booking|${s}|${d}`, "2026-10-07T04:00:00+09:00");
+    const p = plan({ scope: ALL, last, starvedLimit: 0 });
+    expect(winterOf(p).some((t) => t.property_slug === HAMMOND || t.property_slug === KIRAKU)).toBe(false);
+    expect(p.selected.length).toBeLessThanOrEqual(CAPS3.total_pages_per_run);
   });
 });
 

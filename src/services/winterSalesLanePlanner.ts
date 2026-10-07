@@ -28,9 +28,11 @@ export const WINTER_ACTIVE_FRESHNESS_HOURS = { near: 24, mid: 48, far: 72 } as c
 export const WINTER_WARM_FRESHNESS_HOURS = 72;
 // セルは target の 75% に達したら "due" (既存 DUE_SOON_FRACTION と同じ考え方)。
 export const WINTER_DUE_FRACTION = 0.75;
-// 冬季レーンが 1 run で使える booking cap の上限割合。残り (>=50%) は
-// near-term RMS-critical / research レーン専用に必ず残る (starvation guard)。
-export const WINTER_LANE_MAX_BOOKING_SHARE = 0.5;
+// 冬季レーンが 1 run で使える booking cap の上限 (ceiling)。固定予約枠ではなく、
+// 配分は緊急度順で未使用分は他レーンへ返る。値は simulateWinterCoverage の自動採用基準
+// (docs/winter-sales-coverage-simulation.md) を満たす最小構成: 推奨
+// ZMI_CRAWL_VOLUME_MULTIPLIER=4 (launchd 側設定) / share 0.40。
+export const WINTER_LANE_MAX_BOOKING_SHARE = 0.4;
 
 export type WinterLaneClass = "TRANSITION" | "ACTIVE" | "WARM";
 export type WinterPropertyKind = "own_kiraku" | "primary_comparable";
@@ -77,6 +79,9 @@ export interface WinterLaneDiagnostics {
   booking_cap_per_run: number;
   lane_budget_per_run: number;
   lane_max_share: number;
+  near_term_starved_now?: number;
+  near_term_starved_limit?: number;
+  backpressure_active?: boolean;
   selected_count: number;
   selected_by_class: Record<WinterLaneClass, number>;
   pending_transition_cells: number;
