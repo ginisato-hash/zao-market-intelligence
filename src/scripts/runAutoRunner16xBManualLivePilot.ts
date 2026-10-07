@@ -32,6 +32,7 @@ import {
   type RotatingDemandConfig,
   type RotatingTarget
 } from "../services/rotatingCollectionScopePlanner";
+import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "../services/kirakuWinterSalesWindow";
 
 const HISTORY_DIR = ".data/history";
 const DB_PATH = ".data/zao-market-intelligence.sqlite";
@@ -72,7 +73,7 @@ const DEMAND_CONFIG: RotatingDemandConfig = {
   peak_periods: [
     { code: "obon", from: "2026-08-08", to: "2026-08-16" },
     { code: "autumn_foliage", from: "2026-10-10", to: "2026-11-08", saturday_only: true },
-    { code: "ski_season", from: "2026-12-19", to: "2027-03-15", saturday_only: true },
+    { code: "ski_season", from: MARKET_RESEARCH_SKI_SEASON_WINDOW.from, to: MARKET_RESEARCH_SKI_SEASON_WINDOW.to, saturday_only: true },
     { code: "year_end_peak", from: "2026-12-28", to: "2027-01-03" }
   ]
 };
