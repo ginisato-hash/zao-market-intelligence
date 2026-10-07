@@ -12,7 +12,16 @@
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
 import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
 import { epochDay, roundRobinByGroup } from "./priorityRefreshTiers";
-import { isOwnPropertyName } from "./ownPropertyTargets";
+import { getOwnPropertyKey, isOwnPropertyName } from "./ownPropertyTargets";
+import { CORE_COMPETITORS } from "./coreCompetitorTargets";
+import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "./kirakuWinterSalesWindow";
+import { type WinterSalesScope } from "./kirakuWinterSalesScope";
+import {
+  planWinterLane,
+  type WinterLaneClass,
+  type WinterLaneDiagnostics,
+  type WinterLaneProperty
+} from "./winterSalesLanePlanner";
 
 export type RotatingBucket = "short" | "mid" | "long";
 
@@ -58,8 +67,13 @@ export const DAILY_PAGE_CAPACITY = {
 } as const;
 
 const BUCKET_RANGES = { short: [1, 14], mid: [15, 90], long: [91, 240] } as const;
-const WINTER_RANGE = ["2026-12-19", "2027-03-15"] as const;
+// 一般リサーチ用の winter スコア範囲 (12/19 を含む)。Kiraku 冬季販売レーンは別 (下記)。
+const WINTER_RANGE = [MARKET_RESEARCH_SKI_SEASON_WINDOW.from, MARKET_RESEARCH_SKI_SEASON_WINDOW.to] as const;
 const COOLDOWN_HOURS = 24;
+
+// PRIMARY_COMPARABLE = 既存 registry (coreCompetitorTargets: HAMMOND/吉田屋/OAKHILL)。
+// 他に PRIMARY_COMPARABLE を示す registry は repo に無い。
+export const PRIMARY_COMPARABLE_BOOKING_SLUGS: ReadonlySet<string> = new Set(CORE_COMPETITORS.map((c) => c.bookingSlug));
 
 // ---------------------------------------------------------------------------
 // Phase ZMI-RMS-FAIRNESS-V1 — Booking RMS-critical anti-starvation.
@@ -184,6 +198,10 @@ export interface RotatingTarget {
   service_state: ServiceState;
   service_age_hours: number | null;
   band_rank: number;
+  // Kiraku 冬季販売レーン経由で選ばれた場合のみ付与 (TRANSITION/ACTIVE/WARM)。
+  winter_lane?: WinterLaneClass;
+  winter_transition_key?: string;
+  winter_cooldown_override?: boolean;
 }
 
 export const MAX_TARGETS_PER_PROPERTY_PER_RUN = 2;
@@ -226,6 +244,7 @@ export interface RotatingPlan {
   selected_by_service_state: Record<ServiceState, number>;
   selected_non_critical_count: number;
   max_selected_service_age_hours: number | null;
+  winter_lane: WinterLaneDiagnostics;
 }
 
 function parseYmd(iso: string): Date {
@@ -392,6 +411,13 @@ export function buildRotatingPlan(input: {
   serviceDeadlineHours?: number;
   rmsCriticalLeadDays?: number;
   ownPropertyCriticalLeadDays?: number;
+  // Kiraku 冬季販売レーン: manifest (undefined / status!=ok => 全冬季日 WARM) と
+  // 既に cooldown 上書きを使った transition 世代キー。
+  winterScope?: WinterSalesScope;
+  winterTransitionAttempted?: ReadonlySet<string>;
+  // false: 冬季レーン無効 (旧挙動の回帰テスト用。production は常に既定の true)。
+  winterLaneEnabled?: boolean;
+  winterLaneMaxBookingShare?: number;
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
   const denseDays = input.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
@@ -399,7 +425,60 @@ export function buildRotatingPlan(input: {
   const criticalLeadDays = input.rmsCriticalLeadDays ?? RMS_CRITICAL_LEAD_DAYS;
   const ownCriticalLeadDays = input.ownPropertyCriticalLeadDays ?? OWN_PROPERTY_CRITICAL_LEAD_DAYS;
   const slot = buildSlot(input.runDateIso, input.slotHourJst);
-  const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: input.forcedDates ?? [] });
+
+  // Kiraku 冬季販売レーン (booking のみ)。transition 日は既存 forced_checkin_date
+  // 機構 (+50 score / 候補強制追加) にも流す。
+  const winterProperties: WinterLaneProperty[] = input.liveTargets
+    .filter((t) => input.winterLaneEnabled !== false && t.source === "booking" && t.enabled_for_live && t.verified_mapping)
+    .flatMap((t): WinterLaneProperty[] => {
+      if (getOwnPropertyKey(t.canonical_property_name) === "kiraku") return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "own_kiraku" }];
+      if (PRIMARY_COMPARABLE_BOOKING_SLUGS.has(t.property_slug)) return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "primary_comparable" }];
+      return [];
+    });
+  const winter = planWinterLane({
+    runDateIso: input.runDateIso,
+    nowIso: input.nowIso,
+    slotsPerDay: SLOT_HOURS.length,
+    bookingCap: caps.booking_pages_per_run,
+    properties: winterProperties,
+    scope: input.winterScope,
+    lastCollectedAt: input.lastCollectedAt,
+    transitionAttempted: input.winterTransitionAttempted ?? new Set<string>(),
+    cooldownHours: COOLDOWN_HOURS,
+    ageHours: hoursBetween,
+    offsetDays,
+    ...(input.winterLaneMaxBookingShare !== undefined ? { maxBookingShare: input.winterLaneMaxBookingShare } : {})
+  });
+  const transitionDates = [...new Set(winter.selected.filter((c) => c.lane_class === "TRANSITION").map((c) => c.stay_date))];
+  const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: [...(input.forcedDates ?? []), ...transitionDates] });
+  const tierBySlug = new Map(input.liveTargets.filter((t) => t.source === "booking").map((t) => [t.property_slug, t.tier] as const));
+  const winterTargets: RotatingTarget[] = winter.selected.map((c) => {
+    const bucket = bucketForOffset(c.offset) ?? "long";
+    const tier = tierBySlug.get(c.slug) ?? "tier_direct_mid";
+    const lastIso = input.lastCollectedAt.get(`booking|${c.slug}|${c.stay_date}`);
+    const serviceState = classifyServiceState(lastIso, input.nowIso, c.target_hours);
+    const { score, reasons } = scoreTarget(c.stay_date, bucket, tier, input.config, false, { offset: c.offset, forced: c.lane_class === "TRANSITION", nearTermDenseDays: denseDays });
+    const critical = c.lane_class !== "WARM";
+    return {
+      source: "booking",
+      property_slug: c.slug,
+      canonical_property_name: c.canonical_property_name,
+      stay_date: c.stay_date,
+      checkin: c.stay_date,
+      bucket,
+      tier,
+      priority_score: score,
+      reason_codes: [...reasons, "winter_sales_lane", `winter_${c.lane_class.toLowerCase()}`, c.kind, ...(c.override_cooldown ? ["transition_cooldown_override"] : []), ...(critical ? [`service_${serviceState}`, "rms_critical"] : [])],
+      estimated_page_count: 1,
+      rms_critical: critical,
+      service_state: serviceState,
+      service_age_hours: c.age_hours,
+      band_rank: critical ? SERVICE_BAND_RANK[serviceState] : NON_CRITICAL_BAND_RANK,
+      winter_lane: c.lane_class,
+      ...(c.transition_key !== null ? { winter_transition_key: c.transition_key } : {}),
+      ...(c.override_cooldown ? { winter_cooldown_override: true } : {})
+    };
+  });
 
   const excludedCooldown: RotatingPlan["excluded_by_cooldown"] = [];
   const candidates: RotatingTarget[] = [];
@@ -529,13 +608,15 @@ export function buildRotatingPlan(input: {
   // Tier soft max to avoid all-anchor selection.
   const tierSoftMax = Math.ceil(caps.total_pages_per_run * 0.7);
 
-  const selected: RotatingTarget[] = [];
-  const bySource: Record<string, number> = { booking: 0, jalan: 0 };
+  // 冬季レーンの選択は先に確定 (booking cap 内の専用枠)。bucket/tier/property/date の
+  // soft 制約カウンタは通常レーン専用のまま (レーン間で食い合わない)。
+  const selected: RotatingTarget[] = [...winterTargets];
+  const bySource: Record<string, number> = { booking: winterTargets.length, jalan: 0 };
   const byBucket: Record<string, number> = { short: 0, mid: 0, long: 0 };
   const byTier: Record<string, number> = {};
   const byProperty: Record<string, number> = {};
   const byStayDate: Record<string, number> = {};
-  const seenPair = new Set<string>();
+  const seenPair = new Set<string>(winterTargets.map(keyOf));
   let excludedByCap = 0;
   let excludedByDiversity = 0;
   const diversityCounted = new Set<string>();
@@ -590,7 +671,10 @@ export function buildRotatingPlan(input: {
   const warnings: string[] = [];
   if ((distinctPropBySource["booking"] ?? 0) > 0 && (distinctPropBySource["booking"] ?? 0) < 3) warnings.push(`booking_distinct_properties_lt_3:${distinctPropBySource["booking"]}`);
   if ((distinctPropBySource["jalan"] ?? 0) > 0 && (distinctPropBySource["jalan"] ?? 0) < 3) warnings.push(`jalan_distinct_properties_lt_3:${distinctPropBySource["jalan"]}`);
-  for (const [k, v] of Object.entries(byPropertyOut)) if (v > MAX_TARGETS_PER_PROPERTY_PER_RUN) warnings.push(`property_over_cap:${k}=${v}`);
+  // per-property cap の警告は通常レーン分のみ (冬季レーンは専用 quota を持つ)。
+  const byPropertyRegular: Record<string, number> = {};
+  for (const t of selected) if (t.winter_lane === undefined) byPropertyRegular[`${t.source}|${t.property_slug}`] = (byPropertyRegular[`${t.source}|${t.property_slug}`] ?? 0) + 1;
+  for (const [k, v] of Object.entries(byPropertyRegular)) if (v > MAX_TARGETS_PER_PROPERTY_PER_RUN) warnings.push(`property_over_cap:${k}=${v}`);
 
   // Phase AUTO-RUNNER17X diagnostics (derived from reason_codes).
   const isNearTerm = (t: RotatingTarget): boolean => t.reason_codes.includes("near_term_dense");
@@ -607,8 +691,8 @@ export function buildRotatingPlan(input: {
     excluded_by_property_diversity_cap: excludedByDiversity,
     candidate_count: candidates.length,
     selected_by_source: bySource,
-    selected_by_bucket: byBucket,
-    selected_by_tier: byTier,
+    selected_by_bucket: countBy(selected, (t) => t.bucket, { short: 0, mid: 0, long: 0 }),
+    selected_by_tier: countBy(selected, (t) => t.tier, {}),
     selected_distinct_properties_by_source: distinctPropBySource,
     selected_distinct_stay_dates: new Set(selected.map((t) => t.stay_date)).size,
     selected_targets_by_property: byPropertyOut,
@@ -627,11 +711,18 @@ export function buildRotatingPlan(input: {
     rms_critical_selected_count: selected.filter((c) => c.rms_critical).length,
     candidates_by_service_state: countServiceStates(candidates),
     selected_by_service_state: countServiceStates(selected.filter((c) => c.rms_critical)),
+    winter_lane: winter.diagnostics,
     selected_non_critical_count: selected.filter((c) => !c.rms_critical).length,
     max_selected_service_age_hours: selected
       .filter((c) => c.rms_critical && c.service_age_hours !== null)
       .reduce<number | null>((mx, c) => (mx === null || c.service_age_hours! > mx ? c.service_age_hours! : mx), null)
   };
+}
+
+function countBy(list: readonly RotatingTarget[], f: (t: RotatingTarget) => string, init: Record<string, number>): Record<string, number> {
+  const out = { ...init };
+  for (const t of list) out[f(t)] = (out[f(t)] ?? 0) + 1;
+  return out;
 }
 
 function keyOf(t: RotatingTarget): string {

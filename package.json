@@ -171,6 +171,7 @@
     "auto-runner:market-refresh": "node --import tsx src/scripts/runAutoRunnerMarketRefresh.ts",
     "auto-runner:market-refresh:planned-dry-run": "node --import tsx src/scripts/runPlannedMarketRefreshDryRun.ts",
     "auto-runner:market-refresh-rotating": "node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
+    "simulate:winter-coverage": "node --import tsx src/scripts/simulateWinterCoverage.ts",
     "auto-runner:market-refresh-rotating:dry-run": "ZMI_ROTATING_DRY_RUN=1 node --import tsx src/scripts/runAutoRunnerMarketRefreshRotating.ts",
     "market:refresh:dry-run": "node --import tsx src/scripts/runPlannedMarketRefreshDryRun.ts",
     "market:refresh:live": "node --import tsx src/scripts/runAutoRunnerMarketRefresh.ts",

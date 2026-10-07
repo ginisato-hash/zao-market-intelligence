@@ -43,6 +43,7 @@ import {
   type RotatingPlan,
   type RotatingTarget
 } from "../services/rotatingCollectionScopePlanner";
+import { loadWinterSalesScope } from "../services/kirakuWinterSalesScope";
 import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates, resolveNearTermDenseDays } from "../services/crawlVolumeConfig";
 import {
   backoffDelayMs,
@@ -51,9 +52,12 @@ import {
   shouldEarlyStop,
   sleep
 } from "../services/crawlThrottlePolicy";
+import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "../services/kirakuWinterSalesWindow";
 
 const HISTORY_DIR = ".data/history";
 const DB_PATH = ".data/zao-market-intelligence.sqlite";
+// 冬季 transition の cooldown 上書き済み世代キー (gitignored の .data/run-state/ 配下)。
+const WINTER_TRANSITION_LEDGER_PATH = ".data/run-state/winter_transition_overrides.json";
 const AI_CONTEXT_PATH = ".data/ai-context/latest_market_snapshot.json";
 const REPORT_DIR = ".data/reports/automation";
 const DEBUG_ROOT = ".data/debug/auto-runner-market-refresh-rotating";
@@ -73,7 +77,7 @@ const DEMAND_CONFIG: RotatingDemandConfig = {
   peak_periods: [
     { code: "obon", from: "2026-08-08", to: "2026-08-16" },
     { code: "autumn_foliage", from: "2026-10-10", to: "2026-11-08", saturday_only: true },
-    { code: "ski_season", from: "2026-12-19", to: "2027-03-15", saturday_only: true },
+    { code: "ski_season", from: MARKET_RESEARCH_SKI_SEASON_WINDOW.from, to: MARKET_RESEARCH_SKI_SEASON_WINDOW.to, saturday_only: true },
     { code: "year_end_peak", from: "2026-12-28", to: "2027-01-03" }
   ]
 };
@@ -121,6 +125,17 @@ function readLastCollectedAt(): Map<string, string> {
     }
   }
   return map;
+}
+
+function readWinterTransitionLedger(): Set<string> {
+  try {
+    const parsed = JSON.parse(readFileSync(WINTER_TRANSITION_LEDGER_PATH, "utf8")) as { keys?: unknown };
+    return new Set(Array.isArray(parsed.keys) ? parsed.keys.filter((k): k is string => typeof k === "string") : []);
+  } catch { return new Set(); }
+}
+function writeWinterTransitionLedger(keys: ReadonlySet<string>): void {
+  mkdirSync(resolve(".data/run-state"), { recursive: true });
+  writeJson(WINTER_TRANSITION_LEDGER_PATH, { keys: [...keys].sort() });
 }
 
 interface StateSummary { history_rows: number; db_rows: number; ai_context_rows: number; duplicate_row_id_count: number }
@@ -227,7 +242,13 @@ async function run(): Promise<void> {
   const liveMode = !dryRun && liveGates && rotationEnabled;
 
   const preflight = readState();
+  // 冬季販売 manifest (read-only)。欠落/stale/不正は全冬季日 WARM (販売中扱いにしない)。
+  const winterScope = loadWinterSalesScope(env);
+  if (winterScope.warning !== null) console.warn(`warning_${winterScope.warning}`);
+  const winterLedger = readWinterTransitionLedger();
   const planInput = {
+    winterScope,
+    winterTransitionAttempted: winterLedger,
     runDateIso: jst.date,
     nowIso: jst.iso,
     slotHourJst: jst.hour,
@@ -246,6 +267,11 @@ async function run(): Promise<void> {
     ? candidateStayDates(jst.date, DEMAND_CONFIG, { nearTermDenseDays, forcedDates: forced.valid }).some((d) => d.stayDate === SPOT_CHECK_DATE)
     : false;
   const sixSelectedOrBoosted = plan.selected.some((t) => t.stay_date === SPOT_CHECK_DATE) || forced.valid.includes(SPOT_CHECK_DATE);
+
+  // transition の cooldown 上書きは世代ごとに 1 回: live で選ばれた時点で記録 (dry-run は記録しない)。
+  if (liveMode && plan.winter_lane.transition_keys_selected.length > 0) {
+    writeWinterTransitionLedger(new Set([...winterLedger, ...plan.winter_lane.transition_keys_selected]));
+  }
 
   let decision = dryRun || !liveMode ? "rotating_market_refresh_dry_run_ready" : "rotating_market_refresh_pending";
   let rowsAppended = 0;
@@ -375,6 +401,13 @@ async function run(): Promise<void> {
     jalan_source_level_captcha_or_block: sourceBlockReport.jalan_source_level_captcha_or_block,
     blocked_or_captcha_rejected_rows_count: sourceBlockReport.blocked_or_captcha_rejected_rows_count,
     pricing_output_generated: false, pms_output_generated: false,
+    winter_sales_scope_status: winterScope.status,
+    winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,
+    winter_lane_selected: plan.winter_lane.selected_count,
+    winter_lane_required_pages_per_day: plan.winter_lane.required_pages_per_day,
+    winter_lane_active_dates: plan.winter_lane.active_dates,
+    winter_lane_warm_dates: plan.winter_lane.warm_dates,
+    winter_lane: plan.winter_lane,
     caps: plan.caps,
     theoretical_daily_page_capacity: DAILY_PAGE_CAPACITY.theoretical_daily_page_capacity,
     booking_daily_capacity: DAILY_PAGE_CAPACITY.booking_daily_capacity,

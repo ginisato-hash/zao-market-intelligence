@@ -11,19 +11,22 @@ import {
   type RotatingDemandConfig
 } from "../src/services/rotatingCollectionScopePlanner";
 import { liveTargets } from "../src/services/marketRefreshTargetUniverse";
+import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "../src/services/kirakuWinterSalesWindow";
 
 const CONFIG: RotatingDemandConfig = {
   public_holidays: { "2026-07-20": "海の日", "2026-08-11": "山の日" },
   long_weekend_dates: new Set(["2026-09-19", "2026-09-20"]),
   peak_periods: [
     { code: "obon", from: "2026-08-08", to: "2026-08-16" },
-    { code: "ski_season", from: "2026-12-19", to: "2027-03-15", saturday_only: true }
+    { code: "ski_season", from: MARKET_RESEARCH_SKI_SEASON_WINDOW.from, to: MARKET_RESEARCH_SKI_SEASON_WINDOW.to, saturday_only: true }
   ]
 };
 const RUN_DATE = "2026-06-10";
 
+// 16X 系の既存テストは通常 (非冬季) レーンの挙動を検証するため冬季レーンは無効。
+// 冬季レーンは tests/winterSalesLane.test.ts で別途検証する。
 function plan(slotHour: number, lastCollectedAt = new Map<string, string>()) {
-  return buildRotatingPlan({ runDateIso: RUN_DATE, nowIso: `${RUN_DATE}T${String(slotHour).padStart(2, "0")}:00:00+09:00`, slotHourJst: slotHour, liveTargets: liveTargets(), config: CONFIG, lastCollectedAt });
+  return buildRotatingPlan({ runDateIso: RUN_DATE, nowIso: `${RUN_DATE}T${String(slotHour).padStart(2, "0")}:00:00+09:00`, slotHourJst: slotHour, liveTargets: liveTargets(), config: CONFIG, lastCollectedAt, winterLaneEnabled: false });
 }
 
 describe("AUTO-RUNNER16X - rotating slots", () => {
