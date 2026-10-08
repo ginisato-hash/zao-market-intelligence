@@ -140,7 +140,6 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-23,17873,16
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-25,14887,15179,292,0.0196,up,2026-10-01T16:00:00+09:00,2026-10-06T22:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-10-25,25688,24700,-988,-0.0385,down,2026-10-04T08:00:00+09:00,2026-10-08T06:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-10-27,20218,19440,-778,-0.0385,down,2026-10-03T10:00:01+09:00,2026-10-06T22:00:00+09:00
-own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-28,16848,11134,-5714,-0.3392,down,2026-08-29T14:00:01+09:00,2026-10-02T14:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-10-28,20218,19440,-778,-0.0385,down,2026-10-03T12:00:00+09:00,2026-10-07T08:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-10-28,24960,24000,-960,-0.0385,down,2026-10-01T10:00:00+09:00,2026-10-06T00:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-29,12885,11201,-1684,-0.1307,down,2026-09-17T13:35:01+09:00,2026-10-02T00:00:01+09:00
@@ -149,6 +148,7 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2026-10-30,17341,15
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-10-30,34731,20430,-14301,-0.4118,down,2026-10-03T18:00:00+09:00,2026-10-07T08:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-11-04,18000,30600,12600,0.7,up,2026-10-02T14:00:00+09:00,2026-10-06T14:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-11-05,18000,24300,6300,0.35,up,2026-10-03T16:00:00+09:00,2026-10-08T00:00:01+09:00
+own_property,miuraya,三浦屋 / Miuraya,booking,2026-11-06,19080,32436,13356,0.7,up,2026-10-04T16:00:00+09:00,2026-10-08T16:00:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-11-09,20000,18000,-2000,-0.1,down,2026-09-13T14:00:01+09:00,2026-09-19T13:35:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-11-12,20000,18000,-2000,-0.1,down,2026-09-13T16:00:01+09:00,2026-09-19T13:35:00+09:00
 own_property,miuraya,三浦屋 / Miuraya,jalan,2026-11-22,24552,27900,3348,0.1364,up,2026-09-19T08:00:00+09:00,2026-10-03T06:00:00+09:00
