@@ -12,7 +12,17 @@
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
 import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
 import { epochDay, roundRobinByGroup } from "./priorityRefreshTiers";
-import { isOwnPropertyName } from "./ownPropertyTargets";
+import { getOwnPropertyKey, isOwnPropertyName } from "./ownPropertyTargets";
+import { CORE_COMPETITORS } from "./coreCompetitorTargets";
+import { LEGACY_SKI_SEASON_WINDOW, skiSeasonWindowFor, type DateWindow } from "./kirakuWinterSalesWindow";
+import { type WinterSalesScope } from "./kirakuWinterSalesScope";
+import {
+  WINTER_ACTIVE_MID_LEAD_DAYS,
+  planWinterLane,
+  type WinterLaneClass,
+  type WinterLaneDiagnostics,
+  type WinterLaneProperty
+} from "./winterSalesLanePlanner";
 
 export type RotatingBucket = "short" | "mid" | "long";
 
@@ -58,8 +68,15 @@ export const DAILY_PAGE_CAPACITY = {
 } as const;
 
 const BUCKET_RANGES = { short: [1, 14], mid: [15, 90], long: [91, 240] } as const;
-const WINTER_RANGE = ["2026-12-19", "2027-03-15"] as const;
 const COOLDOWN_HOURS = 24;
+
+// PRIMARY_COMPARABLE = 既存 registry (coreCompetitorTargets: HAMMOND/吉田屋/OAKHILL)。
+// 他に PRIMARY_COMPARABLE を示す registry は repo に無い。
+// near-term backpressure: 旧 planner の実測 baseline (starved 最大 ~12%) + 許容 5%。
+export const NEAR_TERM_STARVED_BASELINE_FRACTION = 0.12;
+export const NEAR_TERM_STARVED_ALLOWANCE_FRACTION = 0.05;
+
+export const PRIMARY_COMPARABLE_BOOKING_SLUGS: ReadonlySet<string> = new Set(CORE_COMPETITORS.map((c) => c.bookingSlug));
 
 // ---------------------------------------------------------------------------
 // Phase ZMI-RMS-FAIRNESS-V1 — Booking RMS-critical anti-starvation.
@@ -184,6 +201,10 @@ export interface RotatingTarget {
   service_state: ServiceState;
   service_age_hours: number | null;
   band_rank: number;
+  // Kiraku 冬季販売レーン経由で選ばれた場合のみ付与 (TRANSITION/ACTIVE/WARM)。
+  winter_lane?: WinterLaneClass;
+  winter_transition_key?: string;
+  winter_cooldown_override?: boolean;
 }
 
 export const MAX_TARGETS_PER_PROPERTY_PER_RUN = 2;
@@ -226,6 +247,7 @@ export interface RotatingPlan {
   selected_by_service_state: Record<ServiceState, number>;
   selected_non_critical_count: number;
   max_selected_service_age_hours: number | null;
+  winter_lane: WinterLaneDiagnostics;
 }
 
 function parseYmd(iso: string): Date {
@@ -254,8 +276,9 @@ export function bucketForOffset(offset: number): RotatingBucket | null {
   return null;
 }
 
-function inWinter(iso: string): boolean {
-  return iso >= WINTER_RANGE[0] && iso <= WINTER_RANGE[1];
+// 一般リサーチの winter 範囲。既定は従来 (LEGACY)。冬季レーン有効時のみ 3/31 まで拡張。
+function inWinter(iso: string, window: DateWindow = LEGACY_SKI_SEASON_WINDOW): boolean {
+  return iso >= window.from && iso <= window.to;
 }
 
 function inPeak(iso: string, config: RotatingDemandConfig): string[] {
@@ -276,10 +299,10 @@ export function scoreTarget(
   tier: TargetTier,
   config: RotatingDemandConfig,
   collectedRecently: boolean,
-  options?: { offset?: number; forced?: boolean; nearTermDenseDays?: number }
+  options?: { offset?: number; forced?: boolean; nearTermDenseDays?: number; researchWindow?: DateWindow }
 ): { score: number; reasons: string[] } {
   const dow = parseYmd(stayDate).getUTCDay();
-  const winter = inWinter(stayDate);
+  const winter = inWinter(stayDate, options?.researchWindow);
   const reasons: string[] = [bucket];
   let score = winter ? 50 : ({ short: 80, mid: 60, long: 40 } as const)[bucket];
   if (winter) reasons.push("winter");
@@ -336,7 +359,7 @@ function offsetDays(fromIso: string, toIso: string): number {
 export function candidateStayDates(
   runDateIso: string,
   config: RotatingDemandConfig,
-  options?: { nearTermDenseDays?: number; forcedDates?: readonly string[] }
+  options?: { nearTermDenseDays?: number; forcedDates?: readonly string[]; researchWindow?: DateWindow }
 ): { stayDate: string; bucket: RotatingBucket; forced: boolean }[] {
   const denseDays = options?.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
   const forced = new Set(options?.forcedDates ?? []);
@@ -352,7 +375,7 @@ export function candidateStayDates(
       config.public_holidays[stayDate] !== undefined ||
       config.long_weekend_dates.has(stayDate) ||
       inPeak(stayDate, config).length > 0 ||
-      inWinter(stayDate);
+      inWinter(stayDate, options?.researchWindow);
     let include: boolean;
     if (offset <= denseDays) include = true; // near-term: every day
     else if (offset <= BUCKET_RANGES.mid[1]) include = interesting || offset % 3 === 0; // mid: + weekday every 3 days
@@ -392,6 +415,16 @@ export function buildRotatingPlan(input: {
   serviceDeadlineHours?: number;
   rmsCriticalLeadDays?: number;
   ownPropertyCriticalLeadDays?: number;
+  // Kiraku 冬季販売レーン: manifest (undefined / status!=ok => 全冬季日 WARM) と
+  // 既に cooldown 上書きを使った transition 世代キー。
+  winterScope?: WinterSalesScope;
+  winterTransitionAttempted?: ReadonlySet<string>;
+  // true のときだけ冬季レーン有効。既定は無効 (= 旧 planner と同一配分)。
+  // 有効化は runner の feature gate (resolveWinterSalesLaneEnabled) 経由のみ。
+  winterLaneEnabled?: boolean;
+  winterLaneMaxBookingShare?: number;
+  // backpressure 閾値 (critical 総数に対する starved 割合)。既定 BASELINE+ALLOWANCE。
+  nearTermStarvedLimitFraction?: number;
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
   const denseDays = input.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
@@ -399,8 +432,63 @@ export function buildRotatingPlan(input: {
   const criticalLeadDays = input.rmsCriticalLeadDays ?? RMS_CRITICAL_LEAD_DAYS;
   const ownCriticalLeadDays = input.ownPropertyCriticalLeadDays ?? OWN_PROPERTY_CRITICAL_LEAD_DAYS;
   const slot = buildSlot(input.runDateIso, input.slotHourJst);
-  const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: input.forcedDates ?? [] });
 
+  // Kiraku 冬季販売レーン (booking のみ)。transition 日は既存 forced_checkin_date
+  // 機構 (+50 score / 候補強制追加) にも流す。
+  const winterProperties: WinterLaneProperty[] = input.liveTargets
+    .filter((t) => input.winterLaneEnabled === true && t.source === "booking" && t.enabled_for_live && t.verified_mapping)
+    .flatMap((t): WinterLaneProperty[] => {
+      if (getOwnPropertyKey(t.canonical_property_name) === "kiraku") return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "own_kiraku" }];
+      if (PRIMARY_COMPARABLE_BOOKING_SLUGS.has(t.property_slug)) return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "primary_comparable" }];
+      return [];
+    });
+  const winter = planWinterLane({
+    runDateIso: input.runDateIso,
+    nowIso: input.nowIso,
+    slotsPerDay: SLOT_HOURS.length,
+    bookingCap: caps.booking_pages_per_run,
+    properties: winterProperties,
+    scope: input.winterScope,
+    lastCollectedAt: input.lastCollectedAt,
+    transitionAttempted: input.winterTransitionAttempted ?? new Set<string>(),
+    cooldownHours: COOLDOWN_HOURS,
+    ageHours: hoursBetween,
+    offsetDays,
+    ...(input.winterLaneMaxBookingShare !== undefined ? { maxBookingShare: input.winterLaneMaxBookingShare } : {})
+  });
+  const transitionDates = [...new Set(winter.selected.filter((c) => c.lane_class === "TRANSITION").map((c) => c.stay_date))];
+  const researchWindow = skiSeasonWindowFor(input.winterLaneEnabled === true);
+  const dates = candidateStayDates(input.runDateIso, input.config, { researchWindow, nearTermDenseDays: denseDays, forcedDates: [...(input.forcedDates ?? []), ...transitionDates] });
+  const tierBySlug = new Map(input.liveTargets.filter((t) => t.source === "booking").map((t) => [t.property_slug, t.tier] as const));
+  const winterTargets: RotatingTarget[] = winter.selected.map((c) => {
+    const bucket = bucketForOffset(c.offset) ?? "long";
+    const tier = tierBySlug.get(c.slug) ?? "tier_direct_mid";
+    const lastIso = input.lastCollectedAt.get(`booking|${c.slug}|${c.stay_date}`);
+    const serviceState = classifyServiceState(lastIso, input.nowIso, c.target_hours);
+    const { score, reasons } = scoreTarget(c.stay_date, bucket, tier, input.config, false, { offset: c.offset, forced: c.lane_class === "TRANSITION", nearTermDenseDays: denseDays, researchWindow });
+    const critical = c.lane_class !== "WARM";
+    return {
+      source: "booking",
+      property_slug: c.slug,
+      canonical_property_name: c.canonical_property_name,
+      stay_date: c.stay_date,
+      checkin: c.stay_date,
+      bucket,
+      tier,
+      priority_score: score,
+      reason_codes: [...reasons, "winter_sales_lane", `winter_${c.lane_class.toLowerCase()}`, c.kind, ...(c.override_cooldown ? ["transition_cooldown_override"] : []), ...(critical ? [`service_${serviceState}`, "rms_critical"] : [])],
+      estimated_page_count: 1,
+      rms_critical: critical,
+      service_state: serviceState,
+      service_age_hours: c.age_hours,
+      band_rank: critical ? SERVICE_BAND_RANK[serviceState] : NON_CRITICAL_BAND_RANK,
+      winter_lane: c.lane_class,
+      ...(c.transition_key !== null ? { winter_transition_key: c.transition_key } : {}),
+      ...(c.override_cooldown ? { winter_cooldown_override: true } : {})
+    };
+  });
+
+  let criticalTotal = 0;
   const excludedCooldown: RotatingPlan["excluded_by_cooldown"] = [];
   const candidates: RotatingTarget[] = [];
 
@@ -411,12 +499,17 @@ export function buildRotatingPlan(input: {
       const key = cooldownKey(target.source, target.property_slug, stayDate);
       const lastIso = input.lastCollectedAt.get(key);
       const collectedRecently = lastIso !== undefined && withinHours(lastIso, input.nowIso, COOLDOWN_HOURS);
+      if (target.source === "booking") {
+        // backpressure 用: cooldown 中も含めた RMS-critical 総セル数。
+        const off0 = offsetDays(input.runDateIso, stayDate);
+        if ((off0 >= 1 && off0 <= criticalLeadDays) || (off0 >= 1 && off0 <= ownCriticalLeadDays && isOwnPropertyName(target.canonical_property_name))) criticalTotal += 1;
+      }
       if (collectedRecently) {
         excludedCooldown.push({ source: target.source, property_slug: target.property_slug, stay_date: stayDate });
         continue;
       }
       const offset = offsetDays(input.runDateIso, stayDate);
-      const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false, { offset, forced, nearTermDenseDays: denseDays });
+      const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false, { offset, forced, nearTermDenseDays: denseDays, researchWindow });
       // Phase ZMI-RMS-FAIRNESS-V1: classify service state so never-served and
       // overdue RMS-critical cells outrank recently-served ones. Only Booking
       // cells inside the RMS pricing horizon are critical; Jalan and the
@@ -513,12 +606,37 @@ export function buildRotatingPlan(input: {
     const arr = criticalByBand.get(c.band_rank);
     if (arr === undefined) criticalByBand.set(c.band_rank, [c]); else arr.push(c);
   }
-  const rotated: RotatingTarget[] = [];
+  // 緊急度ベースの配分 (固定予約枠ではない):
+  //   1.TRANSITION 2.ACTIVE (冬季, 先頭に seed) 3.RMS-critical never_served/overdue
+  //   4.冬季 WARM 5.それ以外 (due_soon/fresh/research)。未使用 capacity は後段へ戻る。
+  // near-term backpressure: 通常レーンの starved (never_served+overdue) が
+  // (BASELINE+ALLOWANCE) x critical 総数を超えたら、緊急でない冬季取得 (WARM と
+  // lead>60d の ACTIVE) を抑える。TRANSITION と近い ACTIVE は常に維持。
+  const starvedNow = candidates.filter((c) => c.rms_critical && (c.service_state === "never_served" || c.service_state === "overdue")).length;
+  const starvedLimit = (input.nearTermStarvedLimitFraction ?? NEAR_TERM_STARVED_BASELINE_FRACTION + NEAR_TERM_STARVED_ALLOWANCE_FRACTION) * criticalTotal;
+  const backpressure = starvedNow > starvedLimit;
+  const winterKept = backpressure
+    ? winterTargets.filter((t) => t.winter_lane === "TRANSITION" || (t.winter_lane === "ACTIVE" && offsetDays(input.runDateIso, t.stay_date) <= WINTER_ACTIVE_MID_LEAD_DAYS))
+    : winterTargets;
+  const winterUrgent = winterKept.filter((t) => t.winter_lane !== "WARM");
+  const winterWarm = winterKept.filter((t) => t.winter_lane === "WARM");
+
+  const crit01: RotatingTarget[] = [];
+  const critRest: RotatingTarget[] = [];
   for (const rank of [...criticalByBand.keys()].sort((a, b) => a - b)) {
-    rotated.push(...interleaveAndRotate(criticalByBand.get(rank)!));
+    (rank <= SERVICE_BAND_RANK.overdue ? crit01 : critRest).push(...interleaveAndRotate(criticalByBand.get(rank)!));
   }
-  rotated.push(...interleaveAndRotate(nonCritical.filter((c) => c.source === "booking")));
-  rotated.push(...interleaveAndRotate(nonCritical.filter((c) => c.source === "jalan")));
+  // WARM は crit01 に全て食われないよう、WARM 件数分だけ crit01 の後ろへ回す。
+  const bookingRoom = Math.max(0, caps.booking_pages_per_run - winterUrgent.length - winterWarm.length);
+  const crit01Booking = crit01.filter((c) => c.source === "booking");
+  const rotated: RotatingTarget[] = [
+    ...crit01Booking.slice(0, bookingRoom),
+    ...winterWarm,
+    ...crit01Booking.slice(bookingRoom),
+    ...critRest,
+    ...interleaveAndRotate(nonCritical.filter((c) => c.source === "booking")),
+    ...interleaveAndRotate(nonCritical.filter((c) => c.source === "jalan"))
+  ];
 
   // Bucket soft targets: short 35% / mid 40% / long(+winter) 25% of total cap.
   const bucketSoftMax: Record<RotatingBucket, number> = {
@@ -529,13 +647,15 @@ export function buildRotatingPlan(input: {
   // Tier soft max to avoid all-anchor selection.
   const tierSoftMax = Math.ceil(caps.total_pages_per_run * 0.7);
 
-  const selected: RotatingTarget[] = [];
-  const bySource: Record<string, number> = { booking: 0, jalan: 0 };
+  // 冬季レーンの選択は先に確定 (booking cap 内の専用枠)。bucket/tier/property/date の
+  // soft 制約カウンタは通常レーン専用のまま (レーン間で食い合わない)。
+  const selected: RotatingTarget[] = [...winterUrgent];
+  const bySource: Record<string, number> = { booking: winterUrgent.length, jalan: 0 };
   const byBucket: Record<string, number> = { short: 0, mid: 0, long: 0 };
   const byTier: Record<string, number> = {};
   const byProperty: Record<string, number> = {};
   const byStayDate: Record<string, number> = {};
-  const seenPair = new Set<string>();
+  const seenPair = new Set<string>(winterUrgent.map(keyOf));
   let excludedByCap = 0;
   let excludedByDiversity = 0;
   const diversityCounted = new Set<string>();
@@ -560,6 +680,13 @@ export function buildRotatingPlan(input: {
       const srcCap = c.source === "booking" ? caps.booking_pages_per_run : caps.jalan_pages_per_run;
       if ((bySource[c.source] ?? 0) >= srcCap) { if (pass.balance) excludedByCap += 1; continue; }
       const propKey = `${c.source}|${c.property_slug}`;
+      if (c.winter_lane !== undefined) {
+        // 冬季 WARM は専用 quota で選別済み: 通常レーンの property/date/bucket 制約は適用しない。
+        selected.push(c);
+        seenPair.add(pairKey);
+        bySource[c.source] = (bySource[c.source] ?? 0) + 1;
+        continue;
+      }
       if (pass.propCap && (byProperty[propKey] ?? 0) >= MAX_TARGETS_PER_PROPERTY_PER_RUN) {
         if (!diversityCounted.has(pairKey)) { excludedByDiversity += 1; diversityCounted.add(pairKey); }
         continue;
@@ -590,7 +717,10 @@ export function buildRotatingPlan(input: {
   const warnings: string[] = [];
   if ((distinctPropBySource["booking"] ?? 0) > 0 && (distinctPropBySource["booking"] ?? 0) < 3) warnings.push(`booking_distinct_properties_lt_3:${distinctPropBySource["booking"]}`);
   if ((distinctPropBySource["jalan"] ?? 0) > 0 && (distinctPropBySource["jalan"] ?? 0) < 3) warnings.push(`jalan_distinct_properties_lt_3:${distinctPropBySource["jalan"]}`);
-  for (const [k, v] of Object.entries(byPropertyOut)) if (v > MAX_TARGETS_PER_PROPERTY_PER_RUN) warnings.push(`property_over_cap:${k}=${v}`);
+  // per-property cap の警告は通常レーン分のみ (冬季レーンは専用 quota を持つ)。
+  const byPropertyRegular: Record<string, number> = {};
+  for (const t of selected) if (t.winter_lane === undefined) byPropertyRegular[`${t.source}|${t.property_slug}`] = (byPropertyRegular[`${t.source}|${t.property_slug}`] ?? 0) + 1;
+  for (const [k, v] of Object.entries(byPropertyRegular)) if (v > MAX_TARGETS_PER_PROPERTY_PER_RUN) warnings.push(`property_over_cap:${k}=${v}`);
 
   // Phase AUTO-RUNNER17X diagnostics (derived from reason_codes).
   const isNearTerm = (t: RotatingTarget): boolean => t.reason_codes.includes("near_term_dense");
@@ -607,8 +737,8 @@ export function buildRotatingPlan(input: {
     excluded_by_property_diversity_cap: excludedByDiversity,
     candidate_count: candidates.length,
     selected_by_source: bySource,
-    selected_by_bucket: byBucket,
-    selected_by_tier: byTier,
+    selected_by_bucket: countBy(selected, (t) => t.bucket, { short: 0, mid: 0, long: 0 }),
+    selected_by_tier: countBy(selected, (t) => t.tier, {}),
     selected_distinct_properties_by_source: distinctPropBySource,
     selected_distinct_stay_dates: new Set(selected.map((t) => t.stay_date)).size,
     selected_targets_by_property: byPropertyOut,
@@ -627,11 +757,18 @@ export function buildRotatingPlan(input: {
     rms_critical_selected_count: selected.filter((c) => c.rms_critical).length,
     candidates_by_service_state: countServiceStates(candidates),
     selected_by_service_state: countServiceStates(selected.filter((c) => c.rms_critical)),
+    winter_lane: { ...winter.diagnostics, selected_count: winterKept.length, near_term_starved_now: starvedNow, near_term_starved_limit: Math.round(starvedLimit * 10) / 10, backpressure_active: backpressure },
     selected_non_critical_count: selected.filter((c) => !c.rms_critical).length,
     max_selected_service_age_hours: selected
       .filter((c) => c.rms_critical && c.service_age_hours !== null)
       .reduce<number | null>((mx, c) => (mx === null || c.service_age_hours! > mx ? c.service_age_hours! : mx), null)
   };
+}
+
+function countBy(list: readonly RotatingTarget[], f: (t: RotatingTarget) => string, init: Record<string, number>): Record<string, number> {
+  const out = { ...init };
+  for (const t of list) out[f(t)] = (out[f(t)] ?? 0) + 1;
+  return out;
 }
 
 function keyOf(t: RotatingTarget): string {

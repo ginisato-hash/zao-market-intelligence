@@ -81,3 +81,15 @@ export function resolveForcedCheckinDates(env: Record<string, string | undefined
   }
   return { valid: [...validSet].sort(), invalid };
 }
+
+// ---------------------------------------------------------------------------
+// Kiraku 冬季販売レーンの feature gate。
+// 冬季レーンは multiplier>=4 の容量が前提 (docs/winter-sales-coverage-simulation.md)。
+// multiplier 3 のままだと near-term starvation が受入基準を超えるため、
+// ZMI_WINTER_SALES_LANE_ENABLED="1" かつ 実効 multiplier >= 4 の両方で初めて有効。
+// 実効 multiplier は resolveCrawlVolumeMultiplier (整数化 + hard max 5 クランプ)。
+export const WINTER_LANE_MIN_MULTIPLIER = 4;
+
+export function resolveWinterSalesLaneEnabled(env: Record<string, string | undefined>): boolean {
+  return env.ZMI_WINTER_SALES_LANE_ENABLED === "1" && resolveCrawlVolumeMultiplier(env) >= WINTER_LANE_MIN_MULTIPLIER;
+}
