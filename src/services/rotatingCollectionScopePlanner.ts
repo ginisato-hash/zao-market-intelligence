@@ -14,7 +14,7 @@ import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
 import { epochDay, roundRobinByGroup } from "./priorityRefreshTiers";
 import { getOwnPropertyKey, isOwnPropertyName } from "./ownPropertyTargets";
 import { CORE_COMPETITORS } from "./coreCompetitorTargets";
-import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "./kirakuWinterSalesWindow";
+import { LEGACY_SKI_SEASON_WINDOW, skiSeasonWindowFor, type DateWindow } from "./kirakuWinterSalesWindow";
 import { type WinterSalesScope } from "./kirakuWinterSalesScope";
 import {
   WINTER_ACTIVE_MID_LEAD_DAYS,
@@ -68,8 +68,6 @@ export const DAILY_PAGE_CAPACITY = {
 } as const;
 
 const BUCKET_RANGES = { short: [1, 14], mid: [15, 90], long: [91, 240] } as const;
-// 一般リサーチ用の winter スコア範囲 (12/19 を含む)。Kiraku 冬季販売レーンは別 (下記)。
-const WINTER_RANGE = [MARKET_RESEARCH_SKI_SEASON_WINDOW.from, MARKET_RESEARCH_SKI_SEASON_WINDOW.to] as const;
 const COOLDOWN_HOURS = 24;
 
 // PRIMARY_COMPARABLE = 既存 registry (coreCompetitorTargets: HAMMOND/吉田屋/OAKHILL)。
@@ -278,8 +276,9 @@ export function bucketForOffset(offset: number): RotatingBucket | null {
   return null;
 }
 
-function inWinter(iso: string): boolean {
-  return iso >= WINTER_RANGE[0] && iso <= WINTER_RANGE[1];
+// 一般リサーチの winter 範囲。既定は従来 (LEGACY)。冬季レーン有効時のみ 3/31 まで拡張。
+function inWinter(iso: string, window: DateWindow = LEGACY_SKI_SEASON_WINDOW): boolean {
+  return iso >= window.from && iso <= window.to;
 }
 
 function inPeak(iso: string, config: RotatingDemandConfig): string[] {
@@ -300,10 +299,10 @@ export function scoreTarget(
   tier: TargetTier,
   config: RotatingDemandConfig,
   collectedRecently: boolean,
-  options?: { offset?: number; forced?: boolean; nearTermDenseDays?: number }
+  options?: { offset?: number; forced?: boolean; nearTermDenseDays?: number; researchWindow?: DateWindow }
 ): { score: number; reasons: string[] } {
   const dow = parseYmd(stayDate).getUTCDay();
-  const winter = inWinter(stayDate);
+  const winter = inWinter(stayDate, options?.researchWindow);
   const reasons: string[] = [bucket];
   let score = winter ? 50 : ({ short: 80, mid: 60, long: 40 } as const)[bucket];
   if (winter) reasons.push("winter");
@@ -360,7 +359,7 @@ function offsetDays(fromIso: string, toIso: string): number {
 export function candidateStayDates(
   runDateIso: string,
   config: RotatingDemandConfig,
-  options?: { nearTermDenseDays?: number; forcedDates?: readonly string[] }
+  options?: { nearTermDenseDays?: number; forcedDates?: readonly string[]; researchWindow?: DateWindow }
 ): { stayDate: string; bucket: RotatingBucket; forced: boolean }[] {
   const denseDays = options?.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
   const forced = new Set(options?.forcedDates ?? []);
@@ -376,7 +375,7 @@ export function candidateStayDates(
       config.public_holidays[stayDate] !== undefined ||
       config.long_weekend_dates.has(stayDate) ||
       inPeak(stayDate, config).length > 0 ||
-      inWinter(stayDate);
+      inWinter(stayDate, options?.researchWindow);
     let include: boolean;
     if (offset <= denseDays) include = true; // near-term: every day
     else if (offset <= BUCKET_RANGES.mid[1]) include = interesting || offset % 3 === 0; // mid: + weekday every 3 days
@@ -420,7 +419,8 @@ export function buildRotatingPlan(input: {
   // 既に cooldown 上書きを使った transition 世代キー。
   winterScope?: WinterSalesScope;
   winterTransitionAttempted?: ReadonlySet<string>;
-  // false: 冬季レーン無効 (旧挙動の回帰テスト用。production は常に既定の true)。
+  // true のときだけ冬季レーン有効。既定は無効 (= 旧 planner と同一配分)。
+  // 有効化は runner の feature gate (resolveWinterSalesLaneEnabled) 経由のみ。
   winterLaneEnabled?: boolean;
   winterLaneMaxBookingShare?: number;
   // backpressure 閾値 (critical 総数に対する starved 割合)。既定 BASELINE+ALLOWANCE。
@@ -436,7 +436,7 @@ export function buildRotatingPlan(input: {
   // Kiraku 冬季販売レーン (booking のみ)。transition 日は既存 forced_checkin_date
   // 機構 (+50 score / 候補強制追加) にも流す。
   const winterProperties: WinterLaneProperty[] = input.liveTargets
-    .filter((t) => input.winterLaneEnabled !== false && t.source === "booking" && t.enabled_for_live && t.verified_mapping)
+    .filter((t) => input.winterLaneEnabled === true && t.source === "booking" && t.enabled_for_live && t.verified_mapping)
     .flatMap((t): WinterLaneProperty[] => {
       if (getOwnPropertyKey(t.canonical_property_name) === "kiraku") return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "own_kiraku" }];
       if (PRIMARY_COMPARABLE_BOOKING_SLUGS.has(t.property_slug)) return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "primary_comparable" }];
@@ -457,14 +457,15 @@ export function buildRotatingPlan(input: {
     ...(input.winterLaneMaxBookingShare !== undefined ? { maxBookingShare: input.winterLaneMaxBookingShare } : {})
   });
   const transitionDates = [...new Set(winter.selected.filter((c) => c.lane_class === "TRANSITION").map((c) => c.stay_date))];
-  const dates = candidateStayDates(input.runDateIso, input.config, { nearTermDenseDays: denseDays, forcedDates: [...(input.forcedDates ?? []), ...transitionDates] });
+  const researchWindow = skiSeasonWindowFor(input.winterLaneEnabled === true);
+  const dates = candidateStayDates(input.runDateIso, input.config, { researchWindow, nearTermDenseDays: denseDays, forcedDates: [...(input.forcedDates ?? []), ...transitionDates] });
   const tierBySlug = new Map(input.liveTargets.filter((t) => t.source === "booking").map((t) => [t.property_slug, t.tier] as const));
   const winterTargets: RotatingTarget[] = winter.selected.map((c) => {
     const bucket = bucketForOffset(c.offset) ?? "long";
     const tier = tierBySlug.get(c.slug) ?? "tier_direct_mid";
     const lastIso = input.lastCollectedAt.get(`booking|${c.slug}|${c.stay_date}`);
     const serviceState = classifyServiceState(lastIso, input.nowIso, c.target_hours);
-    const { score, reasons } = scoreTarget(c.stay_date, bucket, tier, input.config, false, { offset: c.offset, forced: c.lane_class === "TRANSITION", nearTermDenseDays: denseDays });
+    const { score, reasons } = scoreTarget(c.stay_date, bucket, tier, input.config, false, { offset: c.offset, forced: c.lane_class === "TRANSITION", nearTermDenseDays: denseDays, researchWindow });
     const critical = c.lane_class !== "WARM";
     return {
       source: "booking",
@@ -508,7 +509,7 @@ export function buildRotatingPlan(input: {
         continue;
       }
       const offset = offsetDays(input.runDateIso, stayDate);
-      const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false, { offset, forced, nearTermDenseDays: denseDays });
+      const { score, reasons } = scoreTarget(stayDate, bucket, target.tier, input.config, false, { offset, forced, nearTermDenseDays: denseDays, researchWindow });
       // Phase ZMI-RMS-FAIRNESS-V1: classify service state so never-served and
       // overdue RMS-critical cells outrank recently-served ones. Only Booking
       // cells inside the RMS pricing horizon are critical; Jalan and the

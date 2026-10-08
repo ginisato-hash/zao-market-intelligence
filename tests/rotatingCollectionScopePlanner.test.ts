@@ -11,14 +11,14 @@ import {
   type RotatingDemandConfig
 } from "../src/services/rotatingCollectionScopePlanner";
 import { liveTargets } from "../src/services/marketRefreshTargetUniverse";
-import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "../src/services/kirakuWinterSalesWindow";
+import { LEGACY_SKI_SEASON_WINDOW } from "../src/services/kirakuWinterSalesWindow";
 
 const CONFIG: RotatingDemandConfig = {
   public_holidays: { "2026-07-20": "海の日", "2026-08-11": "山の日" },
   long_weekend_dates: new Set(["2026-09-19", "2026-09-20"]),
   peak_periods: [
     { code: "obon", from: "2026-08-08", to: "2026-08-16" },
-    { code: "ski_season", from: MARKET_RESEARCH_SKI_SEASON_WINDOW.from, to: MARKET_RESEARCH_SKI_SEASON_WINDOW.to, saturday_only: true }
+    { code: "ski_season", from: LEGACY_SKI_SEASON_WINDOW.from, to: LEGACY_SKI_SEASON_WINDOW.to, saturday_only: true }
   ]
 };
 const RUN_DATE = "2026-06-10";

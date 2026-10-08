@@ -17,7 +17,7 @@ import {
   type DemandConfig,
   type PlannerProperty
 } from "../services/collectionScopePlanner";
-import { MARKET_RESEARCH_SKI_SEASON_WINDOW } from "../services/kirakuWinterSalesWindow";
+import { LEGACY_SKI_SEASON_WINDOW } from "../services/kirakuWinterSalesWindow";
 
 const REPORT_DIR = ".data/reports/collection-scope";
 
@@ -45,7 +45,7 @@ const DEFAULT_DEMAND_CONFIG: DemandConfig = {
   peak_periods: [
     { code: "obon", from: "2026-08-08", to: "2026-08-16" },
     { code: "autumn_foliage_saturday", from: "2026-10-10", to: "2026-11-08", saturday_only: true },
-    { code: "ski_season_saturday", from: MARKET_RESEARCH_SKI_SEASON_WINDOW.from, to: MARKET_RESEARCH_SKI_SEASON_WINDOW.to, saturday_only: true },
+    { code: "ski_season_saturday", from: LEGACY_SKI_SEASON_WINDOW.from, to: LEGACY_SKI_SEASON_WINDOW.to, saturday_only: true },
     { code: "year_end_peak", from: "2026-12-28", to: "2027-01-03" }
   ]
 };

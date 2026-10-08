@@ -43,3 +43,12 @@ export function kirakuWinterSalesDates(): string[] {
   for (let d = KIRAKU_WINTER_SALES_WINDOW.from; d <= KIRAKU_WINTER_SALES_WINDOW.to; d = shiftYmd(d, 1)) out.push(d);
   return out;
 }
+
+// 冬季レーン無効時 (gate OFF) に維持する従来の一般リサーチ ski 期間。旧 planner と完全に
+// 同一の配分を保つための互換定数 (リテラルはここだけ)。レーン有効時は
+// MARKET_RESEARCH_SKI_SEASON_WINDOW (3/31 まで) を使う。
+export const LEGACY_SKI_SEASON_WINDOW: DateWindow = { from: "2026-12-19", to: "2027-03-15" };
+
+export function skiSeasonWindowFor(winterLaneEnabled: boolean): DateWindow {
+  return winterLaneEnabled ? MARKET_RESEARCH_SKI_SEASON_WINDOW : LEGACY_SKI_SEASON_WINDOW;
+}

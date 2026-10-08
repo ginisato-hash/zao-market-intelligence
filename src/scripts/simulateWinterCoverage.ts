@@ -29,7 +29,7 @@ import {
   type RotatingDemandConfig,
   type RotatingPlan
 } from "../services/rotatingCollectionScopePlanner";
-import { MARKET_RESEARCH_SKI_SEASON_WINDOW, kirakuWinterSalesDates } from "../services/kirakuWinterSalesWindow";
+import { LEGACY_SKI_SEASON_WINDOW, MARKET_RESEARCH_SKI_SEASON_WINDOW, kirakuWinterSalesDates } from "../services/kirakuWinterSalesWindow";
 import { parseWinterSalesScope, winterLaneOf, type WinterSalesScope } from "../services/kirakuWinterSalesScope";
 import { winterTargetHours } from "../services/winterSalesLanePlanner";
 import { getOwnPropertyKey, isOwnPropertyName } from "../services/ownPropertyTargets";
@@ -64,6 +64,8 @@ const DEMAND_CONFIG: RotatingDemandConfig = {
 };
 
 type PlanFn = (input: Record<string, unknown>) => RotatingPlan;
+// 新 planner は冬季レーン有効 (本番では gate: ZMI_WINTER_SALES_LANE_ENABLED=1 かつ multiplier>=4)。
+const newPlan: PlanFn = (i) => buildNewPlan({ ...(i as Parameters<typeof buildNewPlan>[0]), winterLaneEnabled: true });
 
 function parseCsvLine(line: string): string[] {
   const cells: string[] = []; let cur = ""; let q = false;
@@ -232,7 +234,7 @@ function simulate(args: { planner: "old" | "new"; plan: PlanFn; scenario: Scenar
     const nowIso = isoOf(nowMs);
     const scope = scopeFor(scenario, nowMs, dayIdx, transitionAt);
     const p = plan({
-      runDateIso: nowIso.slice(0, 10), nowIso, slotHourJst: hour, liveTargets: targets, config: DEMAND_CONFIG,
+      runDateIso: nowIso.slice(0, 10), nowIso, slotHourJst: hour, liveTargets: targets, config: planner === "new" ? DEMAND_CONFIG : { ...DEMAND_CONFIG, peak_periods: DEMAND_CONFIG.peak_periods.map((p) => (p.code === "ski_season" ? { ...p, from: LEGACY_SKI_SEASON_WINDOW.from, to: LEGACY_SKI_SEASON_WINDOW.to } : p)) },
       lastCollectedAt: last, caps: CAPS, nearTermDenseDays: 30, forcedDates: [],
       winterScope: scope, winterTransitionAttempted: attempted,
       ...(args.maxShare !== undefined ? { winterLaneMaxBookingShare: args.maxShare } : {})
@@ -388,7 +390,7 @@ async function main(): Promise<void> {
   for (const c of CASES) {
     for (const m of CANDIDATE_MULTIPLIERS) {
       oldM.set(key(c.key, m), simulate({ planner: "old", plan: old.fn, scenario: c.scenario, startDate: c.start, history: hist.map, multiplier: m }));
-      for (const sh of CANDIDATE_SHARES) grid.set(key(c.key, m, sh), simulate({ planner: "new", plan: buildNewPlan as unknown as PlanFn, scenario: c.scenario, startDate: c.start, history: hist.map, multiplier: m, maxShare: sh }));
+      for (const sh of CANDIDATE_SHARES) grid.set(key(c.key, m, sh), simulate({ planner: "new", plan: newPlan, scenario: c.scenario, startDate: c.start, history: hist.map, multiplier: m, maxShare: sh }));
       console.error(`done ${c.key} m=${m}`);
     }
   }

@@ -75,6 +75,7 @@ function plan(opts: { starvedLimit?: number; hour?: number; scope?: WinterSalesS
     config: CONFIG,
     lastCollectedAt: opts.last ?? new Map(),
     caps: opts.caps ?? CAPS3,
+    winterLaneEnabled: true,
     nearTermStarvedLimitFraction: opts.starvedLimit ?? 1, // 既定は backpressure 無効 (専用テストで有効化)
     ...(opts.scope !== undefined ? { winterScope: opts.scope } : {}),
     ...(opts.attempted !== undefined ? { winterTransitionAttempted: opts.attempted } : {})
@@ -368,7 +369,7 @@ describe("urgency-based allocation and near-term backpressure", () => {
     for (const share of [0.25, 0.33, 0.4, 0.5]) {
       const p = buildRotatingPlan({
         runDateIso: RUN_DATE, nowIso: `${RUN_DATE}T08:00:00+09:00`, slotHourJst: 8, liveTargets: liveTargets(), config: CONFIG,
-        lastCollectedAt: new Map(), caps: CAPS3, winterScope: ALL, winterLaneMaxBookingShare: share, nearTermStarvedLimitFraction: 1
+        lastCollectedAt: new Map(), caps: CAPS3, winterLaneEnabled: true, winterScope: ALL, winterLaneMaxBookingShare: share, nearTermStarvedLimitFraction: 1
       });
       expect(winterOf(p).length).toBeLessThanOrEqual(Math.floor(CAPS3.booking_pages_per_run * share));
     }
