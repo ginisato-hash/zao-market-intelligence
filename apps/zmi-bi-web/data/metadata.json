@@ -1,8 +1,8 @@
 {
-  "generated_at_jst": "2026-10-09T23:10:00+09:00",
-  "latest_collected_at_jst": "2026-10-09T22:00:00+09:00",
-  "history_rows_total": 64203,
-  "latest_observation_rows": 6092,
+  "generated_at_jst": "2026-10-10T01:10:00+09:00",
+  "latest_collected_at_jst": "2026-10-10T00:00:00+09:00",
+  "history_rows_total": 64218,
+  "latest_observation_rows": 6093,
   "unified_rows": 3071,
   "unified_rows_before_retention": 4422,
   "distinct_properties": 28,
@@ -46,13 +46,13 @@
     "data_reliability_rate": 0.8789
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 5416,
+  "price_movement_rows": 5417,
   "dp_pressure_rows": 170,
-  "price_movement_own_property_rows": 8327,
-  "price_movement_latest_collected_at_jst": "2026-10-09T22:00:00+09:00",
+  "price_movement_own_property_rows": 8331,
+  "price_movement_latest_collected_at_jst": "2026-10-10T00:00:00+09:00",
   "dp_pressure_latest_collected_at_jst": "2026-10-09T20:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 27900,
+  "own_miuraya_price": 38930,
   "own_kiraku_price": 16859,
   "own_property_price_status": [
     {
@@ -68,13 +68,13 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 0.9889,
+      "coverage_90d": 0.9778,
       "status": "warning"
     },
     {
       "property": "kiraku",
       "coverage_30d": 1,
-      "coverage_90d": 0.9889,
+      "coverage_90d": 0.9778,
       "status": "warning"
     }
   ],
@@ -82,24 +82,24 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.5667,
+      "coverage_90d": 0.5556,
       "status": "warning"
     },
     {
       "property": "oakhill",
       "coverage_30d": 1,
-      "coverage_90d": 0.6111,
+      "coverage_90d": 0.6,
       "status": "warning"
     },
     {
       "property": "yoshidaya",
       "coverage_30d": 1,
-      "coverage_90d": 0.6222,
+      "coverage_90d": 0.6111,
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 8311,
-  "priority_competitor_vs_own_price_gap": 8311,
+  "competitor_vs_own_price_gap": 2796,
+  "priority_competitor_vs_own_price_gap": 2796,
   "priority_competitor_price_changes_count": 236,
-  "own_property_price_changes_count": 160
+  "own_property_price_changes_count": 161
 }
