@@ -1,8 +1,8 @@
 {
-  "generated_at_jst": "2026-10-12T03:10:00+09:00",
-  "latest_collected_at_jst": "2026-10-12T02:00:00+09:00",
-  "history_rows_total": 65154,
-  "latest_observation_rows": 6215,
+  "generated_at_jst": "2026-10-12T05:10:00+09:00",
+  "latest_collected_at_jst": "2026-10-12T04:00:02+09:00",
+  "history_rows_total": 65169,
+  "latest_observation_rows": 6216,
   "unified_rows": 3154,
   "unified_rows_before_retention": 4505,
   "distinct_properties": 28,
@@ -37,22 +37,22 @@
   "dropped_past_rows_count": 1351,
   "availability_breakdown": {
     "total": 3154,
-    "available": 2324,
-    "sold_out": 431,
+    "available": 2323,
+    "sold_out": 432,
     "not_found": 0,
     "excluded": 399,
-    "ota_unavailable_rate": 0.1564,
+    "ota_unavailable_rate": 0.1568,
     "data_missing_rate": 0.1265,
     "data_reliability_rate": 0.8735
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 5519,
+  "price_movement_rows": 5520,
   "dp_pressure_rows": 170,
-  "price_movement_own_property_rows": 8487,
-  "price_movement_latest_collected_at_jst": "2026-10-12T02:00:00+09:00",
+  "price_movement_own_property_rows": 8489,
+  "price_movement_latest_collected_at_jst": "2026-10-12T04:00:02+09:00",
   "dp_pressure_latest_collected_at_jst": "2026-10-12T00:00:01+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 26208,
+  "own_miuraya_price": 24000,
   "own_kiraku_price": 75391,
   "own_property_price_status": [
     {
@@ -98,8 +98,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -28799,
-  "priority_competitor_vs_own_price_gap": -28799,
+  "competitor_vs_own_price_gap": -27695,
+  "priority_competitor_vs_own_price_gap": -27695,
   "priority_competitor_price_changes_count": 238,
   "own_property_price_changes_count": 155
 }
