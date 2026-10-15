@@ -82,6 +82,13 @@ export interface WinterLaneDiagnostics {
   near_term_starved_now?: number;
   near_term_starved_limit?: number;
   backpressure_active?: boolean;
+  // far-lead ACTIVE refresh / comparable set (present only when either is non-default).
+  active_refresh_enabled?: boolean;
+  comparable_set?: string;
+  comparable_set_version?: string;
+  own_quota_per_run?: number | null;
+  own_quota_raw_per_run?: number | null;
+  far_active_kept_under_backpressure?: number;
   selected_count: number;
   selected_by_class: Record<WinterLaneClass, number>;
   pending_transition_cells: number;
@@ -103,6 +110,10 @@ export interface WinterLaneInput {
   offsetDays: (fromIso: string, toIso: string) => number;
   // 感度分析 (simulateWinterCoverage) 用。省略時は WINTER_LANE_MAX_BOOKING_SHARE。
   maxBookingShare?: number;
+  // true: 自館 (own_kiraku) quota を比較施設と分離する。自館は販売中日の SLA から算定した
+  // ceil(required/slots) を予算内で先に確保し (固定 1 件ではない)、比較施設は (予算 - 自館分) の中で按分。
+  // 省略時は従来どおり全施設を一括按分。
+  separateOwnQuota?: boolean;
 }
 
 function cellOrder(a: WinterLaneCell, b: WinterLaneCell): number {
@@ -188,7 +199,20 @@ export function planWinterLane(input: WinterLaneInput): { selected: WinterLaneCe
 
   const quotaRaw: Record<string, number> = {};
   for (const p of input.properties) quotaRaw[p.slug] = Math.ceil(required[p.slug]! / slotsPerDay - 1e-9);
-  const quota = scaleQuotas(quotaRaw, budget);
+  let quota: Record<string, number>;
+  if (input.separateOwnQuota !== true) {
+    quota = scaleQuotas(quotaRaw, budget);
+  } else {
+    // 自館は観測を止めず SLA 由来の専用枠に分離し、独立競合 (>=3 施設) の枠と混ぜない。
+    const own: Record<string, number> = {};
+    const comps: Record<string, number> = {};
+    for (const p of input.properties) {
+      if (p.kind === "own_kiraku") own[p.slug] = quotaRaw[p.slug]!;
+      else comps[p.slug] = quotaRaw[p.slug]!;
+    }
+    const ownTotal = Math.min(budget, Object.values(own).reduce((n, x) => n + x, 0));
+    quota = { ...scaleQuotas(own, ownTotal), ...scaleQuotas(comps, Math.max(0, budget - ownTotal)) };
+  }
 
   const selected: WinterLaneCell[] = [];
   const byClass: Record<WinterLaneClass, number> = { TRANSITION: 0, ACTIVE: 0, WARM: 0 };

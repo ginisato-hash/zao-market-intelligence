@@ -93,3 +93,19 @@ export const WINTER_LANE_MIN_MULTIPLIER = 4;
 export function resolveWinterSalesLaneEnabled(env: Record<string, string | undefined>): boolean {
   return env.ZMI_WINTER_SALES_LANE_ENABLED === "1" && resolveCrawlVolumeMultiplier(env) >= WINTER_LANE_MIN_MULTIPLIER;
 }
+
+// 冬季 far-lead ACTIVE refresh (default OFF)。冬季レーン自体が有効なときだけ効く。
+// ON: (1) 自館 (xi-raku) は 1 枠/run の専用予約で観測を継続し、独立競合 3 件の取得枠とは分離、
+//     (2) backpressure 中でも lead>60d の ACTIVE (販売中) セルを既存レーン予算 (0.40 share) 内で維持。
+// 既存の per-run cap / multiplier / share は変えない。
+export function resolveWinterActiveRefreshEnabled(env: Record<string, string | undefined>): boolean {
+  return resolveWinterSalesLaneEnabled(env) && env.ZMI_WINTER_ACTIVE_REFRESH_ENABLED === "1";
+}
+
+// 冬季レーンの比較施設セット。既定は現行 registry (HAMMOND/吉田屋/OAKHILL)。
+// "primary_v1_best5" は RMS peer_membership_v1_2026-09-02 の PRIMARY_COMPARABLE から選んだ 5 施設のみ。
+// 未知の値は既定 (registry_v0) に倒す。
+export type WinterComparableSetId = "registry_v0" | "primary_v1_best5";
+export function resolveWinterComparableSet(env: Record<string, string | undefined>): WinterComparableSetId {
+  return env.ZMI_WINTER_COMPARABLE_SET === "primary_v1_best5" ? "primary_v1_best5" : "registry_v0";
+}
