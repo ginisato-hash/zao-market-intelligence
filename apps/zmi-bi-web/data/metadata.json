@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-10-15T23:10:05+09:00",
-  "latest_collected_at_jst": "2026-10-15T22:00:05+09:00",
-  "history_rows_total": 67144,
-  "latest_observation_rows": 6479,
-  "unified_rows": 3333,
-  "unified_rows_before_retention": 4684,
+  "generated_at_jst": "2026-10-16T01:10:05+09:00",
+  "latest_collected_at_jst": "2026-10-16T00:00:00+09:00",
+  "history_rows_total": 67204,
+  "latest_observation_rows": 6501,
+  "unified_rows": 2949,
+  "unified_rows_before_retention": 4701,
   "distinct_properties": 28,
-  "distinct_checkins": 175,
+  "distinct_checkins": 163,
   "sources_included": [
     "booking",
     "jalan",
@@ -14,11 +14,10 @@
   ],
   "data_policy": "ZMI history only. All sources unified. No external data.",
   "period_retention_policy": "current_or_next_period_plus_3_previous_periods_and_all_future_periods",
-  "current_period_key_jst": "2026-10_early",
-  "default_period_key": "2026-10_early",
+  "current_period_key_jst": "2026-10_late",
+  "default_period_key": "2026-10_late",
   "retention_previous_periods": 3,
   "retained_period_keys": [
-    "2026-08_late",
     "2026-09_early",
     "2026-09_late",
     "2026-10_early",
@@ -33,27 +32,27 @@
     "2027-02_late",
     "2027-03_early"
   ],
-  "dropped_past_period_keys_count": 6,
-  "dropped_past_rows_count": 1351,
+  "dropped_past_period_keys_count": 7,
+  "dropped_past_rows_count": 1752,
   "availability_breakdown": {
-    "total": 3333,
-    "available": 2462,
-    "sold_out": 440,
+    "total": 2949,
+    "available": 2131,
+    "sold_out": 420,
     "not_found": 0,
-    "excluded": 431,
-    "ota_unavailable_rate": 0.1516,
-    "data_missing_rate": 0.1293,
-    "data_reliability_rate": 0.8707
+    "excluded": 398,
+    "ota_unavailable_rate": 0.1646,
+    "data_missing_rate": 0.135,
+    "data_reliability_rate": 0.865
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 5756,
+  "price_movement_rows": 5774,
   "dp_pressure_rows": 176,
-  "price_movement_own_property_rows": 8751,
-  "price_movement_latest_collected_at_jst": "2026-10-15T22:00:05+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-10-15T22:00:05+09:00",
+  "price_movement_own_property_rows": 8760,
+  "price_movement_latest_collected_at_jst": "2026-10-16T00:00:00+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-10-16T00:00:00+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 19980,
-  "own_kiraku_price": 46980,
+  "own_miuraya_price": 24000,
+  "own_kiraku_price": 42525,
   "own_property_price_status": [
     {
       "property": "miuraya",
@@ -68,7 +67,7 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     },
     {
@@ -82,7 +81,7 @@
     {
       "property": "hammond",
       "coverage_30d": 1,
-      "coverage_90d": 0.7556,
+      "coverage_90d": 0.7667,
       "status": "warning"
     },
     {
@@ -98,8 +97,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -11700,
-  "priority_competitor_vs_own_price_gap": -11700,
+  "competitor_vs_own_price_gap": -6532,
+  "priority_competitor_vs_own_price_gap": -6532,
   "priority_competitor_price_changes_count": 269,
   "own_property_price_changes_count": 172
 }
