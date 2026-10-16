@@ -44,7 +44,7 @@ import {
   type RotatingTarget
 } from "../services/rotatingCollectionScopePlanner";
 import { loadWinterSalesScope } from "../services/kirakuWinterSalesScope";
-import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates, resolveNearTermDenseDays, resolveWinterSalesLaneEnabled } from "../services/crawlVolumeConfig";
+import { resolveCrawlVolumeMultiplier, resolveForcedCheckinDates, resolveNearTermDenseDays, resolveWinterActiveRefreshEnabled, resolveWinterComparableSet, resolveWinterSalesLaneEnabled } from "../services/crawlVolumeConfig";
 import {
   backoffDelayMs,
   classifyBlock,
@@ -251,8 +251,13 @@ async function run(): Promise<void> {
   const winterScope = winterLaneEnabled ? loadWinterSalesScope(env) : undefined;
   if (winterScope?.warning != null) console.warn(`warning_${winterScope.warning}`);
   const winterLedger = winterLaneEnabled ? readWinterTransitionLedger() : new Set<string>();
+  // default OFF: far-lead ACTIVE refresh + 自館専用予約 / 比較施設セット (registry_v0 既定)。
+  const winterActiveRefresh = resolveWinterActiveRefreshEnabled(env);
+  const winterComparableSet = resolveWinterComparableSet(env);
   const planInput = {
     winterLaneEnabled,
+    ...(winterActiveRefresh ? { winterActiveRefresh } : {}),
+    ...(winterComparableSet !== "registry_v0" ? { winterComparableSet } : {}),
     ...(winterScope !== undefined ? { winterScope } : {}),
     winterTransitionAttempted: winterLedger,
     runDateIso: jst.date,

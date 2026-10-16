@@ -10,7 +10,7 @@
 // No I/O, no network, no DB. Rakuten/Google are never collected (cap 0).
 
 import { type MarketRefreshPropertyTarget, type TargetTier } from "./marketRefreshTargetUniverse";
-import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap } from "./crawlVolumeConfig";
+import { DEFAULT_NEAR_TERM_DENSE_DAYS, scaleCap, type WinterComparableSetId } from "./crawlVolumeConfig";
 import { epochDay, roundRobinByGroup } from "./priorityRefreshTiers";
 import { getOwnPropertyKey, isOwnPropertyName } from "./ownPropertyTargets";
 import { CORE_COMPETITORS } from "./coreCompetitorTargets";
@@ -77,6 +77,18 @@ export const NEAR_TERM_STARVED_BASELINE_FRACTION = 0.12;
 export const NEAR_TERM_STARVED_ALLOWANCE_FRACTION = 0.05;
 
 export const PRIMARY_COMPARABLE_BOOKING_SLUGS: ReadonlySet<string> = new Set(CORE_COMPETITORS.map((c) => c.bookingSlug));
+
+// 冬季レーンの比較施設セット (versioned)。primary_v1_best5 は RMS rms_v4_peer_membership
+// membership_version=peer_membership_v1_2026-09-02 / peer_class=PRIMARY_COMPARABLE の施設のみから、
+// 2026-10-01..15 の Booking 実測適格率 (確定2名・販売・価格妥当) 上位で選定。
+// 新しい peer 定義・比較商品の承認ではない。
+export const WINTER_COMPARABLE_SETS: Readonly<Record<WinterComparableSetId, { version: string; slugs: ReadonlySet<string> }>> = {
+  registry_v0: { version: "core_competitor_registry", slugs: PRIMARY_COMPARABLE_BOOKING_SLUGS },
+  primary_v1_best5: {
+    version: "peer_membership_v1_2026-09-02",
+    slugs: new Set(["onsen-amp-stay-oakhill", "hammond-takamiya", "le-vert-zao", "pension-puutaro-yamagata", "ji-tian-wu-shan-xing-shi"])
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Phase ZMI-RMS-FAIRNESS-V1 — Booking RMS-critical anti-starvation.
@@ -425,6 +437,10 @@ export function buildRotatingPlan(input: {
   winterLaneMaxBookingShare?: number;
   // backpressure 閾値 (critical 総数に対する starved 割合)。既定 BASELINE+ALLOWANCE。
   nearTermStarvedLimitFraction?: number;
+  // default OFF。far-lead ACTIVE refresh + 自館専用予約 (crawlVolumeConfig.resolveWinterActiveRefreshEnabled)。
+  winterActiveRefresh?: boolean;
+  // 冬季レーン比較施設セット。省略時 registry_v0 (現行)。
+  winterComparableSet?: WinterComparableSetId;
 }): RotatingPlan {
   const caps = input.caps ?? ROTATING_CAPS;
   const denseDays = input.nearTermDenseDays ?? DEFAULT_NEAR_TERM_DENSE_DAYS;
@@ -435,13 +451,17 @@ export function buildRotatingPlan(input: {
 
   // Kiraku 冬季販売レーン (booking のみ)。transition 日は既存 forced_checkin_date
   // 機構 (+50 score / 候補強制追加) にも流す。
+  const winterActiveRefresh = input.winterLaneEnabled === true && input.winterActiveRefresh === true;
+  const winterComparableSetId: WinterComparableSetId = input.winterComparableSet ?? "registry_v0";
+  const winterComparableSlugs = WINTER_COMPARABLE_SETS[winterComparableSetId].slugs;
   const winterProperties: WinterLaneProperty[] = input.liveTargets
     .filter((t) => input.winterLaneEnabled === true && t.source === "booking" && t.enabled_for_live && t.verified_mapping)
     .flatMap((t): WinterLaneProperty[] => {
       if (getOwnPropertyKey(t.canonical_property_name) === "kiraku") return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "own_kiraku" }];
-      if (PRIMARY_COMPARABLE_BOOKING_SLUGS.has(t.property_slug)) return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "primary_comparable" }];
+      if (winterComparableSlugs.has(t.property_slug)) return [{ slug: t.property_slug, canonical_property_name: t.canonical_property_name, kind: "primary_comparable" }];
       return [];
     });
+  const ownWinterSlugs: ReadonlySet<string> = new Set(winterProperties.filter((p) => p.kind === "own_kiraku").map((p) => p.slug));
   const winter = planWinterLane({
     runDateIso: input.runDateIso,
     nowIso: input.nowIso,
@@ -454,7 +474,8 @@ export function buildRotatingPlan(input: {
     cooldownHours: COOLDOWN_HOURS,
     ageHours: hoursBetween,
     offsetDays,
-    ...(input.winterLaneMaxBookingShare !== undefined ? { maxBookingShare: input.winterLaneMaxBookingShare } : {})
+    ...(input.winterLaneMaxBookingShare !== undefined ? { maxBookingShare: input.winterLaneMaxBookingShare } : {}),
+    ...(winterActiveRefresh ? { separateOwnQuota: true } : {})
   });
   const transitionDates = [...new Set(winter.selected.filter((c) => c.lane_class === "TRANSITION").map((c) => c.stay_date))];
   const researchWindow = skiSeasonWindowFor(input.winterLaneEnabled === true);
@@ -615,8 +636,11 @@ export function buildRotatingPlan(input: {
   const starvedNow = candidates.filter((c) => c.rms_critical && (c.service_state === "never_served" || c.service_state === "overdue")).length;
   const starvedLimit = (input.nearTermStarvedLimitFraction ?? NEAR_TERM_STARVED_BASELINE_FRACTION + NEAR_TERM_STARVED_ALLOWANCE_FRACTION) * criticalTotal;
   const backpressure = starvedNow > starvedLimit;
+  // winterActiveRefresh ON: 販売中 (ACTIVE) セルは lead に関係なく維持 (数は既にレーン quota = 0.40 share 内)。
+  // backpressure の抑制対象は WARM のみになる。OFF なら従来どおり lead>60d の ACTIVE も抑制。
   const winterKept = backpressure
-    ? winterTargets.filter((t) => t.winter_lane === "TRANSITION" || (t.winter_lane === "ACTIVE" && offsetDays(input.runDateIso, t.stay_date) <= WINTER_ACTIVE_MID_LEAD_DAYS))
+    ? winterTargets.filter((t) => t.winter_lane === "TRANSITION"
+        || (t.winter_lane === "ACTIVE" && (winterActiveRefresh || offsetDays(input.runDateIso, t.stay_date) <= WINTER_ACTIVE_MID_LEAD_DAYS)))
     : winterTargets;
   const winterUrgent = winterKept.filter((t) => t.winter_lane !== "WARM");
   const winterWarm = winterKept.filter((t) => t.winter_lane === "WARM");
@@ -757,7 +781,16 @@ export function buildRotatingPlan(input: {
     rms_critical_selected_count: selected.filter((c) => c.rms_critical).length,
     candidates_by_service_state: countServiceStates(candidates),
     selected_by_service_state: countServiceStates(selected.filter((c) => c.rms_critical)),
-    winter_lane: { ...winter.diagnostics, selected_count: winterKept.length, near_term_starved_now: starvedNow, near_term_starved_limit: Math.round(starvedLimit * 10) / 10, backpressure_active: backpressure },
+    winter_lane: { ...winter.diagnostics, selected_count: winterKept.length, near_term_starved_now: starvedNow, near_term_starved_limit: Math.round(starvedLimit * 10) / 10, backpressure_active: backpressure,
+      ...(winterActiveRefresh || winterComparableSetId !== "registry_v0" ? {
+        active_refresh_enabled: winterActiveRefresh,
+        comparable_set: winterComparableSetId,
+        comparable_set_version: WINTER_COMPARABLE_SETS[winterComparableSetId].version,
+        own_quota_per_run: winterActiveRefresh ? sumQuota(winter.diagnostics.quota_by_property, ownWinterSlugs) : null,
+        own_quota_raw_per_run: winterActiveRefresh ? sumQuota(winter.diagnostics.quota_raw_by_property, ownWinterSlugs) : null,
+        far_active_kept_under_backpressure: backpressure && winterActiveRefresh
+          ? winterKept.filter((t) => t.winter_lane === "ACTIVE" && offsetDays(input.runDateIso, t.stay_date) > WINTER_ACTIVE_MID_LEAD_DAYS).length : 0
+      } : {}) },
     selected_non_critical_count: selected.filter((c) => !c.rms_critical).length,
     max_selected_service_age_hours: selected
       .filter((c) => c.rms_critical && c.service_age_hours !== null)
@@ -801,6 +834,10 @@ function withinHours(pastIso: string, nowIso: string, hours: number): boolean {
 
 // Elapsed hours between two ISO timestamps, using the same date+hour parsing as
 // withinHours so cooldown and service-state agree on what "age" means.
+function sumQuota(q: Record<string, number>, slugs: ReadonlySet<string>): number {
+  return Object.entries(q).filter(([slug]) => slugs.has(slug)).reduce((n, [, x]) => n + x, 0);
+}
+
 function hoursBetween(pastIso: string, nowIso: string): number {
   if (!/^\d{4}-\d{2}-\d{2}/u.test(pastIso) || !/^\d{4}-\d{2}-\d{2}/u.test(nowIso)) return Number.NaN;
   const past = parseYmd(pastIso.slice(0, 10)).getTime() + hourMs(pastIso);
