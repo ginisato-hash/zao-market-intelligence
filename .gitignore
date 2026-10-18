@@ -172,3 +172,6 @@ vite.config.ts.timestamp-*
 *.local.json
 *.ai-discovered.local.json
 *.verified.local.json
+
+# Market evidence sidecar (ZMI_EVIDENCE_SIDECAR_ENABLED): local only, never published
+.data/history-evidence/
