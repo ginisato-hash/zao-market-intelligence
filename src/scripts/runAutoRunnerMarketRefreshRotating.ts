@@ -223,7 +223,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
 }
 
 /** Sidecar export after an ACCEPTED history append. Never throws into the run: a failure is reported, history is untouched. */
-function exportEvidenceSidecar(acceptedRows: ReadonlyArray<{ rowId: string; rowHash: string; shardMonth: string; checkin: string; checkout: string; collectedAtJst: string; sourceSlugOrCode: string; source: string; debugArtifactPath: string; normalizedTotalPrice: number | null; sourcePrimaryPrice: number | null; isPriceExcludedFromDp: boolean }>,
+function exportEvidenceSidecar(acceptedRows: ReadonlyArray<{ rowId: string; rowHash: string; shardMonth: string; checkin: string; checkout: string; collectedAtJst: string; sourceSlugOrCode: string; source: string; debugArtifactPath: string; normalizedTotalPrice: number | null; sourcePrimaryPrice: number | null; isPriceExcludedFromDp: boolean; availabilityStatus: string }>,
   bookingCaptures: readonly BookingCaptureRef[], runId: string): Record<string, unknown> {
   try {
     const read = guardedReader([DEBUG_ROOT]);

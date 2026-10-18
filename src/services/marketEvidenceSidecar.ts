@@ -28,6 +28,7 @@ import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readF
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { guessPriceCandidateType, sanitizeBookingUrl, type BookingRenderedDomSignals } from "./bookingRenderedDomProbe";
+import { parseCsv } from "./localHistoryAppendValidationPolicy";
 
 export const MARKET_EVIDENCE_EXPORT_SCHEMA = "zmi_market_evidence_export_v1" as const;
 export const BOOKING_CAPTURE_SCHEMA = "zmi_booking_selected_card_capture_v1" as const;
@@ -57,6 +58,8 @@ export interface AcceptedRow {
   checkin: string; checkout: string; collectedAtJst: string; normalizedTotalPrice: number | null; debugArtifactPath: string;
   /** The raw source price the canonical row carries (present also when the row is excluded from DP use). */
   sourcePrimaryPrice: number | null; isPriceExcludedFromDp: boolean;
+  /** The canonical row's own availability label (copied, never synthesized). */
+  availabilityStatus: string;
 }
 export interface EvidenceFields {
   request_checkin: EvidenceField<string>; request_checkout: EvidenceField<string>; request_adults: EvidenceField<number>;
@@ -69,7 +72,7 @@ export interface EvidenceFields {
 export interface EvidenceRecord {
   schema: typeof MARKET_EVIDENCE_EXPORT_SCHEMA;
   record_kind: "booking_selected_card" | "jalan_decision";
-  row: { row_id: string; row_hash: string; shard_month: string; source: "booking" | "jalan"; property_slug: string; checkin: string; checkout: string; collected_at_jst: string; normalized_total_price: number | null; source_primary_price: number | null; price_excluded_from_dp: boolean };
+  row: { row_id: string; row_hash: string; shard_month: string; source: "booking" | "jalan"; property_slug: string; checkin: string; checkout: string; collected_at_jst: string; normalized_total_price: number | null; source_primary_price: number | null; price_excluded_from_dp: boolean; availability_status: string };
   run_id: string;
   artifact: { path: string; sha256: string; kind: typeof BOOKING_CAPTURE_SCHEMA | "jalan_classification_decision" };
   fields: EvidenceFields;
@@ -160,7 +163,7 @@ export function captureBookingEvidence(sink: BookingCaptureRef[], artifactDir: s
 }
 
 /** Re-derives every Booking field from the capture alone. */
-export function deriveBookingFields(cap: BookingSelectedCardCapture): EvidenceFields {
+export function deriveBookingFields(cap: BookingSelectedCardCapture, unpricedRow: { availabilityStatus: string } | null = null): EvidenceFields {
   const qp = (url: string, k: string): string | null => { try { return new URL(url).searchParams.get(k); } catch { return null; } };
   const sp = cap.selected_price;
   // The selected price is CONFIRMED only when its raw text parses to the recorded value AND that raw text is present in
@@ -168,6 +171,19 @@ export function deriveBookingFields(cap: BookingSelectedCardCapture): EvidenceFi
   const priceOk = sp !== null && sp.block_guess === "main_room_card" && yen(sp.raw_text) === sp.numeric_value && sp.context.includes(sp.raw_text);
   const nameOk = cap.room_card.name !== "" && cap.room_card.text.includes(cap.room_card.name);
   const refundNo = priceOk && REFUND_NO.test(sp!.context); const refundYes = priceOk && REFUND_YES.test(sp!.context);
+  // The accepted canonical row carries no price: nothing commercial is evidence. The row's own availability label is
+  // quoted as the reason; sold-out is never inferred here.
+  const audit = <T>(): EvidenceField<T> => u(`ACCEPTED_ROW_UNPRICED(${unpricedRow?.availabilityStatus ?? ""})`);
+  if (unpricedRow !== null) {
+    return {
+      request_checkin: qp(cap.probe_url_sanitized, "checkin") === cap.checkin ? f("CONFIRMED", cap.checkin, "REQUEST_PARAMETER", "capture.probe_url_sanitized?checkin") : u("REQUEST_CHECKIN_MISMATCH"),
+      request_checkout: qp(cap.probe_url_sanitized, "checkout") === cap.checkout ? f("CONFIRMED", cap.checkout, "REQUEST_PARAMETER", "capture.probe_url_sanitized?checkout") : u("REQUEST_CHECKOUT_MISMATCH"),
+      request_adults: qp(cap.probe_url_sanitized, "group_adults") !== null ? f("CONFIRMED", Number(qp(cap.probe_url_sanitized, "group_adults")), "REQUEST_PARAMETER", "capture.probe_url_sanitized?group_adults") : u("REQUEST_ADULTS_ABSENT"),
+      displayed_checkin: audit(), displayed_adults: audit(), displayed_one_night: audit(),
+      room_name: audit(), price_jpy: audit(), selected_rate_plan: audit(), tax_basis: audit(), meal_room_only: audit(), refundable: audit(), promotion: audit(),
+      own_k27_t04: u(cap.property_slug === K27_T04_REFERENCE.ownSlug ? "SELECTED_ROOM_ID_AND_RATE_PLAN_NOT_EXPOSED_BY_COLLECTOR" : "NOT_OWN_PROPERTY")
+    };
+  }
   return {
     request_checkin: qp(cap.probe_url_sanitized, "checkin") === cap.checkin ? f("CONFIRMED", cap.checkin, "REQUEST_PARAMETER", "capture.probe_url_sanitized?checkin") : u("REQUEST_CHECKIN_MISMATCH"),
     request_checkout: qp(cap.probe_url_sanitized, "checkout") === cap.checkout ? f("CONFIRMED", cap.checkout, "REQUEST_PARAMETER", "capture.probe_url_sanitized?checkout") : u("REQUEST_CHECKOUT_MISMATCH"),
@@ -253,7 +269,16 @@ export function guardedReader(roots: readonly string[], maxBytes = EVIDENCE_ARTI
 export type BuildResult = EvidenceRecord | { rejected: string };
 const rowPart = (row: AcceptedRow, source: "booking" | "jalan"): EvidenceRecord["row"] => ({ row_id: row.rowId, row_hash: row.rowHash, shard_month: row.shardMonth, source,
   property_slug: row.sourceSlugOrCode, checkin: row.checkin, checkout: row.checkout, collected_at_jst: row.collectedAtJst, normalized_total_price: row.normalizedTotalPrice,
-  source_primary_price: row.sourcePrimaryPrice, price_excluded_from_dp: row.isPriceExcludedFromDp });
+  source_primary_price: row.sourcePrimaryPrice, price_excluded_from_dp: row.isPriceExcludedFromDp, availability_status: row.availabilityStatus });
+/** Canonical availability labels that state a usable price was found (Booking preview / Jalan collector). */
+const PRICED_AVAILABILITY = new Set(["available_price_basis", "available"]);
+/**
+ * An accepted canonical row that legitimately carries no price at all (audit row): BOTH prices blank AND the row's own
+ * availability label says no usable price (sold out / no safe price / empty ...). Blank prices under a "price found"
+ * label are inconsistent and are NOT an audit row.
+ */
+const isUnpricedAuditRow = (row: { sourcePrimaryPrice: number | null; normalizedTotalPrice: number | null; availabilityStatus: string }): boolean =>
+  row.sourcePrimaryPrice === null && row.normalizedTotalPrice === null && row.availabilityStatus !== "" && !PRICED_AVAILABILITY.has(row.availabilityStatus);
 /** The accepted canonical row's prices must both agree with the proven source price (normalized may be blank = excluded). */
 const acceptedPriceAgrees = (row: AcceptedRow, proven: number | null): boolean =>
   row.sourcePrimaryPrice === proven && (row.normalizedTotalPrice === null || row.normalizedTotalPrice === proven);
@@ -265,9 +290,18 @@ export function buildBookingRecord(row: AcceptedRow, capturePath: string, runId:
   try { cap = JSON.parse(bytes.toString("utf8")) as BookingSelectedCardCapture; } catch { return { rejected: "CAPTURE_UNPARSEABLE" }; }
   if (cap.capture_schema !== BOOKING_CAPTURE_SCHEMA) return { rejected: "CAPTURE_SCHEMA" };
   if (cap.property_slug !== row.sourceSlugOrCode || cap.checkin !== row.checkin || cap.checkout !== row.checkout || cap.collected_at_jst !== row.collectedAtJst) return { rejected: "ROW_IDENTITY_MISMATCH" };
-  const fields = deriveBookingFields(cap);
-  // The accepted canonical price must be exactly the proven selected price.
-  if (fields.price_jpy.state !== "CONFIRMED" || !acceptedPriceAgrees(row, fields.price_jpy.value)) return { rejected: "ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE" };
+  const proven = deriveBookingFields(cap);
+  let fields: EvidenceFields;
+  if (isUnpricedAuditRow(row)) {
+    // A legitimately accepted no-price audit row: bound, all commercial fields UNKNOWN. A capture that DOES prove a
+    // selected price contradicts the canonical row -> refused.
+    if (proven.price_jpy.state === "CONFIRMED") return { rejected: "CAPTURE_PRICE_BUT_ACCEPTED_ROW_UNPRICED" };
+    fields = deriveBookingFields(cap, { availabilityStatus: row.availabilityStatus });
+  } else {
+    // Any accepted row WITH a price (usable or DP-excluded) must be exactly the proven selected price.
+    if (proven.price_jpy.state !== "CONFIRMED" || !acceptedPriceAgrees(row, proven.price_jpy.value)) return { rejected: "ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE" };
+    fields = proven;
+  }
   return sealRecord({ schema: MARKET_EVIDENCE_EXPORT_SCHEMA, record_kind: "booking_selected_card", row: rowPart(row, "booking"), run_id: runId,
     artifact: { path: capturePath, sha256: sha256(bytes), kind: BOOKING_CAPTURE_SCHEMA }, fields });
 }
@@ -285,22 +319,89 @@ export function buildJalanRecord(row: AcceptedRow, decisionPath: string, runId: 
     artifact: { path: decisionPath, sha256: sha256(bytes), kind: "jalan_classification_decision" }, fields: deriveJalanFields(j) });
 }
 
-/** Full verification: seal, artifact bytes + hash, and EVERY field re-derived from those bytes. */
+/**
+ * SOURCE verification: seal, record kind / artifact kind / source consistency, artifact bytes + hash, the record's row
+ * identity and prices re-bound to the artifact, and EVERY field re-derived from those bytes. This proves the record is
+ * consistent with its source capture -- NOT that it belongs to canonical history (see verifyEvidenceRecordFullTrust).
+ */
 export function verifyEvidenceRecord(rec: EvidenceRecord, read: (p: string) => Buffer | null): string[] {
   if (rec.schema !== MARKET_EVIDENCE_EXPORT_SCHEMA) return ["SCHEMA"];
   const p: string[] = [];
   if (!recordSealOk(rec)) p.push("RECORD_SEAL_MISMATCH");
+  const kindOk = (rec.record_kind === "booking_selected_card" && rec.row.source === "booking" && rec.artifact.kind === BOOKING_CAPTURE_SCHEMA)
+    || (rec.record_kind === "jalan_decision" && rec.row.source === "jalan" && rec.artifact.kind === "jalan_classification_decision");
+  if (!kindOk) return [...p, "KIND_SOURCE_ARTIFACT_INCONSISTENT"];
   const bytes = read(rec.artifact.path);
   if (bytes === null) return [...p, "ARTIFACT_MISSING_OR_NOT_ALLOWED"];
   if (sha256(bytes) !== rec.artifact.sha256) return [...p, "ARTIFACT_HASH_MISMATCH"];
+  const row = { sourcePrimaryPrice: rec.row.source_primary_price, normalizedTotalPrice: rec.row.normalized_total_price, availabilityStatus: rec.row.availability_status };
   let again: EvidenceFields;
   try {
     const raw = JSON.parse(bytes.toString("utf8")) as unknown;
-    again = rec.record_kind === "booking_selected_card" ? deriveBookingFields(raw as BookingSelectedCardCapture) : deriveJalanFields(raw as JalanDecision);
+    if (rec.record_kind === "booking_selected_card") {
+      const cap = raw as BookingSelectedCardCapture;
+      if (cap.property_slug !== rec.row.property_slug || cap.checkin !== rec.row.checkin || cap.checkout !== rec.row.checkout || cap.collected_at_jst !== rec.row.collected_at_jst) p.push("ROW_IDENTITY_NOT_BOUND_TO_ARTIFACT");
+      const proven = deriveBookingFields(cap);
+      if (isUnpricedAuditRow(row)) {
+        if (proven.price_jpy.state === "CONFIRMED") p.push("ROW_PRICE_NOT_BOUND_TO_ARTIFACT");
+        again = deriveBookingFields(cap, { availabilityStatus: rec.row.availability_status });
+      } else {
+        if (proven.price_jpy.state !== "CONFIRMED" || rec.row.source_primary_price !== proven.price_jpy.value || (rec.row.normalized_total_price !== null && rec.row.normalized_total_price !== proven.price_jpy.value)) p.push("ROW_PRICE_NOT_BOUND_TO_ARTIFACT");
+        again = proven;
+      }
+    } else {
+      const j = raw as JalanDecision; const r = j.row ?? {};
+      if (r["source_slug_or_code"] !== rec.row.property_slug || r["checkin"] !== rec.row.checkin || r["checkout"] !== rec.row.checkout || r["collected_at_jst"] !== rec.row.collected_at_jst) p.push("ROW_IDENTITY_NOT_BOUND_TO_ARTIFACT");
+      const decided = typeof r["normalized_total_price"] === "number" ? r["normalized_total_price"] as number : null;
+      if (rec.row.source_primary_price !== decided || (rec.row.normalized_total_price !== null && rec.row.normalized_total_price !== decided)) p.push("ROW_PRICE_NOT_BOUND_TO_ARTIFACT");
+      again = deriveJalanFields(j);
+    }
   } catch { return [...p, "ARTIFACT_UNPARSEABLE"]; }
   for (const k of Object.keys(again) as Array<keyof EvidenceFields>) if (canonicalJson(rec.fields[k]) !== canonicalJson(again[k])) p.push(`FIELD_MISMATCH(${k})`);
   if (Object.keys(rec.fields).length !== Object.keys(again).length) p.push("FIELD_SET_MISMATCH");
   return p;
+}
+
+/**
+ * FULL-TRUST verification: source verification PLUS re-binding to the canonical accepted history row, looked up
+ * independently by (shard, row_id). Every history attribute the record carries must equal the canonical row exactly.
+ * No canonical row -> HISTORY_BINDING_UNVERIFIED (never full trust, whatever the artifact hash says).
+ */
+export function verifyEvidenceRecordFullTrust(rec: EvidenceRecord, read: (p: string) => Buffer | null,
+  lookupCanonical: (shardMonth: string, rowId: string) => AcceptedRow | null): string[] {
+  const p = verifyEvidenceRecord(rec, read);
+  const canonical = lookupCanonical(rec.row.shard_month, rec.row.row_id);
+  if (canonical === null) return [...p, "HISTORY_BINDING_UNVERIFIED"];
+  if (canonical.source !== rec.row.source) p.push("HISTORY_SOURCE_MISMATCH");
+  const expected = rowPart(canonical, canonical.source === "jalan" ? "jalan" : "booking");
+  for (const k of Object.keys(expected) as Array<keyof EvidenceRecord["row"]>) if (canonicalJson(rec.row[k]) !== canonicalJson(expected[k])) p.push(`HISTORY_MISMATCH(${k})`);
+  if (rec.record_kind === "jalan_decision" && canonical.debugArtifactPath !== rec.artifact.path) p.push("HISTORY_ARTIFACT_PATH_MISMATCH");
+  return p;
+}
+
+/** Independent read-only lookup of accepted rows in the canonical history shards (zao_signals_<shard>.csv). */
+export function canonicalHistoryLookup(historyDir: string): (shardMonth: string, rowId: string) => AcceptedRow | null {
+  const cache = new Map<string, Map<string, AcceptedRow>>();
+  return (shardMonth: string, rowId: string): AcceptedRow | null => {
+    if (!/^\d{4}_\d{2}$/u.test(shardMonth)) return null;
+    if (!cache.has(shardMonth)) {
+      const m = new Map<string, AcceptedRow>(); cache.set(shardMonth, m);
+      const path = join(historyDir, `zao_signals_${shardMonth}.csv`);
+      if (existsSync(path)) {
+        const recs = parseCsv(readFileSync(path, "utf8")); const h = recs[0] ?? []; const ix = (n: string) => h.indexOf(n);
+        const num = (v: string | undefined): number | null => v === undefined || v === "" ? null : Number(v);
+        for (const c of recs.slice(1)) {
+          const id = c[ix("row_id")]; if (id === undefined || id === "") continue;
+          m.set(id, { rowId: id, rowHash: c[ix("row_hash")] ?? "", shardMonth, source: c[ix("source")] ?? "", sourceSlugOrCode: c[ix("source_slug_or_code")] ?? "",
+            checkin: c[ix("checkin")] ?? "", checkout: c[ix("checkout")] ?? "", collectedAtJst: c[ix("collected_at_jst")] ?? "",
+            normalizedTotalPrice: num(c[ix("normalized_total_price")]), debugArtifactPath: c[ix("debug_artifact_path")] ?? "",
+            sourcePrimaryPrice: num(c[ix("source_primary_price")]), isPriceExcludedFromDp: c[ix("is_price_excluded_from_dp")] === "true",
+            availabilityStatus: c[ix("availability_status")] ?? "" });
+        }
+      }
+    }
+    return cache.get(shardMonth)!.get(rowId) ?? null;
+  };
 }
 
 /** Strict structural contract of this export (what a downstream translator may rely on). */

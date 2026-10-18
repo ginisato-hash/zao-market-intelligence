@@ -12,11 +12,12 @@ import {
   BOOKING_CAPTURE_FILE, EVIDENCE_EXCERPT_MAX_CHARS, MARKET_EVIDENCE_EXPORT_SCHEMA, MARKET_EVIDENCE_SIDECAR_DIR, PRIVATE_K27_SIDECAR_SCHEMA,
   appendEvidenceSidecar, buildBookingCapture, buildBookingRecord, buildEvidenceForAcceptedRows, buildJalanRecord, canonicalJson, captureBookingEvidence,
   deriveBookingFields, evidenceExportStatus, evidenceShardName, exportContractProblems, guardedReader, isEvidenceSidecarEnabled, recordSealOk,
-  scrubExcerpt, sealRecord, verifyEvidenceRecord, type AcceptedRow, type BookingCaptureRef, type BookingSelectedCardCapture, type EvidenceRecord
+  scrubExcerpt, sealRecord, verifyEvidenceRecord, verifyEvidenceRecordFullTrust, canonicalHistoryLookup, type AcceptedRow, type BookingCaptureRef, type BookingSelectedCardCapture, type EvidenceRecord
 } from "../src/services/marketEvidenceSidecar";
 
 const sha = (b: string | Buffer) => createHash("sha256").update(b).digest("hex");
 const FIX = "tests/fixtures/market-evidence";
+const withDirResult = <T>(f: (d: string) => T): T => { const d = mkdtempSync(join(tmpdir(), "zmi-ev-")); try { return f(d); } finally { /* removed by OS tmp cleanup; read-only fixtures */ } };
 const withDir = (f: (d: string) => void) => { const d = mkdtempSync(join(tmpdir(), "zmi-ev-")); try { f(d); } finally { rmSync(d, { recursive: true, force: true }); } };
 const PROBE = "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html?checkin=2027-02-13&checkout=2027-02-14&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja";
 const CAP = (o: Partial<BookingSelectedCardCapture> = {}): BookingSelectedCardCapture => ({
@@ -28,7 +29,7 @@ const CAP = (o: Partial<BookingSelectedCardCapture> = {}): BookingSelectedCardCa
 });
 const ROW = (o: Partial<AcceptedRow> = {}): AcceptedRow => ({ rowId: "2026-10-18|booking|HAMMOND|hammond-takamiya|2027-02-13|2027-02-14|2_adults_1_room_1_night", rowHash: "h1",
   shardMonth: "2027_02", source: "booking", sourceSlugOrCode: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14",
-  collectedAtJst: "2026-10-18T12:00:06+09:00", normalizedTotalPrice: 43_560, debugArtifactPath: "/dbg", sourcePrimaryPrice: 43_560, isPriceExcludedFromDp: false, ...o });
+  collectedAtJst: "2026-10-18T12:00:06+09:00", normalizedTotalPrice: 43_560, debugArtifactPath: "/dbg", sourcePrimaryPrice: 43_560, isPriceExcludedFromDp: false, availabilityStatus: "available_price_basis", ...o });
 const mem = (m: Record<string, string>) => (p: string) => (p in m ? Buffer.from(m[p]!) : null);
 const capFiles = (cap: BookingSelectedCardCapture = CAP()) => ({ "/cap.json": `${JSON.stringify(cap)}\n` });
 const bookingRec = (cap = CAP(), row = ROW()) => buildBookingRecord(row, "/cap.json", "run1", mem(capFiles(cap))) as EvidenceRecord;
@@ -161,7 +162,7 @@ describe("P0-3 Jalan: real collector-serialized decision JSON", () => {
   const rowOf = (raw: string): AcceptedRow => { const j = JSON.parse(raw) as { row: Record<string, unknown> };
     return { rowId: "jrow", rowHash: "jh", shardMonth: String(j.row["checkin"]).slice(0, 7).replace("-", "_"), source: "jalan", sourceSlugOrCode: String(j.row["source_slug_or_code"]),
       checkin: String(j.row["checkin"]), checkout: String(j.row["checkout"]), collectedAtJst: String(j.row["collected_at_jst"]), normalizedTotalPrice: j.row["normalized_total_price"] as number | null, debugArtifactPath: "/d.json",
-      sourcePrimaryPrice: j.row["source_primary_price"] as number | null, isPriceExcludedFromDp: j.row["is_price_excluded_from_dp"] as boolean }; };
+      sourcePrimaryPrice: j.row["source_primary_price"] as number | null, isPriceExcludedFromDp: j.row["is_price_excluded_from_dp"] as boolean, availabilityStatus: String(j.row["availability_status"]) }; };
   it("the selected-plan discount is read from row.evidence_flags (real positive fixture)", () => {
     const raw = load("jalan_decision_plan_discount.json"); const r = buildJalanRecord(rowOf(raw), "/d.json", "r", mem({ "/d.json": raw })) as EvidenceRecord;
     expect(r.fields.promotion).toMatchObject({ state: "CONFIRMED", pointer: "row.evidence_flags.selected_plan_coupon_or_discount_evidence" });
@@ -200,11 +201,101 @@ describe("sold-out / unavailable pages carry no commercial evidence", () => {
     j.row.availability_status = "sold_out"; j.pageResult.final_status = "sold_out"; j.pageResult.price_total_tax_included = null; j.row.normalized_total_price = null; j.row.source_primary_price = null;
     const raw = JSON.stringify(j);
     const row: AcceptedRow = { rowId: "so", rowHash: "h", shardMonth: "2026_11", source: "jalan", sourceSlugOrCode: j.row.source_slug_or_code, checkin: j.row.checkin, checkout: j.row.checkout,
-      collectedAtJst: j.row.collected_at_jst, normalizedTotalPrice: null, debugArtifactPath: "/d.json", sourcePrimaryPrice: null, isPriceExcludedFromDp: true };
+      collectedAtJst: j.row.collected_at_jst, normalizedTotalPrice: null, debugArtifactPath: "/d.json", sourcePrimaryPrice: null, isPriceExcludedFromDp: true, availabilityStatus: "sold_out" };
     const r = buildJalanRecord(row, "/d.json", "r", mem({ "/d.json": raw })) as EvidenceRecord;
     for (const k of ["room_name", "price_jpy", "selected_rate_plan", "tax_basis", "meal_room_only", "promotion"] as const) expect(r.fields[k]).toEqual({ state: "UNKNOWN", reason: "NOT_AVAILABLE(sold_out)" });
     expect(r.fields.request_checkin.state).toBe("CONFIRMED");
   });
+});
+
+describe("P0-R1 Booking accepted rows without a price (audit rows)", () => {
+  const sig = (bodyText: string) => analyzeBookingRenderedDomSignals({ target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" }, checkin: "2027-02-13", checkout: "2027-02-14",
+    loaded: true, httpStatus: 200, finalUrl: PROBE, pageTitle: "HAMMOND", bodyText, error: "" });
+  const preview = (o: Partial<PreviewRow>): PreviewRow => ({ source: "booking", property_slug: "hammond-takamiya", canonical_property_name: "HAMMOND", checkin: "2027-02-13", checkout: "2027-02-14",
+    stay_scope: "2_adults_1_room_1_night", availability_status: "sold_out_or_unavailable", primary_price_numeric: null, official_tax_fee_adder_numeric: null, computed_total_with_tax_fee: null,
+    basis_confidence: "insufficient", dp_usage: "audit_only", classification: "excluded", screenshot_path: "/s.png", debug_path: "/dbg", warning_flags: [],
+    collected_at_jst: "2026-10-18T12:00:06+09:00", source_phase: "AUTO-RUNNER08X", ...o });
+  /** Real accepted-row path: preview -> buildAppendPlan -> approved canonical row -> capture -> export record. */
+  const viaAppend = (p: PreviewRow, body: string) => withDirResult((d) => {
+    const plan = buildAppendPlan({ bookingRows: [p], jalanRows: [], existingKeys: [], bookingSourceCheck: buildBookingSourceLevelCheck([p]), jalanSourceCheck: buildJalanSourceLevelCheck([]), bookingReportPath: "", bookingCsvPath: "" });
+    const sink: BookingCaptureRef[] = [];
+    captureBookingEvidence(sink, d, { slug: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "2026-10-18T12:00:06+09:00", probeUrl: PROBE, signals: sig(body) });
+    return { plan, built: buildEvidenceForAcceptedRows({ acceptedRows: plan.approved_rows, bookingCaptures: sink, runId: "r", read: guardedReader([d]) }), read: guardedReader([d]) };
+  });
+  it("sold out / no safe price / excluded no-price rows: accepted, bound, every commercial field UNKNOWN quoting the row's own label", () => {
+    for (const [avail, body] of [["sold_out_or_unavailable", "HAMMOND 空室がありません 類似施設 ￥9,000"], ["visible_no_safe_price", "HAMMOND ツインルーム"], ["not_found", "ページが見つかりません"]] as const) {
+      const { plan, built, read } = viaAppend(preview({ availability_status: avail }), body);
+      expect(plan.approved_rows.length).toBe(1); expect(built.rejected).toEqual([]);
+      const r = built.records[0]!;
+      expect(r.row).toMatchObject({ source_primary_price: null, normalized_total_price: null, availability_status: avail });
+      for (const k of ["room_name", "price_jpy", "selected_rate_plan", "tax_basis", "meal_room_only", "refundable", "promotion", "displayed_checkin"] as const)
+        expect(r.fields[k]).toEqual({ state: "UNKNOWN", reason: `ACCEPTED_ROW_UNPRICED(${avail})` });
+      expect(r.fields.request_checkin.state).toBe("CONFIRMED");
+      expect(verifyEvidenceRecord(r, read)).toEqual([]);
+      expect(JSON.stringify(r)).not.toMatch(/9000|9,000/u);                    // the carousel price is never carried
+    }
+  });
+  it("blocked / CAPTCHA and degraded pages are rejected by the append policy, so they never get a record", () => {
+    for (const [p, re] of [[preview({ availability_status: "blocked_captcha_or_security", warning_flags: ["captcha_or_security_detected"] }), /captcha|block/u],
+      [preview({ availability_status: "degraded_empty" }), /degraded/u]] as const) {
+      const { plan, built } = viaAppend(p, "captcha");
+      expect(plan.approved_rows.length).toBe(0); expect(plan.rejected_rows[0]!.reason).toMatch(re);
+      expect(built.records).toEqual([]); expect(built.rejected).toEqual([]);
+    }
+  });
+  it("priced rows still fail closed: missing card, wrong price; blank price under a 'price found' label; an unpriced row whose capture proves a price", () => {
+    const blankButPriced = viaAppend(preview({ availability_status: "available_price_basis" }), "HAMMOND ツインルーム");
+    expect(blankButPriced.built.rejected).toEqual([`${blankButPriced.plan.approved_rows[0]!.rowId}:ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE`]);
+    const priced = preview({ availability_status: "available_price_basis", primary_price_numeric: 43_560, classification: "directional", basis_confidence: "directional_candidate_basis", dp_usage: "directional_only" });
+    const missing = viaAppend(priced, "HAMMOND ツインルーム");                   // no price candidate in the page text
+    expect(missing.built.rejected).toEqual([`${missing.plan.approved_rows[0]!.rowId}:ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE`]);
+    const wrong = viaAppend(priced, "HAMMOND ツインルーム シングルベッド2台 ￥45,000 税・手数料込み");
+    expect(wrong.built.rejected).toEqual([`${wrong.plan.approved_rows[0]!.rowId}:ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE`]);
+    const contradiction = viaAppend(preview({ availability_status: "visible_no_safe_price" }), "HAMMOND ツインルーム シングルベッド2台 ￥43,560 税・手数料込み");
+    expect(contradiction.built.rejected).toEqual([`${contradiction.plan.approved_rows[0]!.rowId}:CAPTURE_PRICE_BUT_ACCEPTED_ROW_UNPRICED`]);
+  });
+});
+
+describe("P0-R2 full-trust verification re-binds to canonical history", () => {
+  const appendAndExport = (d: string) => {
+    const b: PreviewRow = { source: "booking", property_slug: "hammond-takamiya", canonical_property_name: "HAMMOND", checkin: "2027-02-13", checkout: "2027-02-14",
+      stay_scope: "2_adults_1_room_1_night", availability_status: "available_price_basis", primary_price_numeric: 43_560, official_tax_fee_adder_numeric: null,
+      computed_total_with_tax_fee: null, basis_confidence: "directional_candidate_basis", dp_usage: "directional_only", classification: "directional",
+      screenshot_path: "/s.png", debug_path: "/dbg", warning_flags: [], collected_at_jst: "2026-10-18T12:00:06+09:00", source_phase: "AUTO-RUNNER08X" };
+    const plan = buildAppendPlan({ bookingRows: [b], jalanRows: [], existingKeys: [], bookingSourceCheck: buildBookingSourceLevelCheck([b]), jalanSourceCheck: buildJalanSourceLevelCheck([]), bookingReportPath: "", bookingCsvPath: "" });
+    appendHistoryRowsAtomic({ rows: plan.approved_rows, historyDir: join(d, "history"), backupDir: join(d, "bk"), historyBefore: 0 });
+    const sink: BookingCaptureRef[] = []; mkdirSync(join(d, "dbg"));
+    captureBookingEvidence(sink, join(d, "dbg"), { slug: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "2026-10-18T12:00:06+09:00", probeUrl: PROBE,
+      signals: analyzeBookingRenderedDomSignals({ target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" }, checkin: "2027-02-13", checkout: "2027-02-14", loaded: true, httpStatus: 200,
+        finalUrl: PROBE, pageTitle: "HAMMOND", bodyText: "HAMMOND 2027年2月13日 大人2名 1泊 ツインルーム シングルベッド2台 ￥43,560 税・手数料込み", error: "" }) });
+    const built = buildEvidenceForAcceptedRows({ acceptedRows: plan.approved_rows, bookingCaptures: sink, runId: "r", read: guardedReader([d]) });
+    return { rec: built.records[0]!, read: guardedReader([d]), lookup: canonicalHistoryLookup(join(d, "history")) };
+  };
+  it("a genuine record is fully trusted against the independently read canonical history row", () => withDir((d) => {
+    const { rec, read, lookup } = appendAndExport(d);
+    expect(verifyEvidenceRecordFullTrust(rec, read, lookup)).toEqual([]);
+  }));
+  it("re-sealed forged history attributes with untouched source bytes are refused", () => withDir((d) => {
+    const { rec, read, lookup } = appendAndExport(d);
+    const reseal = (row: Partial<EvidenceRecord["row"]>) => { const { record_sha256: _, ...rest } = rec; return sealRecord({ ...rest, row: { ...rest.row, ...row } }); };
+    expect(verifyEvidenceRecordFullTrust(reseal({ row_hash: "forged" }), read, lookup)).toContain("HISTORY_MISMATCH(row_hash)");
+    expect(verifyEvidenceRecordFullTrust(reseal({ row_id: `${rec.row.row_id}x` }), read, lookup)).toContain("HISTORY_BINDING_UNVERIFIED");
+    const date = verifyEvidenceRecordFullTrust(reseal({ checkin: "2027-02-14" }), read, lookup);
+    expect(date).toEqual(expect.arrayContaining(["ROW_IDENTITY_NOT_BOUND_TO_ARTIFACT", "HISTORY_MISMATCH(checkin)"]));
+    const price = verifyEvidenceRecordFullTrust(reseal({ source_primary_price: 39_000, normalized_total_price: 39_000 }), read, lookup);
+    expect(price).toEqual(expect.arrayContaining(["ROW_PRICE_NOT_BOUND_TO_ARTIFACT", "HISTORY_MISMATCH(source_primary_price)", "HISTORY_MISMATCH(normalized_total_price)"]));
+    expect(verifyEvidenceRecordFullTrust(reseal({ availability_status: "sold_out_or_unavailable" }), read, lookup)).toContain("HISTORY_MISMATCH(availability_status)");
+    expect(verifyEvidenceRecordFullTrust(reseal({ collected_at_jst: "2026-10-18T14:00:06+09:00" }), read, lookup)).toContain("HISTORY_MISMATCH(collected_at_jst)");
+  }));
+  it("wrong record_kind / artifact kind / source, and no canonical row, are never fully trusted", () => withDir((d) => {
+    const { rec, read, lookup } = appendAndExport(d);
+    const { record_sha256: _, ...rest } = rec;
+    expect(verifyEvidenceRecordFullTrust(sealRecord({ ...rest, record_kind: "jalan_decision" }), read, lookup)).toContain("KIND_SOURCE_ARTIFACT_INCONSISTENT");
+    expect(verifyEvidenceRecordFullTrust(sealRecord({ ...rest, artifact: { ...rest.artifact, kind: "jalan_classification_decision" } }), read, lookup)).toContain("KIND_SOURCE_ARTIFACT_INCONSISTENT");
+    expect(verifyEvidenceRecordFullTrust(sealRecord({ ...rest, row: { ...rest.row, source: "jalan" } }), read, lookup)).toContain("KIND_SOURCE_ARTIFACT_INCONSISTENT");
+    expect(verifyEvidenceRecordFullTrust(rec, read, () => null)).toEqual(["HISTORY_BINDING_UNVERIFIED"]);
+    expect(verifyEvidenceRecord(rec, read)).toEqual([]);                  // source-consistent, but that alone is not full trust
+  }));
 });
 
 describe("P0-4 distinct wire schema + pinned cross-repo contract", () => {
@@ -221,7 +312,7 @@ describe("P0-4 distinct wire schema + pinned cross-repo contract", () => {
     const j = JSON.parse(jRaw) as { row: Record<string, unknown> };
     const jRow: AcceptedRow = { rowId: "contract-jalan-row", rowHash: "contract-jalan-hash", shardMonth: "2026_11", source: "jalan", sourceSlugOrCode: String(j.row["source_slug_or_code"]),
       checkin: String(j.row["checkin"]), checkout: String(j.row["checkout"]), collectedAtJst: String(j.row["collected_at_jst"]), normalizedTotalPrice: j.row["normalized_total_price"] as number, debugArtifactPath: "fixtures/jalan_decision_plan_discount.json",
-      sourcePrimaryPrice: j.row["source_primary_price"] as number, isPriceExcludedFromDp: j.row["is_price_excluded_from_dp"] as boolean };
+      sourcePrimaryPrice: j.row["source_primary_price"] as number, isPriceExcludedFromDp: j.row["is_price_excluded_from_dp"] as boolean, availabilityStatus: String(j.row["availability_status"]) };
     const regenerated = [bookingRec(CAP(), ROW({ rowHash: "contract-booking-hash" })), buildJalanRecord(jRow, jRow.debugArtifactPath, "run1", mem({ [jRow.debugArtifactPath]: jRaw })) as EvidenceRecord]
       .map((r) => `${canonicalJson(r)}\n`).join("");
     expect(regenerated).toBe(pinned);
