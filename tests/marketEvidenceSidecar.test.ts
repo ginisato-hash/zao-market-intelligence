@@ -1,206 +1,286 @@
-// Market evidence sidecar exporter (default OFF). Isolated fixtures only: no browser, no network, no real history.
+// Market evidence export (default OFF). Isolated fixtures only: no browser, no network, no real history or debug dir.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { appendHistoryRowsAtomic, buildAppendPlan, buildBookingSourceLevelCheck, buildJalanSourceLevelCheck } from "../src/services/autoRunnerMarketRefresh";
 import type { PreviewRow } from "../src/services/autoRunnerBookingPreview";
+import { analyzeBookingRenderedDomSignals } from "../src/services/bookingRenderedDomProbe";
 import { TRUSTED_MARKET_DATA_PREFIXES } from "../src/services/marketDataCommitPolicy";
 import {
-  EVIDENCE_EXCERPT_MAX_CHARS, K27_T04_REFERENCE, MARKET_EVIDENCE_SIDECAR_DIR, appendEvidenceSidecar, buildBookingEvidence, buildEvidenceForAcceptedRows,
-  buildJalanEvidence, canonicalJson, evidenceShardName, isEvidenceSidecarEnabled, recordSealOk, refundFromSelectedContext, scrubExcerpt,
-  verifyEvidenceArtifact, type BookingEvidenceInput, type EvidenceRecord, type RowIdentity
+  BOOKING_CAPTURE_FILE, EVIDENCE_EXCERPT_MAX_CHARS, MARKET_EVIDENCE_EXPORT_SCHEMA, MARKET_EVIDENCE_SIDECAR_DIR, PRIVATE_K27_SIDECAR_SCHEMA,
+  appendEvidenceSidecar, buildBookingCapture, buildBookingRecord, buildEvidenceForAcceptedRows, buildJalanRecord, canonicalJson, captureBookingEvidence,
+  deriveBookingFields, evidenceExportStatus, evidenceShardName, exportContractProblems, guardedReader, isEvidenceSidecarEnabled, recordSealOk,
+  scrubExcerpt, sealRecord, verifyEvidenceRecord, type AcceptedRow, type BookingCaptureRef, type BookingSelectedCardCapture, type EvidenceRecord
 } from "../src/services/marketEvidenceSidecar";
 
 const sha = (b: string | Buffer) => createHash("sha256").update(b).digest("hex");
+const FIX = "tests/fixtures/market-evidence";
+const withDir = (f: (d: string) => void) => { const d = mkdtempSync(join(tmpdir(), "zmi-ev-")); try { f(d); } finally { rmSync(d, { recursive: true, force: true }); } };
 const PROBE = "https://www.booking.com/hotel/jp/hammond-takamiya.ja.html?checkin=2027-02-13&checkout=2027-02-14&group_adults=2&no_rooms=1&group_children=0&selected_currency=JPY&lang=ja";
-const ROW: RowIdentity = { rowId: "2026-10-18|booking|HAMMOND|hammond-takamiya|2027-02-13|2027-02-14|2_adults_1_room_1_night", shardMonth: "2027_02",
-  checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "2026-10-18T12:00:06+09:00", sourceSlugOrCode: "hammond-takamiya" };
-const ev = (o: Partial<BookingEvidenceInput> = {}): BookingEvidenceInput => ({
-  propertySlug: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14", probeUrl: PROBE, probeArtifactPath: "/probe.txt",
-  checkinDetected: true, checkoutDetected: true, adultCountDetected: true, nightCountDetected: false,
-  primaryPrice: { numericValue: 43_560, candidateTypeGuess: "total_tax_included", blockGuess: "main_room_card", contextBeforeAfter: "ツインルーム 1泊 税・手数料込み ￥43,560" },
-  originalPriceNumeric: null, priceDiscountDetected: false, primaryRoomName: "ツインルーム", primaryRoomCardText: "ツインルーム シングルベッド2台 ￥43,560", selectedRoomId: null, ...o
+const CAP = (o: Partial<BookingSelectedCardCapture> = {}): BookingSelectedCardCapture => ({
+  ...buildBookingCapture({ propertySlug: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "2026-10-18T12:00:06+09:00",
+    probeUrlSanitized: PROBE, finalUrlSanitized: PROBE,
+    primaryPrice: { rawText: "￥43,560", numericValue: 43_560, blockGuess: "main_room_card", roleGuess: "effective_price", contextBeforeAfter: "ツインルーム 1泊 大人2名 ￥43,560 税・手数料込み" },
+    originalPriceNumeric: null, priceDiscountDetected: false, primaryRoomName: "ツインルーム", primaryRoomCardText: "ツインルーム シングルベッド2台 ￥43,560",
+    bodyText: "2027年2月13日 - 2027年2月14日 大人2名 1泊 ツインルーム ￥43,560" }), ...o
 });
-const files = (m: Record<string, string>) => (p: string) => (p in m ? Buffer.from(m[p]!) : null);
-const READ = files({ "/probe.txt": PROBE });
-const built = (o: Partial<BookingEvidenceInput> = {}, row: RowIdentity = ROW) => buildBookingEvidence(row, ev(o), "run1", READ) as EvidenceRecord;
+const ROW = (o: Partial<AcceptedRow> = {}): AcceptedRow => ({ rowId: "2026-10-18|booking|HAMMOND|hammond-takamiya|2027-02-13|2027-02-14|2_adults_1_room_1_night", rowHash: "h1",
+  shardMonth: "2027_02", source: "booking", sourceSlugOrCode: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14",
+  collectedAtJst: "2026-10-18T12:00:06+09:00", normalizedTotalPrice: 43_560, debugArtifactPath: "/dbg", sourcePrimaryPrice: 43_560, isPriceExcludedFromDp: false, ...o });
+const mem = (m: Record<string, string>) => (p: string) => (p in m ? Buffer.from(m[p]!) : null);
+const capFiles = (cap: BookingSelectedCardCapture = CAP()) => ({ "/cap.json": `${JSON.stringify(cap)}\n` });
+const bookingRec = (cap = CAP(), row = ROW()) => buildBookingRecord(row, "/cap.json", "run1", mem(capFiles(cap))) as EvidenceRecord;
 
-describe("flag and isolation", () => {
+describe("flag, isolation, OFF path", () => {
   it("is OFF unless ZMI_EVIDENCE_SIDECAR_ENABLED=1", () => {
     expect(isEvidenceSidecarEnabled({})).toBe(false);
     for (const v of ["0", "true", "yes", ""]) expect(isEvidenceSidecarEnabled({ ZMI_EVIDENCE_SIDECAR_ENABLED: v })).toBe(false);
     expect(isEvidenceSidecarEnabled({ ZMI_EVIDENCE_SIDECAR_ENABLED: "1" })).toBe(true);
   });
-  it("lives outside the canonical history: separate dir, never matches zao_signals_*.csv, not staged by auto-commit, git-ignored", () => {
+  it("outside the canonical history: own dir, never zao_signals_*.csv, not auto-committed, git-ignored", () => {
     expect(MARKET_EVIDENCE_SIDECAR_DIR).toBe(".data/history-evidence");
     for (const d of ["2027-01-01", "2027-03-31"]) expect(/^zao_signals_.*\.csv$/u.test(evidenceShardName(d))).toBe(false);
     for (const p of TRUSTED_MARKET_DATA_PREFIXES) expect(`${MARKET_EVIDENCE_SIDECAR_DIR}/`.startsWith(p)).toBe(false);
     expect(readFileSync(".gitignore", "utf8")).toMatch(/^\.data\/history-evidence\/$/mu);
   });
-  it("the rotating script touches the sidecar only behind the flag and only after an accepted append", () => {
+  it("the rotating script touches evidence only behind the flag and only after an accepted append", () => {
     const src = readFileSync("src/scripts/runAutoRunnerMarketRefreshRotating.ts", "utf8");
     expect(src).toMatch(/collectBookingLive\(bookingTargets, debugPath, jst\.iso, evidenceOn \? bookingEvidence : undefined\)/u);
+    expect(src).toMatch(/if \(evidenceSink !== undefined\) captureBookingEvidence\(/u);
     expect(src).toMatch(/rowsAppended = r\.rows_written;\n\s+if \(evidenceOn\) evidenceSidecar = exportEvidenceSidecar\(appendPlan\.approved_rows, bookingEvidence, runId\);/u);
     expect(src).toMatch(/\.\.\.\(evidenceOn \? \{ evidence_sidecar: evidenceSidecar \} : \{\}\)/u);
-    expect((src.match(/appendEvidenceSidecar\(/gu) ?? []).length).toBe(1);
+    expect((src.match(/appendEvidenceSidecar\(|captureBookingEvidence\(/gu) ?? []).length).toBe(2);
   });
-});
-
-describe("OFF-path / history byte identity on the real append path", () => {
-  it("history shards are byte-identical before and after an ON export; the exporter writes only under its own dir", () => {
-    const tmp = mkdtempSync(join(tmpdir(), "zmi-evidence-"));
-    try {
-      const historyDir = join(tmp, "history"); const evDir = join(tmp, "history-evidence");
-      const b: PreviewRow = { source: "booking", property_slug: "hammond-takamiya", canonical_property_name: "HAMMOND", checkin: "2027-02-13", checkout: "2027-02-14",
-        stay_scope: "2_adults_1_room_1_night", availability_status: "available_price_basis", primary_price_numeric: 43_560, official_tax_fee_adder_numeric: null,
-        computed_total_with_tax_fee: null, basis_confidence: "directional_candidate_basis", dp_usage: "directional_only", classification: "directional",
-        screenshot_path: "/s.png", debug_path: "/dbg", warning_flags: [], collected_at_jst: "2026-10-18T12:00:06+09:00", source_phase: "AUTO-RUNNER08X" };
+  it("OFF live-path fixture: the real append path writes byte-identical history and no capture / sidecar file exists", () => withDir((tmp) => {
+    const b: PreviewRow = { source: "booking", property_slug: "hammond-takamiya", canonical_property_name: "HAMMOND", checkin: "2027-02-13", checkout: "2027-02-14",
+      stay_scope: "2_adults_1_room_1_night", availability_status: "available_price_basis", primary_price_numeric: 43_560, official_tax_fee_adder_numeric: null,
+      computed_total_with_tax_fee: null, basis_confidence: "directional_candidate_basis", dp_usage: "directional_only", classification: "directional",
+      screenshot_path: "/s.png", debug_path: "/dbg", warning_flags: [], collected_at_jst: "2026-10-18T12:00:06+09:00", source_phase: "AUTO-RUNNER08X" };
+    const run = (dir: string) => {
       const plan = buildAppendPlan({ bookingRows: [b], jalanRows: [], existingKeys: [], bookingSourceCheck: buildBookingSourceLevelCheck([b]), jalanSourceCheck: buildJalanSourceLevelCheck([]), bookingReportPath: "", bookingCsvPath: "" });
-      appendHistoryRowsAtomic({ rows: plan.approved_rows, historyDir, backupDir: join(tmp, "bk"), historyBefore: 0 });
-      const before = Object.fromEntries(readdirSync(historyDir).map((f) => [f, sha(readFileSync(join(historyDir, f)))]));
-      const accepted = plan.approved_rows.map((r) => ({ ...r }));
-      const out = buildEvidenceForAcceptedRows({ acceptedRows: accepted, booking: [ev({ propertySlug: "hammond-takamiya" })], runId: "run1", readBytes: READ });
-      expect(out.rejected).toEqual([]); expect(out.records.length).toBe(1);
-      expect(out.records[0]!.row_id).toBe(plan.approved_rows[0]!.rowId);
-      appendEvidenceSidecar(out.records, evDir);
-      expect(Object.fromEntries(readdirSync(historyDir).map((f) => [f, sha(readFileSync(join(historyDir, f)))]))).toEqual(before);
-      expect(readdirSync(historyDir).every((f) => /^zao_signals_.*\.csv$/u.test(f))).toBe(true);
-      expect(readdirSync(evDir)).toEqual(["zao_evidence_2027_02.jsonl"]);
-    } finally { rmSync(tmp, { recursive: true, force: true }); }
-  });
-  it("no record for a row the append did not accept (no phantom evidence)", () => {
-    const out = buildEvidenceForAcceptedRows({ acceptedRows: [], booking: [ev()], runId: "r", readBytes: READ });
-    expect(out.records).toEqual([]);
-  });
+      appendHistoryRowsAtomic({ rows: plan.approved_rows, historyDir: join(dir, "history"), backupDir: join(dir, "bk"), historyBefore: 0 });
+      return { plan, files: Object.fromEntries(readdirSync(join(dir, "history")).map((f) => [f, sha(readFileSync(join(dir, "history", f)))])) };
+    };
+    const off = run(join(tmp, "off"));
+    // ON: identical canonical append, then the export (into its own dir) leaves history untouched
+    const on = run(join(tmp, "on"));
+    expect(on.files).toEqual(off.files);
+    const artifactDir = join(tmp, "on", "dbg"); mkdirSync(artifactDir, { recursive: true });
+    const signals = analyzeBookingRenderedDomSignals({ target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" }, checkin: "2027-02-13", checkout: "2027-02-14",
+      loaded: true, httpStatus: 200, finalUrl: PROBE, pageTitle: "HAMMOND", bodyText: "HAMMOND 2027年2月13日 大人2名 1泊 ツインルーム シングルベッド2台 ￥43,560 税・手数料込み", error: "" });
+    const sink: BookingCaptureRef[] = [];
+    captureBookingEvidence(sink, artifactDir, { slug: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "2026-10-18T12:00:06+09:00", probeUrl: PROBE, signals });
+    const built = buildEvidenceForAcceptedRows({ acceptedRows: on.plan.approved_rows, bookingCaptures: sink, runId: "r", read: guardedReader([tmp]) });
+    appendEvidenceSidecar(built.records, join(tmp, "on", "history-evidence"));
+    expect(Object.fromEntries(readdirSync(join(tmp, "on", "history")).map((f) => [f, sha(readFileSync(join(tmp, "on", "history", f)))]))).toEqual(off.files);
+    expect(readdirSync(join(tmp, "on", "history")).every((f) => /^zao_signals_.*\.csv$/u.test(f))).toBe(true);
+    // OFF never had a capture or sidecar
+    expect(existsSync(join(tmp, "off", "dbg"))).toBe(false); expect(existsSync(join(tmp, "off", "history-evidence"))).toBe(false);
+  }));
 });
 
-describe("evidence semantics", () => {
-  it("tax basis is a GUESS, never CONFIRMED; request and page-text evidence keep their own kinds", () => {
-    const r = built();
-    expect(r.fields.tax_basis).toMatchObject({ state: "GUESS", value: "total_tax_included" });
-    expect(r.fields.request_checkin).toMatchObject({ state: "CONFIRMED", kind: "REQUEST_PARAMETER" });
-    expect(r.fields.displayed_dates).toMatchObject({ state: "CONFIRMED", kind: "SOURCE_TEXT_MARKER" });
-    expect(r.fields.displayed_one_night.state).toBe("UNKNOWN");
+describe("P0-1 Booking: every field re-derived from the bounded selected-card capture", () => {
+  it("price / room / displayed spans CONFIRMED only when provable from the capture; tax GUESS; meal and plan UNKNOWN", () => {
+    const r = bookingRec();
+    expect(verifyEvidenceRecord(r, mem(capFiles()))).toEqual([]);
     expect(r.fields.price_jpy).toMatchObject({ state: "CONFIRMED", value: 43_560, kind: "SOURCE_PARSED_FIELD" });
-    expect(r.fields.meal_room_only.state).toBe("UNKNOWN");
-    expect(recordSealOk(r)).toBe(true);
+    expect(r.fields.room_name).toMatchObject({ state: "CONFIRMED", value: "ツインルーム" });
+    expect(r.fields.displayed_checkin).toMatchObject({ state: "CONFIRMED", kind: "SOURCE_TEXT_MARKER" });
+    expect(r.fields.tax_basis).toMatchObject({ state: "GUESS", value: "total_tax_included" });
+    expect(r.fields.selected_rate_plan.state).toBe("UNKNOWN"); expect(r.fields.meal_room_only.state).toBe("UNKNOWN");
+    expect(r.artifact.sha256).toBe(sha(capFiles()["/cap.json"]));
   });
-  it("no discount marker -> UNKNOWN (never 'no discount'); a selected-card discount pair -> CONFIRMED with the original price", () => {
-    expect(built().fields.promotion).toEqual({ state: "UNKNOWN", reason: "NO_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE" });
-    expect(built({ priceDiscountDetected: true, originalPriceNumeric: 52_000 }).fields.promotion).toMatchObject({ state: "CONFIRMED", value: { adjusted: true, original_jpy: 52_000 } });
+  it("a forged value that is re-sealed is still refused: the source capture re-derivation disagrees", () => {
+    const r = bookingRec();
+    const { record_sha256: _, ...rest } = r;
+    const forged = sealRecord({ ...rest, fields: { ...rest.fields, price_jpy: { state: "CONFIRMED", value: 39_000, kind: "SOURCE_PARSED_FIELD", pointer: "x" } } });
+    expect(recordSealOk(forged)).toBe(true);
+    expect(verifyEvidenceRecord(forged, mem(capFiles()))).toEqual(["FIELD_MISMATCH(price_jpy)"]);
+    const unknownPromoted = sealRecord({ ...rest, fields: { ...rest.fields, meal_room_only: { state: "CONFIRMED", value: true, kind: "SOURCE_PARSED_FIELD", pointer: "x" } } });
+    expect(verifyEvidenceRecord(unknownPromoted, mem(capFiles()))).toEqual(["FIELD_MISMATCH(meal_room_only)"]);
   });
-  it("refund only from the selected price's own context; page-wide or ambiguous markers do not count", () => {
-    expect(refundFromSelectedContext("ツイン ￥43,560 返金不可")).toMatchObject({ state: "CONFIRMED", value: false });
-    expect(refundFromSelectedContext("ツイン ￥43,560 キャンセル無料")).toMatchObject({ state: "CONFIRMED", value: true });
-    expect(refundFromSelectedContext("返金不可 / キャンセル無料").state).toBe("UNKNOWN");
-    expect(refundFromSelectedContext("ツイン ￥43,560").state).toBe("UNKNOWN");
-    // marker only in the room-card text (not the selected price context) is ignored
-    expect(built({ primaryRoomCardText: "ツインルーム キャンセル無料 ￥43,560" }).fields.refundable.state).toBe("UNKNOWN");
+  it("missing capture / changed capture bytes / unrelated-card or unprovable capture never yield CONFIRMED", () => {
+    expect(verifyEvidenceRecord(bookingRec(), mem({}))).toEqual(["ARTIFACT_MISSING_OR_NOT_ALLOWED"]);
+    expect(verifyEvidenceRecord(bookingRec(), mem({ "/cap.json": capFiles()["/cap.json"].replace("43,560", "43,000") }))).toEqual(["ARTIFACT_HASH_MISMATCH"]);
+    expect(buildBookingRecord(ROW(), "/none.json", "r", mem({}))).toEqual({ rejected: "CAPTURE_MISSING_OR_NOT_ALLOWED" });
+    const related = CAP({ selected_price: { raw_text: "￥9,000", numeric_value: 9_000, block_guess: "related_property", role_guess: "unknown", context: "類似施設 ￥9,000" } });
+    expect(deriveBookingFields(related).price_jpy.state).toBe("UNKNOWN");
+    const notInContext = CAP({ selected_price: { raw_text: "￥43,560", numeric_value: 43_560, block_guess: "main_room_card", role_guess: "effective_price", context: "ツインルーム" } });
+    expect(deriveBookingFields(notInContext).price_jpy.state).toBe("UNKNOWN");
+    const valueMismatch = CAP({ selected_price: { raw_text: "￥43,560", numeric_value: 44_000, block_guess: "main_room_card", role_guess: "effective_price", context: "￥43,560" } });
+    expect(deriveBookingFields(valueMismatch).price_jpy.state).toBe("UNKNOWN");
+    expect(deriveBookingFields(CAP({ room_card: { name: "和室", text: "ツインルーム" } })).room_name.state).toBe("UNKNOWN");
   });
-  it("a related-property (carousel) price is not a selected price", () => {
-    const r = built({ primaryPrice: { numericValue: 9_000, candidateTypeGuess: "unknown", blockGuess: "related_property", contextBeforeAfter: "類似施設 ￥9,000" } });
-    expect(r.fields.price_jpy.state).toBe("UNKNOWN"); expect(r.fields.tax_basis.state).toBe("UNKNOWN");
+  it("refund markers near the selected price are POSSIBLE at most; discount pairing is GUESS; no marker is UNKNOWN", () => {
+    const ctx = (c: string) => CAP({ selected_price: { raw_text: "￥43,560", numeric_value: 43_560, block_guess: "main_room_card", role_guess: "effective_price", context: `ツイン ￥43,560 ${c}` } });
+    expect(deriveBookingFields(ctx("キャンセル無料")).refundable).toMatchObject({ state: "POSSIBLE", value: true });
+    expect(deriveBookingFields(ctx("返金不可")).refundable).toMatchObject({ state: "POSSIBLE", value: false });
+    expect(deriveBookingFields(ctx("返金不可 キャンセル無料")).refundable.state).toBe("UNKNOWN");
+    expect(deriveBookingFields(CAP({ room_card: { name: "ツインルーム", text: "ツインルーム キャンセル無料" } })).refundable.state).toBe("UNKNOWN");
+    expect(deriveBookingFields(CAP()).promotion).toEqual({ state: "UNKNOWN", reason: "NO_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE" });
+    expect(deriveBookingFields(CAP({ price_discount_detected: true, original_price_numeric: 52_000 })).promotion).toMatchObject({ state: "GUESS", value: { original_jpy: 52_000 } });
   });
-  it("row identity must match the evidence (slug / checkin / checkout)", () => {
-    expect(buildBookingEvidence(ROW, ev({ checkin: "2027-02-14" }), "r", READ)).toEqual({ rejected: "ROW_IDENTITY_MISMATCH" });
-    expect(buildBookingEvidence(ROW, ev({ propertySlug: "oakhill" }), "r", READ)).toEqual({ rejected: "ROW_IDENTITY_MISMATCH" });
+  it("own K27 T04 is never inferred: UNKNOWN without the selected room id and rate plan", () => {
+    const own = CAP({ property_slug: "xi-raku", room_card: { name: "スタンダード ツインルーム ソファ付 16m²", text: "スタンダード ツインルーム ソファ付 16m² キャンセル無料" } });
+    expect(deriveBookingFields(own).own_k27_t04).toEqual({ state: "UNKNOWN", reason: "SELECTED_ROOM_ID_AND_RATE_PLAN_NOT_EXPOSED_BY_COLLECTOR" });
+  });
+  it("the capture is bounded and scrubbed; no body text is stored", () => {
+    const cap = buildBookingCapture({ propertySlug: "x", checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "t", probeUrlSanitized: PROBE, finalUrlSanitized: PROBE,
+      primaryPrice: null, originalPriceNumeric: null, priceDiscountDetected: false, primaryRoomName: "ツイン", primaryRoomCardText: `ツイン guest@example.com 090-1234-5678 https://x.example/a ${"あ".repeat(2000)}`,
+      bodyText: "SECRET-BODY 2027年2月13日 大人2名 1泊" });
+    const s = JSON.stringify(cap);
+    expect(s).not.toMatch(/@example|090-1234|https:\/\/x\.example|SECRET-BODY/u);
+    expect(cap.room_card.text.length).toBeLessThanOrEqual(EVIDENCE_EXCERPT_MAX_CHARS);
+    expect(cap.displayed_spans).toEqual({ checkin: "2027年2月13日", adults: "大人2名", nights: "1泊" });
+    expect(scrubExcerpt("a\u0000b")).toBe("a b");
   });
 });
 
-describe("own K27 T04 reference (Booking roomId 1655515709, Standard 2P)", () => {
-  const OWN: RowIdentity = { ...ROW, rowId: "own1", sourceSlugOrCode: "xi-raku" };
-  const own = (o: Partial<BookingEvidenceInput>) => buildBookingEvidence(OWN, ev({ propertySlug: "xi-raku", probeUrl: PROBE.replace("hammond-takamiya", "xi-raku"), ...o }), "r", READ) as EvidenceRecord;
-  it("never mapped from an arbitrary primary room: no room id -> UNKNOWN even when the name matches", () => {
-    expect(own({ primaryRoomName: `${K27_T04_REFERENCE.roomName} 16m²` }).own_reference).toEqual({ state: "UNKNOWN", reason: "SELECTED_ROOM_ID_NOT_EXPOSED_BY_COLLECTOR" });
-    expect(own({ selectedRoomId: "999", primaryRoomName: `${K27_T04_REFERENCE.roomName} 16m²` }).own_reference).toMatchObject({ state: "UNKNOWN", reason: "SELECTED_ROOM_IS_NOT_T04_STANDARD" });
+describe("P0-2 accepted-row binding", () => {
+  it("the accepted canonical price must equal the proven selected price; identity must match", () => {
+    expect(buildBookingRecord(ROW({ normalizedTotalPrice: 40_000 }), "/cap.json", "r", mem(capFiles()))).toEqual({ rejected: "ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE" });
+    expect(buildBookingRecord(ROW({ sourcePrimaryPrice: 40_000 }), "/cap.json", "r", mem(capFiles()))).toEqual({ rejected: "ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE" });
+    expect(buildBookingRecord(ROW({ checkin: "2027-02-14" }), "/cap.json", "r", mem(capFiles()))).toEqual({ rejected: "ROW_IDENTITY_MISMATCH" });
+    expect(buildBookingRecord(ROW({ collectedAtJst: "2026-10-18T14:00:06+09:00" }), "/cap.json", "r", mem(capFiles()))).toEqual({ rejected: "ROW_IDENTITY_MISMATCH" });
+    expect(bookingRec().row).toMatchObject({ row_id: ROW().rowId, row_hash: "h1", normalized_total_price: 43_560 });
   });
-  it("recorded only with the exact room id, the T04 room name and a non-NR (free cancellation) selected price", () => {
-    const ctx = { numericValue: 52_530, candidateTypeGuess: "total_tax_included", blockGuess: "main_room_card", contextBeforeAfter: "スタンダード ツインルーム ソファ付 ￥52,530 キャンセル無料" };
-    expect(own({ selectedRoomId: "1655515709", primaryRoomName: "スタンダード ツインルーム ソファ付 16m²", primaryPrice: ctx }).own_reference)
-      .toMatchObject({ state: "CONFIRMED", value: { booking_room_id: "1655515709", plan: "STANDARD" } });
-    expect(own({ selectedRoomId: "1655515709", primaryRoomName: "スタンダード ツインルーム ソファ付 16m²", primaryPrice: { ...ctx, contextBeforeAfter: "￥47,277 返金不可" } }).own_reference?.state).toBe("UNKNOWN");
-    expect(built().own_reference).toBeNull();                                   // not the own property
+  it("zero or several captures for one accepted row are rejected as ambiguous; intraday row ids keep their own binding", () => {
+    const ref = { propertySlug: "hammond-takamiya", checkin: "2027-02-13", collectedAtJst: "2026-10-18T12:00:06+09:00", capturePath: "/cap.json" };
+    const read = mem(capFiles());
+    expect(buildEvidenceForAcceptedRows({ acceptedRows: [ROW()], bookingCaptures: [ref, { ...ref, capturePath: "/cap2.json" }], runId: "r", read }).rejected).toEqual([`${ROW().rowId}:AMBIGUOUS_CAPTURES(2)`]);
+    expect(buildEvidenceForAcceptedRows({ acceptedRows: [ROW()], bookingCaptures: [], runId: "r", read }).rejected).toEqual([`${ROW().rowId}:NO_CAPTURE_FOR_ROW`]);
+    const intraday = ROW({ rowId: `${ROW().rowId}::intraday::1400` });
+    expect(buildEvidenceForAcceptedRows({ acceptedRows: [intraday], bookingCaptures: [ref], runId: "r", read }).records[0]!.row.row_id).toBe(intraday.rowId);
   });
 });
 
-describe("Jalan decision artifact", () => {
-  const J = (o: { meal?: string; coupon?: boolean; slug?: string; price?: number } = {}) => JSON.stringify({
-    target: { checkin: "2027-02-20", checkout: "2027-02-21" },
-    pageResult: { price_total_tax_included: 25_000, final_url: "https://www.jalan.net/yad1/plan/?stayYear=2027&stayMonth=02&stayDay=20&stayCount=1&roomCount=1&adultNum=2" },
-    row: { source_slug_or_code: o.slug ?? "yad1", checkin: "2027-02-20", checkout: "2027-02-21", plan_name: "素泊まりプラン", room_name: "和室", meal_condition: o.meal ?? "食事なし",
-      normalized_total_price: o.price ?? 25_000, normalized_total_price_source: "jalan_visible_total_tax_included" },
-    candidate: { selected_plan_coupon_or_discount_evidence: o.coupon ?? false, page_chrome_coupon_or_discount_evidence: true }
-  });
-  const JR: RowIdentity = { rowId: "j1", shardMonth: "2027_02", checkin: "2027-02-20", checkout: "2027-02-21", collectedAtJst: "2026-10-15T06:00:01+09:00", sourceSlugOrCode: "yad1" };
-  it("binds plan / room / meal / tax-included total to the hashed decision file; page-chrome coupon is not a plan discount", () => {
-    const raw = J(); const r = buildJalanEvidence(JR, "/d.json", "r", files({ "/d.json": raw })) as EvidenceRecord;
-    expect(r.artifact).toEqual({ path: "/d.json", sha256: sha(raw) });
-    expect(r.selected_rate_plan).toBe("素泊まりプラン");
+describe("P0-3 Jalan: real collector-serialized decision JSON", () => {
+  const load = (name: string) => readFileSync(join(FIX, name), "utf8");
+  const rowOf = (raw: string): AcceptedRow => { const j = JSON.parse(raw) as { row: Record<string, unknown> };
+    return { rowId: "jrow", rowHash: "jh", shardMonth: String(j.row["checkin"]).slice(0, 7).replace("-", "_"), source: "jalan", sourceSlugOrCode: String(j.row["source_slug_or_code"]),
+      checkin: String(j.row["checkin"]), checkout: String(j.row["checkout"]), collectedAtJst: String(j.row["collected_at_jst"]), normalizedTotalPrice: j.row["normalized_total_price"] as number | null, debugArtifactPath: "/d.json",
+      sourcePrimaryPrice: j.row["source_primary_price"] as number | null, isPriceExcludedFromDp: j.row["is_price_excluded_from_dp"] as boolean }; };
+  it("the selected-plan discount is read from row.evidence_flags (real positive fixture)", () => {
+    const raw = load("jalan_decision_plan_discount.json"); const r = buildJalanRecord(rowOf(raw), "/d.json", "r", mem({ "/d.json": raw })) as EvidenceRecord;
+    expect(r.fields.promotion).toMatchObject({ state: "CONFIRMED", pointer: "row.evidence_flags.selected_plan_coupon_or_discount_evidence" });
     expect(r.fields.meal_room_only).toMatchObject({ state: "CONFIRMED", value: true });
     expect(r.fields.tax_basis).toMatchObject({ state: "CONFIRMED", value: "total_tax_included" });
-    expect(r.fields.refundable.state).toBe("UNKNOWN");
-    expect(r.fields.promotion.state).toBe("UNKNOWN");
-    expect((buildJalanEvidence(JR, "/d.json", "r", files({ "/d.json": J({ coupon: true }) })) as EvidenceRecord).fields.promotion).toMatchObject({ state: "CONFIRMED" });
-    expect((buildJalanEvidence(JR, "/d.json", "r", files({ "/d.json": J({ price: 24_000 }) })) as EvidenceRecord).fields.price_jpy.state).toBe("UNKNOWN");
-    expect(buildJalanEvidence(JR, "/d.json", "r", files({ "/d.json": J({ slug: "yad2" }) }))).toEqual({ rejected: "ROW_IDENTITY_MISMATCH" });
-    expect(buildJalanEvidence(JR, "/missing.json", "r", files({}))).toEqual({ rejected: "DECISION_ARTIFACT_MISSING" });
+    expect(r.fields.price_jpy).toMatchObject({ state: "CONFIRMED", value: 30_360 });
+    expect(r.fields.selected_rate_plan.state).toBe("CONFIRMED"); expect(r.fields.refundable.state).toBe("UNKNOWN");
+    expect(verifyEvidenceRecord(r, mem({ "/d.json": raw }))).toEqual([]);
+  });
+  it("a page-chrome-only coupon is not a plan discount (real negative fixture); missing flags -> UNKNOWN", () => {
+    const raw = load("jalan_decision_no_plan_discount.json"); const r = buildJalanRecord(rowOf(raw), "/d.json", "r", mem({ "/d.json": raw })) as EvidenceRecord;
+    expect(JSON.parse(raw).row.evidence_flags.page_chrome_coupon_or_discount_evidence).toBe(true);
+    expect(r.fields.promotion).toEqual({ state: "UNKNOWN", reason: "NO_SELECTED_PLAN_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE" });
+    const j = JSON.parse(raw); delete j.row.evidence_flags; const noFlags = JSON.stringify(j);
+    expect((buildJalanRecord(rowOf(noFlags), "/d.json", "r", mem({ "/d.json": noFlags })) as EvidenceRecord).fields.promotion).toEqual({ state: "UNKNOWN", reason: "EVIDENCE_FLAGS_ABSENT" });
+    // a flag invented on `candidate` (the old, wrong location) is ignored
+    const k = JSON.parse(raw); k.candidate.selected_plan_coupon_or_discount_evidence = true; const wrong = JSON.stringify(k);
+    expect((buildJalanRecord(rowOf(wrong), "/d.json", "r", mem({ "/d.json": wrong })) as EvidenceRecord).fields.promotion.state).toBe("UNKNOWN");
+  });
+  it("accepted-row price and identity must match the decision; a DP-excluded row binds by its source price", () => {
+    const raw = load("jalan_decision_plan_discount.json");
+    expect(buildJalanRecord({ ...rowOf(raw), normalizedTotalPrice: 1 }, "/d.json", "r", mem({ "/d.json": raw }))).toEqual({ rejected: "ACCEPTED_PRICE_MISMATCH" });
+    expect(buildJalanRecord({ ...rowOf(raw), sourcePrimaryPrice: 1 }, "/d.json", "r", mem({ "/d.json": raw }))).toEqual({ rejected: "ACCEPTED_PRICE_MISMATCH" });
+    const excl = load("jalan_decision_no_plan_discount.json");      // real row: room type excluded -> history price blank, source price kept
+    const er = rowOf(excl);
+    expect(er.isPriceExcludedFromDp).toBe(true);
+    const rec = buildJalanRecord({ ...er, normalizedTotalPrice: null }, "/d.json", "r", mem({ "/d.json": excl })) as EvidenceRecord;
+    expect(rec.row).toMatchObject({ normalized_total_price: null, source_primary_price: er.sourcePrimaryPrice, price_excluded_from_dp: true });
+    expect(buildJalanRecord({ ...rowOf(raw), sourceSlugOrCode: "yad0" }, "/d.json", "r", mem({ "/d.json": raw }))).toEqual({ rejected: "ROW_IDENTITY_MISMATCH" });
   });
 });
 
-describe("append-only, idempotent, conflict / tamper fail-closed, artifact re-verification, PII", () => {
-  const withDir = (f: (dir: string) => void) => { const d = mkdtempSync(join(tmpdir(), "zmi-ev-")); try { f(d); } finally { rmSync(d, { recursive: true, force: true }); } };
-  it("second identical export is a no-op; existing bytes stay an exact prefix; new rows append", () => withDir((d) => {
-    const a = built(); const first = appendEvidenceSidecar([a], d);
-    expect(first.written).toBe(1);
-    const path = join(d, "zao_evidence_2027_02.jsonl"); const bytes1 = readFileSync(path);
+describe("sold-out / unavailable pages carry no commercial evidence", () => {
+  it("plan / room / meal / price / tax / discount are UNKNOWN when the page is not available", () => {
+    const j = JSON.parse(readFileSync(join(FIX, "jalan_decision_plan_discount.json"), "utf8"));
+    j.row.availability_status = "sold_out"; j.pageResult.final_status = "sold_out"; j.pageResult.price_total_tax_included = null; j.row.normalized_total_price = null; j.row.source_primary_price = null;
+    const raw = JSON.stringify(j);
+    const row: AcceptedRow = { rowId: "so", rowHash: "h", shardMonth: "2026_11", source: "jalan", sourceSlugOrCode: j.row.source_slug_or_code, checkin: j.row.checkin, checkout: j.row.checkout,
+      collectedAtJst: j.row.collected_at_jst, normalizedTotalPrice: null, debugArtifactPath: "/d.json", sourcePrimaryPrice: null, isPriceExcludedFromDp: true };
+    const r = buildJalanRecord(row, "/d.json", "r", mem({ "/d.json": raw })) as EvidenceRecord;
+    for (const k of ["room_name", "price_jpy", "selected_rate_plan", "tax_basis", "meal_room_only", "promotion"] as const) expect(r.fields[k]).toEqual({ state: "UNKNOWN", reason: "NOT_AVAILABLE(sold_out)" });
+    expect(r.fields.request_checkin.state).toBe("CONFIRMED");
+  });
+});
+
+describe("P0-4 distinct wire schema + pinned cross-repo contract", () => {
+  it("the export schema is not the private K27 sidecar schema, and a private-layout record is refused", () => {
+    expect(MARKET_EVIDENCE_EXPORT_SCHEMA).toBe("zmi_market_evidence_export_v1");
+    expect(MARKET_EVIDENCE_EXPORT_SCHEMA).not.toBe(PRIVATE_K27_SIDECAR_SCHEMA);
+    const privateShaped = { schema: "zao_market_evidence_sidecar_v0", origin: "JALAN_DECISION", artifact: { path: "/a", sha256: "0".repeat(64), index: null }, key: {}, fields: {} };
+    expect(exportContractProblems(privateShaped)).toEqual(["PRIVATE_K27_SIDECAR_SCHEMA_IS_NOT_THIS_EXPORT"]);
+    expect(exportContractProblems({ ...privateShaped, schema: "zmi_market_evidence_export_v1" })).toContain("TOP_LEVEL_KEYS");
+  });
+  it("the pinned contract fixture validates and is reproduced byte-for-byte by the current builders", () => {
+    const pinned = readFileSync(join(FIX, "zmi_market_evidence_export_v1.contract.jsonl"), "utf8");
+    const jRaw = readFileSync(join(FIX, "jalan_decision_plan_discount.json"), "utf8");
+    const j = JSON.parse(jRaw) as { row: Record<string, unknown> };
+    const jRow: AcceptedRow = { rowId: "contract-jalan-row", rowHash: "contract-jalan-hash", shardMonth: "2026_11", source: "jalan", sourceSlugOrCode: String(j.row["source_slug_or_code"]),
+      checkin: String(j.row["checkin"]), checkout: String(j.row["checkout"]), collectedAtJst: String(j.row["collected_at_jst"]), normalizedTotalPrice: j.row["normalized_total_price"] as number, debugArtifactPath: "fixtures/jalan_decision_plan_discount.json",
+      sourcePrimaryPrice: j.row["source_primary_price"] as number, isPriceExcludedFromDp: j.row["is_price_excluded_from_dp"] as boolean };
+    const regenerated = [bookingRec(CAP(), ROW({ rowHash: "contract-booking-hash" })), buildJalanRecord(jRow, jRow.debugArtifactPath, "run1", mem({ [jRow.debugArtifactPath]: jRaw })) as EvidenceRecord]
+      .map((r) => `${canonicalJson(r)}\n`).join("");
+    expect(regenerated).toBe(pinned);
+    for (const line of pinned.trim().split("\n")) expect(exportContractProblems(JSON.parse(line))).toEqual([]);
+    // a future private translator must fail closed on any drift
+    const drift = JSON.parse(pinned.split("\n")[0]!); drift.fields.price_jpy.state = "MAYBE";
+    expect(exportContractProblems(drift)).toEqual(expect.arrayContaining(["STATE(price_jpy)", "RECORD_SEAL_MISMATCH"]));
+  });
+});
+
+describe("P1 append / status / reads", () => {
+  it("append-only, idempotent, conflict and tamper fail closed, orphan temp cleaned", () => withDir((d) => {
+    const a = bookingRec();
+    expect(appendEvidenceSidecar([a], d).written).toBe(1);
+    const path = join(d, evidenceShardName("2027-02-13")); const b1 = readFileSync(path);
     expect(appendEvidenceSidecar([a], d)).toMatchObject({ written: 0, identical: 1, conflicts: [] });
-    expect(readFileSync(path).equals(bytes1)).toBe(true);
-    const b = built({}, { ...ROW, rowId: `${ROW.rowId}::intraday::1400` });
-    expect(appendEvidenceSidecar([b], d).written).toBe(1);
-    const bytes2 = readFileSync(path);
-    expect(bytes2.subarray(0, bytes1.length).equals(bytes1)).toBe(true);
-    expect(bytes2.toString("utf8").trim().split("\n").length).toBe(2);
-    expect(readdirSync(d).filter((f) => f.includes(".tmp-"))).toEqual([]);
-  }));
-  it("same row_id with different content is a conflict and is not written", () => withDir((d) => {
-    appendEvidenceSidecar([built()], d);
-    const res = appendEvidenceSidecar([built({ primaryRoomName: "和室" })], d);
-    expect(res.written).toBe(0); expect(res.conflicts).toEqual([`${ROW.rowId}:CONTENT_DIFFERS`]);
-  }));
-  it("a tampered shard is never appended to", () => withDir((d) => {
-    appendEvidenceSidecar([built()], d);
-    const path = join(d, "zao_evidence_2027_02.jsonl");
+    expect(readFileSync(path).equals(b1)).toBe(true);
+    const other = bookingRec(CAP(), ROW({ rowId: "other", rowHash: "h2" }));
+    writeFileSync(`${path}.tmp-999-orphan`, "partial");
+    expect(appendEvidenceSidecar([other], d).written).toBe(1);
+    expect(readFileSync(path).subarray(0, b1.length).equals(b1)).toBe(true);
+    expect(readdirSync(d).filter((f) => f.includes(".tmp-") || f.endsWith(".lock"))).toEqual([]);
+    const changed = bookingRec(CAP({ room_card: { name: "和室", text: "和室 ￥43,560" } }), ROW({ rowId: "other", rowHash: "h2" }));
+    expect(appendEvidenceSidecar([changed], d).conflicts).toEqual(["other:CONTENT_DIFFERS"]);
     const before = readFileSync(path, "utf8"); writeFileSync(path, before.replace("43560", "33560"));
-    const res = appendEvidenceSidecar([built({}, { ...ROW, rowId: "other" })], d);
-    expect(res.tamperedShards).toEqual(["zao_evidence_2027_02.jsonl"]); expect(res.written).toBe(0);
-    expect(readFileSync(path, "utf8")).toBe(before.replace("43560", "33560"));
+    const t = appendEvidenceSidecar([bookingRec(CAP(), ROW({ rowId: "third" }))], d);
+    expect(t.tamperedShards).toEqual([evidenceShardName("2027-02-13")]); expect(t.written).toBe(0);
   }));
-  it("an unsealed / forged record is refused", () => withDir((d) => {
-    const forged = { ...built(), fields: { ...built().fields, price_jpy: { state: "CONFIRMED" as const, value: 1, kind: "SOURCE_PARSED_FIELD" as const, pointer: "x" } } };
-    expect(appendEvidenceSidecar([forged], d).conflicts).toEqual([`${ROW.rowId}:UNSEALED`]);
-    expect(existsSync(join(d, "zao_evidence_2027_02.jsonl"))).toBe(false);
+  it("a held shard lock (concurrent writer) is never waited on or stolen: nothing written, reported", () => withDir((d) => {
+    const path = join(d, evidenceShardName("2027-02-13")); writeFileSync(`${path}.lock`, "123 other-writer\n");
+    const res = appendEvidenceSidecar([bookingRec()], d);
+    expect(res).toMatchObject({ written: 0, lockedShards: [evidenceShardName("2027-02-13")] });
+    expect(existsSync(path)).toBe(false); expect(readFileSync(`${path}.lock`, "utf8")).toBe("123 other-writer\n");
   }));
-  it("artifact and excerpt hashes are recomputed (a hash string is not proof)", () => {
-    const r = built();
-    expect(verifyEvidenceArtifact(r, READ)).toEqual([]);
-    expect(verifyEvidenceArtifact(r, files({ "/probe.txt": `${PROBE}&x=1` }))).toEqual(["ARTIFACT_HASH_MISMATCH"]);
-    expect(verifyEvidenceArtifact(r, files({}))).toEqual(["ARTIFACT_MISSING"]);
-    expect(verifyEvidenceArtifact({ ...r, excerpt: { text: "x", sha256: r.excerpt!.sha256 } } as EvidenceRecord, READ)).toContain("EXCERPT_HASH_MISMATCH");
+  it("status is OK only when every accepted row produced a record and nothing was refused", () => {
+    const rec = bookingRec(); const clean = { written: 1, identical: 0, conflicts: [], tamperedShards: [], lockedShards: [], files: [] };
+    expect(evidenceExportStatus(1, { records: [rec], rejected: [] }, clean)).toBe("OK");
+    expect(evidenceExportStatus(2, { records: [rec], rejected: ["x:NO_CAPTURE_FOR_ROW"] }, clean)).toBe("PARTIAL_EVIDENCE_DEGRADED");
+    expect(evidenceExportStatus(2, { records: [rec], rejected: [] }, clean)).toBe("PARTIAL_EVIDENCE_DEGRADED");
+    expect(evidenceExportStatus(1, { records: [rec], rejected: [] }, { ...clean, lockedShards: ["s"] })).toBe("PARTIAL_EVIDENCE_DEGRADED");
   });
-  it("excerpt is bounded and scrubbed of e-mail / phone / URL; no body text is stored", () => {
-    const s = scrubExcerpt(`ツイン 連絡 guest@example.com 090-1234-5678 https://x.example/a ${"あ".repeat(2000)}`);
-    expect(s).not.toMatch(/@|090-1234|https?:/u); expect(s.length).toBeLessThanOrEqual(EVIDENCE_EXCERPT_MAX_CHARS);
-    const line = canonicalJson(built({ primaryRoomCardText: "ツイン guest@example.com" }));
-    expect(line).not.toContain("guest@example.com"); expect(line).not.toContain("bodyText");
-  });
-});
-
-describe("no new request path", () => {
-  it("the exporter module performs no network or browser access", () => {
-    const src = readFileSync("src/services/marketEvidenceSidecar.ts", "utf8");
-    expect(src).not.toMatch(/fetch\(|playwright|chromium|https?\.request|goto\(/u);
-    mkdirSync(join(tmpdir(), "zmi-noop"), { recursive: true });
+  it("guarded reads: allowlisted root only, no symlink, bounded size", () => withDir((d) => {
+    const root = join(d, "debug"); mkdirSync(root); writeFileSync(join(root, "ok.json"), "{}"); writeFileSync(join(d, "outside.json"), "{}");
+    symlinkSync(join(d, "outside.json"), join(root, "link.json")); writeFileSync(join(root, "big.json"), "x".repeat(50));
+    const read = guardedReader([root], 20);
+    expect(read(join(root, "ok.json"))?.toString()).toBe("{}");
+    expect(read(join(d, "outside.json"))).toBeNull(); expect(read(join(root, "link.json"))).toBeNull(); expect(read(join(root, "big.json"))).toBeNull();
+    expect(read(join(root, "..", "outside.json"))).toBeNull();
+  }));
+  it("capture writing never overwrites and never throws into the run", () => withDir((d) => {
+    const signals = analyzeBookingRenderedDomSignals({ target: { canonicalPropertyName: "HAMMOND", slug: "hammond-takamiya" }, checkin: "2027-02-13", checkout: "2027-02-14",
+      loaded: true, httpStatus: 200, finalUrl: PROBE, pageTitle: "", bodyText: "ツインルーム ￥43,560", error: "" });
+    const sink: BookingCaptureRef[] = []; const x = { slug: "hammond-takamiya", checkin: "2027-02-13", checkout: "2027-02-14", collectedAtJst: "t", probeUrl: PROBE, signals };
+    captureBookingEvidence(sink, d, x); const first = readFileSync(join(d, BOOKING_CAPTURE_FILE));
+    captureBookingEvidence(sink, d, x);
+    expect(sink.length).toBe(1); expect(readFileSync(join(d, BOOKING_CAPTURE_FILE)).equals(first)).toBe(true);
+    expect(() => captureBookingEvidence(sink, join(d, "missing-dir"), x)).not.toThrow();
+  }));
+  it("the module performs no network or browser access", () => {
+    expect(readFileSync("src/services/marketEvidenceSidecar.ts", "utf8")).not.toMatch(/fetch\(|playwright|chromium|https?\.request|goto\(/u);
   });
 });

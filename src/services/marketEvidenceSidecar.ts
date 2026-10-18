@@ -1,70 +1,83 @@
-// MARKET EVIDENCE SIDECAR EXPORTER -- default OFF (ZMI_EVIDENCE_SIDECAR_ENABLED=1 to enable).
+// MARKET EVIDENCE EXPORT -- default OFF (ZMI_EVIDENCE_SIDECAR_ENABLED=1 to enable).
 //
-// Keeps the commercial-basis facts the collectors ALREADY parse for the selected product of each fetched page --
-// facts the canonical history (zao_local_history_v1, 45 columns) cannot carry -- in an append-only JSONL sidecar keyed
-// by the accepted history row_id. It adds no page request, no browser action, no planner / quota / cadence change and
-// never touches the canonical history files: .data/history-evidence/zao_evidence_YYYY_MM.jsonl is outside
-// .data/history, never matches /^zao_signals_.*\.csv$/ (the downstream 05:30 import filter), is not staged by
-// ops:auto-commit-push (which stages only .data/history, apps/zmi-bi-web/data and .data/market-observations) and is
-// git-ignored.
+// Keeps the commercial-basis facts the collectors ALREADY parse for the selected product of each fetched page in an
+// append-only JSONL export keyed by the ACCEPTED canonical history row. No page request, browser action, planner /
+// quota / cadence change; the canonical history (zao_local_history_v1, 45 columns) is never touched.
+//   .data/history-evidence/zmi_evidence_YYYY_MM.jsonl  -- outside .data/history, never /^zao_signals_.*\.csv$/,
+//   not staged by ops:auto-commit-push (TRUSTED_MARKET_DATA_PREFIXES), git-ignored.
 //
-// Evidence rules (TD #6245360507):
-// - every field is CONFIRMED (with the kind of evidence and where it came from), GUESS, or UNKNOWN; absence of a
-//   marker is UNKNOWN, never "no";
-// - Booking's price-type classification (candidateTypeGuess) is a GUESS, never proof of tax inclusion;
-// - a discount is CONFIRMED only from a marker on the selected product; no marker -> UNKNOWN;
-// - a cancellation term is used only when it appears in the selected price's own local context and is unambiguous;
-// - request parameters are REQUEST_PARAMETER, page-text detections SOURCE_TEXT_MARKER, parser fields
-//   SOURCE_PARSED_FIELD -- never promoted;
-// - the own K27 T04 reference (Booking roomId 1655515709, Standard 2P) is recorded only when the selected room id,
-//   room name and a non-NR plan are all positively identified; the rendered-text collector exposes no room id, so
-//   today it is UNKNOWN (never an arbitrary primary room);
-// - records exist only for rows the history append ACCEPTED; a row_id already present with different content is a
-//   conflict (fail closed, nothing written for it); identical content is an idempotent no-op;
-// - every line carries record_sha256 over its canonical JSON; an existing shard that fails verification is never
-//   appended to (tamper -> fail closed);
-// - the stored room-card excerpt is bounded and scrubbed (hotel rate-card text only; e-mail / phone / URL removed).
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+// WIRE SCHEMA: "zmi_market_evidence_export_v1". This is NOT the private K27 sidecar ("zao_market_evidence_sidecar_v0",
+// layout {origin, artifact, key, fields}, CONFIRMED|UNKNOWN only). The two are deliberately distinct; a consumer must
+// translate explicitly and fail closed (see exportContractProblems and the pinned contract fixture).
+//
+// SOURCE PROOF (TD #6248592366):
+// - Booking: the collector writes, only when the flag is ON, a bounded selected-rate-card CAPTURE next to the probe URL
+//   (selected_card_capture.json: selected price raw text + local context, room card name/text, displayed spans, parser
+//   version, sanitized URLs, observedAt; scrubbed, no body text, no screenshot). Every Booking field is RE-DERIVED from
+//   that capture's bytes; the record must equal the re-derivation. Values the capture cannot prove are never CONFIRMED.
+// - Jalan: every field is re-derived from the collector's own classification decision JSON (hash-bound); the selected-
+//   plan discount flag is read where the collector serializes it: row.evidence_flags.
+// - Each record is bound to exactly ONE accepted history row (row_id, row_hash, slug, dates, collected_at, accepted
+//   price). Duplicate candidates for one row are ambiguous and rejected; a price mismatch is rejected.
+//
+// EVIDENCE STATES: CONFIRMED (re-derivable fact) | GUESS (classifier output) | POSSIBLE (a marker near the selected price
+// but not bound to the selected rate plan) | UNKNOWN. Booking tax basis = GUESS; Booking discount pairing = GUESS;
+// Booking refund markers = POSSIBLE at most; no marker = UNKNOWN, never "no". Own K27 T04 (Booking roomId 1655515709,
+// Standard 2P) requires the selected room id AND rate-plan identity; the rendered-text collector exposes neither -> UNKNOWN.
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
+import { guessPriceCandidateType, sanitizeBookingUrl, type BookingRenderedDomSignals } from "./bookingRenderedDomProbe";
 
-export const MARKET_EVIDENCE_SIDECAR_SCHEMA = "zao_market_evidence_sidecar_v0" as const;
+export const MARKET_EVIDENCE_EXPORT_SCHEMA = "zmi_market_evidence_export_v1" as const;
+export const BOOKING_CAPTURE_SCHEMA = "zmi_booking_selected_card_capture_v1" as const;
+export const BOOKING_CAPTURE_PARSER_VERSION = "bookingRenderedDomProbe@selectPrimaryBookingPriceCandidate" as const;
+/** The private K27 sidecar wire name -- a DIFFERENT layout; never accepted as this export. */
+export const PRIVATE_K27_SIDECAR_SCHEMA = "zao_market_evidence_sidecar_v0" as const;
 export const MARKET_EVIDENCE_SIDECAR_DIR = ".data/history-evidence";
+export const BOOKING_CAPTURE_FILE = "selected_card_capture.json";
 export const EVIDENCE_EXCERPT_MAX_CHARS = 600;
-/** K27 T04 own reference (Beds24 737052). */
-export const K27_T04_REFERENCE = Object.freeze({ ownSlug: "xi-raku", bookingRoomId: "1655515709", roomName: "スタンダード ツインルーム ソファ付" } as const);
+export const EVIDENCE_CONTEXT_MAX_CHARS = 300;
+export const EVIDENCE_ARTIFACT_MAX_BYTES = 2_000_000;
+export const K27_T04_REFERENCE = Object.freeze({ ownSlug: "xi-raku", bookingRoomId: "1655515709", ratePlan: "STANDARD" } as const);
 
 export function isEvidenceSidecarEnabled(env: Record<string, string | undefined>): boolean { return env["ZMI_EVIDENCE_SIDECAR_ENABLED"] === "1"; }
-export const evidenceShardName = (checkin: string): string => `zao_evidence_${checkin.slice(0, 4)}_${checkin.slice(5, 7)}.jsonl`;
+export const evidenceShardName = (checkin: string): string => `zmi_evidence_${checkin.slice(0, 4)}_${checkin.slice(5, 7)}.jsonl`;
 
 export type EvidenceKind = "SOURCE_PARSED_FIELD" | "SOURCE_TEXT_MARKER" | "REQUEST_PARAMETER";
 export type EvidenceField<T> =
-  | { state: "CONFIRMED"; value: T; kind: EvidenceKind; pointer: string }
-  | { state: "GUESS"; value: T; kind: EvidenceKind; pointer: string }
+  | { state: "CONFIRMED" | "GUESS" | "POSSIBLE"; value: T; kind: EvidenceKind; pointer: string }
   | { state: "UNKNOWN"; reason: string };
-const c = <T>(value: T, kind: EvidenceKind, pointer: string): EvidenceField<T> => ({ state: "CONFIRMED", value, kind, pointer });
+const f = <T>(state: "CONFIRMED" | "GUESS" | "POSSIBLE", value: T, kind: EvidenceKind, pointer: string): EvidenceField<T> => ({ state, value, kind, pointer });
 const u = <T>(reason: string): EvidenceField<T> => ({ state: "UNKNOWN", reason });
 
+/** The accepted canonical history row an export record is bound to. */
+export interface AcceptedRow {
+  rowId: string; rowHash: string; shardMonth: string; source: string; sourceSlugOrCode: string;
+  checkin: string; checkout: string; collectedAtJst: string; normalizedTotalPrice: number | null; debugArtifactPath: string;
+  /** The raw source price the canonical row carries (present also when the row is excluded from DP use). */
+  sourcePrimaryPrice: number | null; isPriceExcludedFromDp: boolean;
+}
+export interface EvidenceFields {
+  request_checkin: EvidenceField<string>; request_checkout: EvidenceField<string>; request_adults: EvidenceField<number>;
+  displayed_checkin: EvidenceField<string>; displayed_adults: EvidenceField<string>; displayed_one_night: EvidenceField<string>;
+  room_name: EvidenceField<string>; price_jpy: EvidenceField<number>; selected_rate_plan: EvidenceField<string>;
+  tax_basis: EvidenceField<string>; meal_room_only: EvidenceField<boolean>;
+  refundable: EvidenceField<boolean>; promotion: EvidenceField<{ adjusted: true; original_jpy: number | null }>;
+  own_k27_t04: EvidenceField<{ booking_room_id: string; rate_plan: string }>;
+}
 export interface EvidenceRecord {
-  schema: typeof MARKET_EVIDENCE_SIDECAR_SCHEMA;
-  row_id: string; shard_month: string; source: "booking" | "jalan"; property_slug: string;
-  checkin: string; checkout: string; observed_at: string; run_id: string;
-  selected_rate_plan: string | null;
-  artifact: { path: string; sha256: string } | null;
-  excerpt: { text: string; sha256: string } | null;
-  fields: {
-    request_checkin: EvidenceField<string>; request_checkout: EvidenceField<string>; request_adults: EvidenceField<number>;
-    displayed_dates: EvidenceField<boolean>; displayed_adults: EvidenceField<boolean>; displayed_one_night: EvidenceField<boolean>;
-    room_name: EvidenceField<string>; price_jpy: EvidenceField<number>;
-    tax_basis: EvidenceField<string>; meal_room_only: EvidenceField<boolean>;
-    refundable: EvidenceField<boolean>; promotion: EvidenceField<{ adjusted: true; original_jpy: number | null }>;
-  };
-  own_reference: EvidenceField<{ booking_room_id: string; room_name: string; plan: "STANDARD" }> | null;
+  schema: typeof MARKET_EVIDENCE_EXPORT_SCHEMA;
+  record_kind: "booking_selected_card" | "jalan_decision";
+  row: { row_id: string; row_hash: string; shard_month: string; source: "booking" | "jalan"; property_slug: string; checkin: string; checkout: string; collected_at_jst: string; normalized_total_price: number | null; source_primary_price: number | null; price_excluded_from_dp: boolean };
+  run_id: string;
+  artifact: { path: string; sha256: string; kind: typeof BOOKING_CAPTURE_SCHEMA | "jalan_classification_decision" };
+  fields: EvidenceFields;
   record_sha256: string;
 }
 
 const sha256 = (s: string | Buffer): string => createHash("sha256").update(s).digest("hex");
-/** Canonical JSON: keys sorted recursively, so the record hash is independent of construction order. */
+/** Canonical JSON: keys sorted recursively. */
 export function canonicalJson(v: unknown): string {
   if (v === null || typeof v !== "object") return JSON.stringify(v);
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
@@ -73,185 +86,323 @@ export function canonicalJson(v: unknown): string {
 export function sealRecord(r: Omit<EvidenceRecord, "record_sha256">): EvidenceRecord { return { ...r, record_sha256: sha256(canonicalJson(r)) }; }
 export function recordSealOk(r: EvidenceRecord): boolean { const { record_sha256, ...rest } = r; return record_sha256 === sha256(canonicalJson(rest)); }
 
-/** Bounded, scrubbed hotel rate-card excerpt (no e-mail / phone / URL; control characters folded). */
-export function scrubExcerpt(text: string): string {
+/** Bounded, scrubbed text (no e-mail / phone / URL; control characters folded). */
+export function scrubExcerpt(text: string, max = EVIDENCE_EXCERPT_MAX_CHARS): string {
   return text
     .replace(/[\u0000-\u001f\u007f]+/gu, " ")
     .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/gu, "[email]")
     .replace(/https?:\/\/\S+/gu, "[url]")
     .replace(/(?:\+?\d[\d\s-]{8,}\d)/gu, "[number]")
-    .replace(/\s{2,}/gu, " ").trim().slice(0, EVIDENCE_EXCERPT_MAX_CHARS);
+    .replace(/\s{2,}/gu, " ").trim().slice(0, max);
 }
 
+// ------------------------------------------------------------------------------------------------- Booking capture
+/** What the collector writes (flag ON only) from the page it already fetched. No body text is kept. */
+export interface BookingSelectedCardCapture {
+  capture_schema: typeof BOOKING_CAPTURE_SCHEMA; parser_version: string;
+  property_slug: string; checkin: string; checkout: string; collected_at_jst: string;
+  probe_url_sanitized: string; final_url_sanitized: string;
+  selected_price: { raw_text: string; numeric_value: number; block_guess: string; role_guess: string; context: string } | null;
+  original_price_numeric: number | null; price_discount_detected: boolean;
+  room_card: { name: string; text: string };
+  displayed_spans: { checkin: string | null; adults: string | null; nights: string | null };
+}
+const DATE_SPAN = (iso: string): RegExp => { const [y, m, d] = iso.split("-"); return new RegExp(`${y}年0?${Number(m)}月0?${Number(d)}日|0?${Number(m)}月0?${Number(d)}日`, "u"); };
+const ADULTS_SPAN = /大人\s*[2２]\s*名|[2２]\s*名の大人/u;
+const NIGHTS_SPAN = /[1１]\s*泊/u;
+/** Extracts the displayed spans from the in-memory page text (collector side); only the short matches are kept. */
+export function displayedSpans(bodyText: string, checkin: string): BookingSelectedCardCapture["displayed_spans"] {
+  return { checkin: DATE_SPAN(checkin).exec(bodyText)?.[0] ?? null, adults: ADULTS_SPAN.exec(bodyText)?.[0] ?? null, nights: NIGHTS_SPAN.exec(bodyText)?.[0] ?? null };
+}
+const yen = (raw: string): number | null => { const m = /[￥¥]\s*([\d,]+)|([\d,]+)\s*円/u.exec(raw); const s = m?.[1] ?? m?.[2]; return s === undefined ? null : Number(s.replace(/,/gu, "")); };
 const REFUND_NO = /返金不可|払い戻し不可|払戻不可|non[- ]?refundable/iu;
 const REFUND_YES = /キャンセル無料|無料キャンセル|free cancellation/iu;
-/** Cancellation term from the SELECTED price's local context only; both or neither -> UNKNOWN. */
-export function refundFromSelectedContext(context: string): EvidenceField<boolean> {
-  const no = REFUND_NO.test(context); const yes = REFUND_YES.test(context);
-  if (no && !yes) return c(false, "SOURCE_TEXT_MARKER", "signals.primaryPriceCandidate.contextBeforeAfter");
-  if (yes && !no) return c(true, "SOURCE_TEXT_MARKER", "signals.primaryPriceCandidate.contextBeforeAfter");
-  return u(no && yes ? "AMBIGUOUS_REFUND_MARKERS_IN_SELECTED_CONTEXT" : "NO_REFUND_MARKER_IN_SELECTED_CONTEXT");
+/** The collector's own price-type classifier (bookingRenderedDomProbe.guessPriceCandidateType): always a GUESS. */
+export function guessTaxBasis(context: string): string { return guessPriceCandidateType(context); }
+
+/** Builds the capture from the collector's in-memory signals (flag ON only). */
+export function buildBookingCapture(input: {
+  propertySlug: string; checkin: string; checkout: string; collectedAtJst: string; probeUrlSanitized: string; finalUrlSanitized: string;
+  primaryPrice: { rawText: string; numericValue: number; blockGuess: string; roleGuess: string; contextBeforeAfter: string } | null;
+  originalPriceNumeric: number | null; priceDiscountDetected: boolean; primaryRoomName: string; primaryRoomCardText: string; bodyText: string;
+}): BookingSelectedCardCapture {
+  const pc = input.primaryPrice;
+  return {
+    capture_schema: BOOKING_CAPTURE_SCHEMA, parser_version: BOOKING_CAPTURE_PARSER_VERSION,
+    property_slug: input.propertySlug, checkin: input.checkin, checkout: input.checkout, collected_at_jst: input.collectedAtJst,
+    probe_url_sanitized: input.probeUrlSanitized, final_url_sanitized: input.finalUrlSanitized,
+    selected_price: pc === null ? null : { raw_text: scrubExcerpt(pc.rawText, 60), numeric_value: pc.numericValue, block_guess: pc.blockGuess, role_guess: pc.roleGuess, context: scrubExcerpt(pc.contextBeforeAfter, EVIDENCE_CONTEXT_MAX_CHARS) },
+    original_price_numeric: input.originalPriceNumeric, price_discount_detected: input.priceDiscountDetected,
+    room_card: { name: scrubExcerpt(input.primaryRoomName, 120), text: scrubExcerpt(input.primaryRoomCardText) },
+    displayed_spans: displayedSpans(input.bodyText, input.checkin)
+  };
 }
 
-/** What the Booking rendered-DOM extractor already holds in memory for one fetched page (no body text kept). */
-export interface BookingEvidenceInput {
-  propertySlug: string; checkin: string; checkout: string; probeUrl: string; probeArtifactPath: string;
-  checkinDetected: boolean; checkoutDetected: boolean; adultCountDetected: boolean; nightCountDetected: boolean;
-  primaryPrice: { numericValue: number; candidateTypeGuess: string; blockGuess: string; contextBeforeAfter: string } | null;
-  originalPriceNumeric: number | null; priceDiscountDetected: boolean;
-  primaryRoomName: string; primaryRoomCardText: string;
-  /** Room id of the selected room card when the collector can see one (the rendered-text collector cannot: null). */
-  selectedRoomId: string | null;
-}
-export interface RowIdentity { rowId: string; shardMonth: string; checkin: string; checkout: string; collectedAtJst: string; sourceSlugOrCode: string }
-
-export function buildBookingEvidence(row: RowIdentity, e: BookingEvidenceInput, runId: string, readBytes: (p: string) => Buffer | null): EvidenceRecord | { rejected: string } {
-  if (e.propertySlug !== row.sourceSlugOrCode || e.checkin !== row.checkin || e.checkout !== row.checkout) return { rejected: "ROW_IDENTITY_MISMATCH" };
-  const probe = readBytes(e.probeArtifactPath);
-  const qp = (k: string): string | null => { try { return new URL(e.probeUrl).searchParams.get(k); } catch { return null; } };
-  const price = e.primaryPrice !== null && e.primaryPrice.blockGuess === "main_room_card" ? e.primaryPrice : null;
-  const excerptText = scrubExcerpt(e.primaryRoomCardText);
-  const refund = price === null ? u<boolean>("NO_SELECTED_MAIN_ROOM_CARD_PRICE") : refundFromSelectedContext(price.contextBeforeAfter);
-  const isOwn = e.propertySlug === K27_T04_REFERENCE.ownSlug;
-  return sealRecord({
-    schema: MARKET_EVIDENCE_SIDECAR_SCHEMA, row_id: row.rowId, shard_month: row.shardMonth, source: "booking", property_slug: e.propertySlug,
-    checkin: row.checkin, checkout: row.checkout, observed_at: row.collectedAtJst, run_id: runId, selected_rate_plan: null,
-    artifact: probe === null ? null : { path: e.probeArtifactPath, sha256: sha256(probe) },
-    excerpt: excerptText === "" ? null : { text: excerptText, sha256: sha256(excerptText) },
-    fields: {
-      request_checkin: qp("checkin") === e.checkin ? c(e.checkin, "REQUEST_PARAMETER", "probe_url?checkin") : u("REQUEST_CHECKIN_MISMATCH"),
-      request_checkout: qp("checkout") === e.checkout ? c(e.checkout, "REQUEST_PARAMETER", "probe_url?checkout") : u("REQUEST_CHECKOUT_MISMATCH"),
-      request_adults: qp("group_adults") !== null ? c(Number(qp("group_adults")), "REQUEST_PARAMETER", "probe_url?group_adults") : u("REQUEST_ADULTS_ABSENT"),
-      displayed_dates: e.checkinDetected && e.checkoutDetected ? c(true, "SOURCE_TEXT_MARKER", "signals.checkinDetected&checkoutDetected") : u("DATES_NOT_DETECTED_IN_PAGE_TEXT"),
-      displayed_adults: e.adultCountDetected ? c(true, "SOURCE_TEXT_MARKER", "signals.adultCountDetected") : u("ADULTS_NOT_DETECTED_IN_PAGE_TEXT"),
-      displayed_one_night: e.nightCountDetected ? c(true, "SOURCE_TEXT_MARKER", "signals.nightCountDetected") : u("ONE_NIGHT_NOT_DETECTED_IN_PAGE_TEXT"),
-      room_name: e.primaryRoomName !== "" ? c(e.primaryRoomName, "SOURCE_PARSED_FIELD", "signals.primaryRoomName") : u("NO_SELECTED_ROOM_NAME"),
-      price_jpy: price !== null ? c(price.numericValue, "SOURCE_PARSED_FIELD", "signals.primaryPriceCandidate.numericValue") : u("NO_SELECTED_MAIN_ROOM_CARD_PRICE"),
-      tax_basis: price !== null ? { state: "GUESS", value: price.candidateTypeGuess, kind: "SOURCE_TEXT_MARKER", pointer: "signals.primaryPriceCandidate.candidateTypeGuess" } : u("NO_SELECTED_MAIN_ROOM_CARD_PRICE"),
-      meal_room_only: u("BOOKING_MEAL_NOT_PARSED_BY_COLLECTOR"),
-      refundable: refund,
-      promotion: e.priceDiscountDetected && e.originalPriceNumeric !== null && price !== null
-        ? c({ adjusted: true as const, original_jpy: e.originalPriceNumeric }, "SOURCE_PARSED_FIELD", "signals.originalPriceNumeric&priceDiscountDetected")
-        : u("NO_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE")
-    },
-    own_reference: !isOwn ? null
-      : e.selectedRoomId === K27_T04_REFERENCE.bookingRoomId && e.primaryRoomName.startsWith(K27_T04_REFERENCE.roomName) && refund.state === "CONFIRMED" && refund.value === true && price !== null
-        ? c({ booking_room_id: e.selectedRoomId, room_name: e.primaryRoomName, plan: "STANDARD" as const }, "SOURCE_PARSED_FIELD", "selectedRoomId+primaryRoomName+refund")
-        : u(e.selectedRoomId === null ? "SELECTED_ROOM_ID_NOT_EXPOSED_BY_COLLECTOR" : "SELECTED_ROOM_IS_NOT_T04_STANDARD")
-  });
+/** One Booking selected-card capture written this run (flag ON only). */
+export interface BookingCaptureRef { propertySlug: string; checkin: string; collectedAtJst: string; capturePath: string }
+/**
+ * Flag ON only (the caller passes a sink only then): writes the bounded selected-rate-card capture of the page ALREADY
+ * fetched (no request, no body text, no screenshot) next to the probe URL. Never overwrites ("wx"); any failure leaves the
+ * run untouched -- the row then simply gets no record.
+ */
+export function captureBookingEvidence(sink: BookingCaptureRef[], artifactDir: string, x: { slug: string; checkin: string; checkout: string; collectedAtJst: string; probeUrl: string; signals: BookingRenderedDomSignals }): void {
+  try {
+    const pc = x.signals.primaryPriceCandidate;
+    const cap = buildBookingCapture({ propertySlug: x.slug, checkin: x.checkin, checkout: x.checkout, collectedAtJst: x.collectedAtJst,
+      probeUrlSanitized: sanitizeBookingUrl(x.probeUrl), finalUrlSanitized: sanitizeBookingUrl(x.signals.finalUrl),
+      primaryPrice: pc === null ? null : { rawText: pc.rawText, numericValue: pc.numericValue, blockGuess: pc.blockGuess, roleGuess: pc.roleGuess, contextBeforeAfter: pc.contextBeforeAfter },
+      originalPriceNumeric: x.signals.originalPriceNumeric, priceDiscountDetected: x.signals.priceDiscountDetected,
+      primaryRoomName: x.signals.primaryRoomName, primaryRoomCardText: x.signals.primaryRoomCardText, bodyText: x.signals.bodyText });
+    const capturePath = join(artifactDir, BOOKING_CAPTURE_FILE);
+    writeFileSync(capturePath, `${JSON.stringify(cap)}\n`, { encoding: "utf8", flag: "wx" });
+    sink.push({ propertySlug: x.slug, checkin: x.checkin, collectedAtJst: x.collectedAtJst, capturePath });
+  } catch { /* evidence is optional: no capture, no record */ }
 }
 
-/** Jalan: the collector's own classification decision JSON for this target (hash-bound). */
-export function buildJalanEvidence(row: RowIdentity, decisionPath: string, runId: string, readBytes: (p: string) => Buffer | null): EvidenceRecord | { rejected: string } {
-  const bytes = readBytes(decisionPath);
-  if (bytes === null) return { rejected: "DECISION_ARTIFACT_MISSING" };
-  let j: { target?: Record<string, unknown>; pageResult?: Record<string, unknown>; row?: Record<string, unknown>; candidate?: Record<string, unknown> };
-  try { j = JSON.parse(bytes.toString("utf8")) as typeof j; } catch { return { rejected: "DECISION_ARTIFACT_UNPARSEABLE" }; }
-  const r = j.row ?? {}; const p = j.pageResult ?? {}; const cand = j.candidate ?? {};
+/** Re-derives every Booking field from the capture alone. */
+export function deriveBookingFields(cap: BookingSelectedCardCapture): EvidenceFields {
+  const qp = (url: string, k: string): string | null => { try { return new URL(url).searchParams.get(k); } catch { return null; } };
+  const sp = cap.selected_price;
+  // The selected price is CONFIRMED only when its raw text parses to the recorded value AND that raw text is present in
+  // its own captured context AND it is a main-room-card (not related-property) candidate.
+  const priceOk = sp !== null && sp.block_guess === "main_room_card" && yen(sp.raw_text) === sp.numeric_value && sp.context.includes(sp.raw_text);
+  const nameOk = cap.room_card.name !== "" && cap.room_card.text.includes(cap.room_card.name);
+  const refundNo = priceOk && REFUND_NO.test(sp!.context); const refundYes = priceOk && REFUND_YES.test(sp!.context);
+  return {
+    request_checkin: qp(cap.probe_url_sanitized, "checkin") === cap.checkin ? f("CONFIRMED", cap.checkin, "REQUEST_PARAMETER", "capture.probe_url_sanitized?checkin") : u("REQUEST_CHECKIN_MISMATCH"),
+    request_checkout: qp(cap.probe_url_sanitized, "checkout") === cap.checkout ? f("CONFIRMED", cap.checkout, "REQUEST_PARAMETER", "capture.probe_url_sanitized?checkout") : u("REQUEST_CHECKOUT_MISMATCH"),
+    request_adults: qp(cap.probe_url_sanitized, "group_adults") !== null ? f("CONFIRMED", Number(qp(cap.probe_url_sanitized, "group_adults")), "REQUEST_PARAMETER", "capture.probe_url_sanitized?group_adults") : u("REQUEST_ADULTS_ABSENT"),
+    displayed_checkin: cap.displayed_spans.checkin !== null && DATE_SPAN(cap.checkin).test(cap.displayed_spans.checkin) ? f("CONFIRMED", cap.displayed_spans.checkin, "SOURCE_TEXT_MARKER", "capture.displayed_spans.checkin") : u("CHECKIN_NOT_DISPLAYED_IN_PAGE_TEXT"),
+    displayed_adults: cap.displayed_spans.adults !== null && ADULTS_SPAN.test(cap.displayed_spans.adults) ? f("CONFIRMED", cap.displayed_spans.adults, "SOURCE_TEXT_MARKER", "capture.displayed_spans.adults") : u("ADULTS_NOT_DISPLAYED_IN_PAGE_TEXT"),
+    displayed_one_night: cap.displayed_spans.nights !== null && NIGHTS_SPAN.test(cap.displayed_spans.nights) ? f("CONFIRMED", cap.displayed_spans.nights, "SOURCE_TEXT_MARKER", "capture.displayed_spans.nights") : u("ONE_NIGHT_NOT_DISPLAYED_IN_PAGE_TEXT"),
+    room_name: nameOk ? f("CONFIRMED", cap.room_card.name, "SOURCE_PARSED_FIELD", "capture.room_card.name in capture.room_card.text") : u("SELECTED_ROOM_NAME_NOT_PROVEN"),
+    price_jpy: priceOk ? f("CONFIRMED", sp!.numeric_value, "SOURCE_PARSED_FIELD", "capture.selected_price.raw_text in capture.selected_price.context") : u("SELECTED_MAIN_CARD_PRICE_NOT_PROVEN"),
+    selected_rate_plan: u("BOOKING_RATE_PLAN_NOT_IDENTIFIED_BY_COLLECTOR"),
+    tax_basis: priceOk ? f("GUESS", guessTaxBasis(sp!.context), "SOURCE_TEXT_MARKER", "capture.selected_price.context") : u("SELECTED_MAIN_CARD_PRICE_NOT_PROVEN"),
+    meal_room_only: u("BOOKING_MEAL_NOT_PARSED_BY_COLLECTOR"),
+    // A marker in the ±context of the selected price is not bound to the selected RATE PLAN -> POSSIBLE at most.
+    refundable: refundNo !== refundYes ? f("POSSIBLE", refundYes, "SOURCE_TEXT_MARKER", "capture.selected_price.context") : u(refundNo && refundYes ? "AMBIGUOUS_REFUND_MARKERS" : "NO_REFUND_MARKER_NEAR_SELECTED_PRICE"),
+    // The original/effective pairing is chosen from the eligible candidate set, not proven same-room -> GUESS.
+    promotion: priceOk && cap.price_discount_detected && cap.original_price_numeric !== null ? f("GUESS", { adjusted: true as const, original_jpy: cap.original_price_numeric }, "SOURCE_TEXT_MARKER", "capture.original_price_numeric") : u("NO_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE"),
+    own_k27_t04: u(cap.property_slug === K27_T04_REFERENCE.ownSlug ? "SELECTED_ROOM_ID_AND_RATE_PLAN_NOT_EXPOSED_BY_COLLECTOR" : "NOT_OWN_PROPERTY")
+  };
+}
+
+// ------------------------------------------------------------------------------------------------- Jalan decision
+type JalanDecision = { target?: Record<string, unknown>; pageResult?: Record<string, unknown>; row?: Record<string, unknown>; candidate?: Record<string, unknown> };
+export function deriveJalanFields(j: JalanDecision): EvidenceFields {
+  const r = j.row ?? {}; const p = j.pageResult ?? {};
   const s = (o: Record<string, unknown>, k: string): string | null => typeof o[k] === "string" && o[k] !== "" ? o[k] as string : null;
   const n = (o: Record<string, unknown>, k: string): number | null => typeof o[k] === "number" && Number.isFinite(o[k]) ? o[k] as number : null;
-  if (s(r, "source_slug_or_code") !== row.sourceSlugOrCode || s(r, "checkin") !== row.checkin || s(r, "checkout") !== row.checkout) return { rejected: "ROW_IDENTITY_MISMATCH" };
   const served = s(p, "final_url") ?? "";
   const qp = (k: string): string | null => { try { return new URL(served).searchParams.get(k); } catch { return null; } };
   const servedCheckin = qp("stayYear") === null ? null : `${qp("stayYear")}-${(qp("stayMonth") ?? "").padStart(2, "0")}-${(qp("stayDay") ?? "").padStart(2, "0")}`;
   const total = n(p, "price_total_tax_included");
   const meal = s(r, "meal_condition");
-  return sealRecord({
-    schema: MARKET_EVIDENCE_SIDECAR_SCHEMA, row_id: row.rowId, shard_month: row.shardMonth, source: "jalan", property_slug: row.sourceSlugOrCode,
-    checkin: row.checkin, checkout: row.checkout, observed_at: row.collectedAtJst, run_id: runId, selected_rate_plan: s(r, "plan_name"),
-    artifact: { path: decisionPath, sha256: sha256(bytes) }, excerpt: null,
-    fields: {
-      request_checkin: servedCheckin === row.checkin ? c(row.checkin, "REQUEST_PARAMETER", "pageResult.final_url?stayYear,stayMonth,stayDay") : u("SERVED_URL_CHECKIN_MISMATCH"),
-      request_checkout: qp("stayCount") === "1" && row.checkout !== "" ? c(row.checkout, "REQUEST_PARAMETER", "pageResult.final_url?stayCount") : u("SERVED_URL_STAYCOUNT_NOT_1"),
-      request_adults: qp("adultNum") !== null ? c(Number(qp("adultNum")), "REQUEST_PARAMETER", "pageResult.final_url?adultNum") : u("SERVED_URL_ADULTS_ABSENT"),
-      displayed_dates: u("JALAN_DISPLAYED_DATES_NOT_PARSED"), displayed_adults: u("JALAN_DISPLAYED_ADULTS_NOT_PARSED"), displayed_one_night: u("JALAN_DISPLAYED_NIGHTS_NOT_PARSED"),
-      room_name: s(r, "room_name") !== null ? c(s(r, "room_name")!, "SOURCE_PARSED_FIELD", "row.room_name") : u("NO_SELECTED_ROOM_NAME"),
-      price_jpy: total !== null && total === n(r, "normalized_total_price") ? c(total, "SOURCE_PARSED_FIELD", "pageResult.price_total_tax_included=row.normalized_total_price") : u("SELECTED_PRICE_ABSENT_OR_INCONSISTENT"),
-      tax_basis: total !== null && s(r, "normalized_total_price_source") === "jalan_visible_total_tax_included"
-        ? c("total_tax_included", "SOURCE_PARSED_FIELD", "pageResult.price_total_tax_included+row.normalized_total_price_source") : u("TAX_INCLUDED_TOTAL_NOT_PARSED"),
-      meal_room_only: meal === null ? u("MEAL_CONDITION_ABSENT") : c(["素泊まり", "食事なし", "食事無し"].includes(meal), "SOURCE_PARSED_FIELD", "row.meal_condition"),
-      refundable: u("CANCELLATION_TERMS_NOT_PARSED_BY_COLLECTOR"),
-      promotion: cand["selected_plan_coupon_or_discount_evidence"] === true
-        ? c({ adjusted: true as const, original_jpy: null }, "SOURCE_TEXT_MARKER", "candidate.selected_plan_coupon_or_discount_evidence")
-        : u("NO_SELECTED_PLAN_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE")
-    },
-    own_reference: null
-  });
-}
-
-export interface SidecarAppendResult { written: number; identical: number; conflicts: string[]; tamperedShards: string[]; files: string[] }
-
-/**
- * Append-only, idempotent, atomic: per shard, verify every existing line (seal + unique row_id); a shard that fails is
- * never touched (tamper -> fail closed). Same row_id + same content -> no-op; same row_id + different content ->
- * conflict, not written. New lines are written as (old bytes + new lines) to a temp file, fsynced, renamed; the old
- * bytes are re-checked as an exact prefix after the rename.
- */
-export function appendEvidenceSidecar(records: readonly EvidenceRecord[], dir: string): SidecarAppendResult {
-  const out: SidecarAppendResult = { written: 0, identical: 0, conflicts: [], tamperedShards: [], files: [] };
-  const byShard = new Map<string, EvidenceRecord[]>();
-  for (const r of records) byShard.set(evidenceShardName(r.checkin), [...(byShard.get(evidenceShardName(r.checkin)) ?? []), r]);
-  for (const [shard, recs] of [...byShard.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const path = join(dir, shard);
-    const old = existsSync(path) ? readFileSync(path) : Buffer.alloc(0);
-    const existing = new Map<string, string>(); let tampered = false;
-    for (const line of old.toString("utf8").split("\n")) {
-      if (line === "") continue;
-      try {
-        const r = JSON.parse(line) as EvidenceRecord;
-        if (r.schema !== MARKET_EVIDENCE_SIDECAR_SCHEMA || !recordSealOk(r) || existing.has(r.row_id)) { tampered = true; break; }
-        existing.set(r.row_id, r.record_sha256);
-      } catch { tampered = true; break; }
-    }
-    if (tampered || (old.length > 0 && old[old.length - 1] !== 0x0a)) { out.tamperedShards.push(shard); continue; }
-    const lines: string[] = [];
-    for (const r of recs) {
-      if (!recordSealOk(r)) { out.conflicts.push(`${r.row_id}:UNSEALED`); continue; }
-      const prev = existing.get(r.row_id);
-      if (prev === r.record_sha256) { out.identical += 1; continue; }
-      if (prev !== undefined) { out.conflicts.push(`${r.row_id}:CONTENT_DIFFERS`); continue; }
-      existing.set(r.row_id, r.record_sha256); lines.push(`${canonicalJson(r)}\n`);
-    }
-    if (lines.length === 0) continue;
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.tmp-${process.pid}`;
-    const fd = openSync(tmp, "wx");
-    try { writeSync(fd, old); writeSync(fd, lines.join("")); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, path);
-    const after = readFileSync(path);
-    if (!after.subarray(0, old.length).equals(old)) throw new Error(`EVIDENCE_SIDECAR_PREFIX_CHANGED(${shard})`);
-    out.written += lines.length; out.files.push(path);
+  const flags = (r["evidence_flags"] ?? null) as Record<string, unknown> | null;
+  const planDiscount = flags === null ? null : flags["selected_plan_coupon_or_discount_evidence"];
+  const plan = s(r, "plan_name");
+  // A sold-out / failed page has no selected product: its plan / room / meal / price / tax / discount are not evidence.
+  const avail = s(r, "availability_status") === "available" && s(p, "final_status") === "available";
+  const na = <T>(): EvidenceField<T> => u(`NOT_AVAILABLE(${s(r, "availability_status") ?? "unknown"})`);
+  if (!avail) {
+    return {
+      request_checkin: servedCheckin !== null && servedCheckin === s(r, "checkin") ? f("CONFIRMED", servedCheckin, "REQUEST_PARAMETER", "pageResult.final_url?stayYear,stayMonth,stayDay") : u("SERVED_URL_CHECKIN_MISMATCH"),
+      request_checkout: qp("stayCount") === "1" && s(r, "checkout") !== null ? f("CONFIRMED", s(r, "checkout")!, "REQUEST_PARAMETER", "pageResult.final_url?stayCount") : u("SERVED_URL_STAYCOUNT_NOT_1"),
+      request_adults: qp("adultNum") !== null ? f("CONFIRMED", Number(qp("adultNum")), "REQUEST_PARAMETER", "pageResult.final_url?adultNum") : u("SERVED_URL_ADULTS_ABSENT"),
+      displayed_checkin: u("JALAN_DISPLAYED_DATES_NOT_PARSED"), displayed_adults: u("JALAN_DISPLAYED_ADULTS_NOT_PARSED"), displayed_one_night: u("JALAN_DISPLAYED_NIGHTS_NOT_PARSED"),
+      room_name: na(), price_jpy: na(), selected_rate_plan: na(), tax_basis: na(), meal_room_only: na(), refundable: na(), promotion: na(), own_k27_t04: u("NOT_OWN_PROPERTY")
+    };
   }
-  return out;
+  return {
+    request_checkin: servedCheckin !== null && servedCheckin === s(r, "checkin") ? f("CONFIRMED", servedCheckin, "REQUEST_PARAMETER", "pageResult.final_url?stayYear,stayMonth,stayDay") : u("SERVED_URL_CHECKIN_MISMATCH"),
+    request_checkout: qp("stayCount") === "1" && s(r, "checkout") !== null ? f("CONFIRMED", s(r, "checkout")!, "REQUEST_PARAMETER", "pageResult.final_url?stayCount") : u("SERVED_URL_STAYCOUNT_NOT_1"),
+    request_adults: qp("adultNum") !== null ? f("CONFIRMED", Number(qp("adultNum")), "REQUEST_PARAMETER", "pageResult.final_url?adultNum") : u("SERVED_URL_ADULTS_ABSENT"),
+    displayed_checkin: u("JALAN_DISPLAYED_DATES_NOT_PARSED"), displayed_adults: u("JALAN_DISPLAYED_ADULTS_NOT_PARSED"), displayed_one_night: u("JALAN_DISPLAYED_NIGHTS_NOT_PARSED"),
+    room_name: s(r, "room_name") !== null ? f("CONFIRMED", s(r, "room_name")!, "SOURCE_PARSED_FIELD", "row.room_name") : u("NO_SELECTED_ROOM_NAME"),
+    price_jpy: total !== null && total === n(r, "normalized_total_price") ? f("CONFIRMED", total, "SOURCE_PARSED_FIELD", "pageResult.price_total_tax_included=row.normalized_total_price") : u("SELECTED_PRICE_ABSENT_OR_INCONSISTENT"),
+    selected_rate_plan: plan !== null ? f("CONFIRMED", plan, "SOURCE_PARSED_FIELD", "row.plan_name") : u("NO_SELECTED_PLAN_NAME"),
+    tax_basis: total !== null && s(r, "normalized_total_price_source") === "jalan_visible_total_tax_included"
+      ? f("CONFIRMED", "total_tax_included", "SOURCE_PARSED_FIELD", "pageResult.price_total_tax_included+row.normalized_total_price_source") : u("TAX_INCLUDED_TOTAL_NOT_PARSED"),
+    meal_room_only: meal === null ? u("MEAL_CONDITION_ABSENT") : f("CONFIRMED", ["素泊まり", "食事なし", "食事無し"].includes(meal), "SOURCE_PARSED_FIELD", "row.meal_condition"),
+    refundable: u("CANCELLATION_TERMS_NOT_PARSED_BY_COLLECTOR"),
+    // Serialized by the collector at row.evidence_flags; the page-chrome coupon flag is never a plan discount.
+    promotion: planDiscount === true ? f("CONFIRMED", { adjusted: true as const, original_jpy: null }, "SOURCE_TEXT_MARKER", "row.evidence_flags.selected_plan_coupon_or_discount_evidence")
+      : u(planDiscount === false ? "NO_SELECTED_PLAN_DISCOUNT_MARKER_IS_NOT_PROOF_OF_NONE" : "EVIDENCE_FLAGS_ABSENT"),
+    own_k27_t04: u("NOT_OWN_PROPERTY")
+  };
 }
 
-/** Re-verify a stored record against its artifact bytes (hash) -- a well-formed hash string is not proof. */
-export function verifyEvidenceArtifact(r: EvidenceRecord, readBytes: (p: string) => Buffer | null): string[] {
+// ------------------------------------------------------------------------------------------------- guarded reads
+/** Reads an artifact only under an allowlisted root, never through a symlink, never above the byte limit. */
+export function guardedReader(roots: readonly string[], maxBytes = EVIDENCE_ARTIFACT_MAX_BYTES): (path: string) => Buffer | null {
+  const allowed = roots.map((r) => { try { return realpathSync(resolve(r)); } catch { return resolve(r); } });
+  return (path: string): Buffer | null => {
+    try {
+      if (path === "" || !existsSync(path)) return null;
+      const st = lstatSync(path);
+      if (st.isSymbolicLink() || !st.isFile() || st.size <= 0 || st.size > maxBytes) return null;
+      const real = realpathSync(path);
+      if (!allowed.some((r) => real.startsWith(`${r}/`))) return null;
+      return readFileSync(real);
+    } catch { return null; }
+  };
+}
+
+// ------------------------------------------------------------------------------------------------- build + verify
+export type BuildResult = EvidenceRecord | { rejected: string };
+const rowPart = (row: AcceptedRow, source: "booking" | "jalan"): EvidenceRecord["row"] => ({ row_id: row.rowId, row_hash: row.rowHash, shard_month: row.shardMonth, source,
+  property_slug: row.sourceSlugOrCode, checkin: row.checkin, checkout: row.checkout, collected_at_jst: row.collectedAtJst, normalized_total_price: row.normalizedTotalPrice,
+  source_primary_price: row.sourcePrimaryPrice, price_excluded_from_dp: row.isPriceExcludedFromDp });
+/** The accepted canonical row's prices must both agree with the proven source price (normalized may be blank = excluded). */
+const acceptedPriceAgrees = (row: AcceptedRow, proven: number | null): boolean =>
+  row.sourcePrimaryPrice === proven && (row.normalizedTotalPrice === null || row.normalizedTotalPrice === proven);
+
+export function buildBookingRecord(row: AcceptedRow, capturePath: string, runId: string, read: (p: string) => Buffer | null): BuildResult {
+  const bytes = read(capturePath);
+  if (bytes === null) return { rejected: "CAPTURE_MISSING_OR_NOT_ALLOWED" };
+  let cap: BookingSelectedCardCapture;
+  try { cap = JSON.parse(bytes.toString("utf8")) as BookingSelectedCardCapture; } catch { return { rejected: "CAPTURE_UNPARSEABLE" }; }
+  if (cap.capture_schema !== BOOKING_CAPTURE_SCHEMA) return { rejected: "CAPTURE_SCHEMA" };
+  if (cap.property_slug !== row.sourceSlugOrCode || cap.checkin !== row.checkin || cap.checkout !== row.checkout || cap.collected_at_jst !== row.collectedAtJst) return { rejected: "ROW_IDENTITY_MISMATCH" };
+  const fields = deriveBookingFields(cap);
+  // The accepted canonical price must be exactly the proven selected price.
+  if (fields.price_jpy.state !== "CONFIRMED" || !acceptedPriceAgrees(row, fields.price_jpy.value)) return { rejected: "ACCEPTED_PRICE_NOT_PROVEN_BY_CAPTURE" };
+  return sealRecord({ schema: MARKET_EVIDENCE_EXPORT_SCHEMA, record_kind: "booking_selected_card", row: rowPart(row, "booking"), run_id: runId,
+    artifact: { path: capturePath, sha256: sha256(bytes), kind: BOOKING_CAPTURE_SCHEMA }, fields });
+}
+
+export function buildJalanRecord(row: AcceptedRow, decisionPath: string, runId: string, read: (p: string) => Buffer | null): BuildResult {
+  const bytes = read(decisionPath);
+  if (bytes === null) return { rejected: "DECISION_MISSING_OR_NOT_ALLOWED" };
+  let j: JalanDecision;
+  try { j = JSON.parse(bytes.toString("utf8")) as JalanDecision; } catch { return { rejected: "DECISION_UNPARSEABLE" }; }
+  const r = j.row ?? {};
+  if (r["source_slug_or_code"] !== row.sourceSlugOrCode || r["checkin"] !== row.checkin || r["checkout"] !== row.checkout || r["collected_at_jst"] !== row.collectedAtJst) return { rejected: "ROW_IDENTITY_MISMATCH" };
+  const decided = typeof r["normalized_total_price"] === "number" ? r["normalized_total_price"] as number : null;
+  if (!acceptedPriceAgrees(row, decided)) return { rejected: "ACCEPTED_PRICE_MISMATCH" };
+  return sealRecord({ schema: MARKET_EVIDENCE_EXPORT_SCHEMA, record_kind: "jalan_decision", row: rowPart(row, "jalan"), run_id: runId,
+    artifact: { path: decisionPath, sha256: sha256(bytes), kind: "jalan_classification_decision" }, fields: deriveJalanFields(j) });
+}
+
+/** Full verification: seal, artifact bytes + hash, and EVERY field re-derived from those bytes. */
+export function verifyEvidenceRecord(rec: EvidenceRecord, read: (p: string) => Buffer | null): string[] {
+  if (rec.schema !== MARKET_EVIDENCE_EXPORT_SCHEMA) return ["SCHEMA"];
   const p: string[] = [];
-  if (!recordSealOk(r)) p.push("RECORD_SEAL_MISMATCH");
-  if (r.artifact !== null) { const b = readBytes(r.artifact.path); if (b === null) p.push("ARTIFACT_MISSING"); else if (sha256(b) !== r.artifact.sha256) p.push("ARTIFACT_HASH_MISMATCH"); }
-  if (r.excerpt !== null && sha256(r.excerpt.text) !== r.excerpt.sha256) p.push("EXCERPT_HASH_MISMATCH");
+  if (!recordSealOk(rec)) p.push("RECORD_SEAL_MISMATCH");
+  const bytes = read(rec.artifact.path);
+  if (bytes === null) return [...p, "ARTIFACT_MISSING_OR_NOT_ALLOWED"];
+  if (sha256(bytes) !== rec.artifact.sha256) return [...p, "ARTIFACT_HASH_MISMATCH"];
+  let again: EvidenceFields;
+  try {
+    const raw = JSON.parse(bytes.toString("utf8")) as unknown;
+    again = rec.record_kind === "booking_selected_card" ? deriveBookingFields(raw as BookingSelectedCardCapture) : deriveJalanFields(raw as JalanDecision);
+  } catch { return [...p, "ARTIFACT_UNPARSEABLE"]; }
+  for (const k of Object.keys(again) as Array<keyof EvidenceFields>) if (canonicalJson(rec.fields[k]) !== canonicalJson(again[k])) p.push(`FIELD_MISMATCH(${k})`);
+  if (Object.keys(rec.fields).length !== Object.keys(again).length) p.push("FIELD_SET_MISMATCH");
+  return p;
+}
+
+/** Strict structural contract of this export (what a downstream translator may rely on). */
+export function exportContractProblems(rec: unknown): string[] {
+  const p: string[] = [];
+  const r = rec as Partial<EvidenceRecord> & Record<string, unknown>;
+  if (r === null || typeof r !== "object") return ["NOT_OBJECT"];
+  if ((r.schema as string | undefined) === PRIVATE_K27_SIDECAR_SCHEMA) return ["PRIVATE_K27_SIDECAR_SCHEMA_IS_NOT_THIS_EXPORT"];
+  if ((r.schema as string | undefined) !== MARKET_EVIDENCE_EXPORT_SCHEMA) return [`SCHEMA(${String(r.schema)})`];
+  const keys = ["schema", "record_kind", "row", "run_id", "artifact", "fields", "record_sha256"];
+  if (canonicalJson(Object.keys(r).sort()) !== canonicalJson([...keys].sort())) p.push("TOP_LEVEL_KEYS");
+  const fieldKeys = ["request_checkin", "request_checkout", "request_adults", "displayed_checkin", "displayed_adults", "displayed_one_night", "room_name", "price_jpy",
+    "selected_rate_plan", "tax_basis", "meal_room_only", "refundable", "promotion", "own_k27_t04"];
+  if (r.fields === undefined || canonicalJson(Object.keys(r.fields).sort()) !== canonicalJson([...fieldKeys].sort())) p.push("FIELD_KEYS");
+  for (const [k, v] of Object.entries(r.fields ?? {})) {
+    const e = v as { state?: string; kind?: string };
+    if (!["CONFIRMED", "GUESS", "POSSIBLE", "UNKNOWN"].includes(e.state ?? "")) p.push(`STATE(${k})`);
+    if (e.state !== "UNKNOWN" && !["SOURCE_PARSED_FIELD", "SOURCE_TEXT_MARKER", "REQUEST_PARAMETER"].includes(e.kind ?? "")) p.push(`KIND(${k})`);
+  }
+  if (r.record_sha256 !== undefined && !recordSealOk(r as EvidenceRecord)) p.push("RECORD_SEAL_MISMATCH");
   return p;
 }
 
 /**
- * Builds records for the rows the history append ACCEPTED (approved rows only), matching each row to the in-memory
- * evidence of the same (source, slug, checkin). Unmatched / mismatched rows get no record (reported).
+ * Builds records only for ACCEPTED rows. A Booking row must have exactly ONE capture for (slug, checkin, collectedAt);
+ * zero or several are rejected (ambiguous), never guessed.
  */
 export function buildEvidenceForAcceptedRows(input: {
-  acceptedRows: ReadonlyArray<RowIdentity & { source: string; debugArtifactPath: string }>;
-  booking: readonly BookingEvidenceInput[]; runId: string; readBytes: (p: string) => Buffer | null;
+  acceptedRows: readonly AcceptedRow[]; bookingCaptures: ReadonlyArray<{ propertySlug: string; checkin: string; collectedAtJst: string; capturePath: string }>;
+  runId: string; read: (p: string) => Buffer | null;
 }): { records: EvidenceRecord[]; rejected: string[] } {
   const records: EvidenceRecord[] = []; const rejected: string[] = [];
-  const bookingByKey = new Map(input.booking.map((b) => [`${b.propertySlug}|${b.checkin}`, b]));
   for (const row of input.acceptedRows) {
-    let r: EvidenceRecord | { rejected: string };
+    let r: BuildResult;
     if (row.source === "booking") {
-      const e = bookingByKey.get(`${row.sourceSlugOrCode}|${row.checkin}`);
-      r = e === undefined ? { rejected: "NO_IN_MEMORY_BOOKING_EVIDENCE" } : buildBookingEvidence(row, e, input.runId, input.readBytes);
-    } else if (row.source === "jalan") r = buildJalanEvidence(row, row.debugArtifactPath, input.runId, input.readBytes);
+      const hits = input.bookingCaptures.filter((c) => c.propertySlug === row.sourceSlugOrCode && c.checkin === row.checkin && c.collectedAtJst === row.collectedAtJst);
+      r = hits.length !== 1 ? { rejected: hits.length === 0 ? "NO_CAPTURE_FOR_ROW" : `AMBIGUOUS_CAPTURES(${hits.length})` } : buildBookingRecord(row, hits[0]!.capturePath, input.runId, input.read);
+    } else if (row.source === "jalan") r = buildJalanRecord(row, row.debugArtifactPath, input.runId, input.read);
     else r = { rejected: "UNSUPPORTED_SOURCE" };
     if ("rejected" in r) rejected.push(`${row.rowId}:${r.rejected}`); else records.push(r);
   }
   return { records, rejected };
+}
+
+// ------------------------------------------------------------------------------------------------- append
+export interface SidecarAppendResult { written: number; identical: number; conflicts: string[]; tamperedShards: string[]; lockedShards: string[]; files: string[] }
+
+/**
+ * Append-only, idempotent, atomic, single writer per shard. Per shard: take an exclusive lock file (O_EXCL; held ->
+ * that shard is skipped and reported, never waited on or stolen); remove this shard's orphaned temp files; verify every
+ * existing line (seal, schema, unique row_id) -- a failing shard is never touched; same row_id + same content -> no-op;
+ * same row_id + different content -> conflict, not written; write (old bytes + new lines) to a fresh temp file, fsync,
+ * rename, fsync the directory, and re-check the old bytes as an exact prefix.
+ */
+export function appendEvidenceSidecar(records: readonly EvidenceRecord[], dir: string): SidecarAppendResult {
+  const out: SidecarAppendResult = { written: 0, identical: 0, conflicts: [], tamperedShards: [], lockedShards: [], files: [] };
+  const byShard = new Map<string, EvidenceRecord[]>();
+  for (const r of records) byShard.set(evidenceShardName(r.row.checkin), [...(byShard.get(evidenceShardName(r.row.checkin)) ?? []), r]);
+  if (byShard.size > 0) mkdirSync(dir, { recursive: true });
+  for (const [shard, recs] of [...byShard.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const path = join(dir, shard); const lock = `${path}.lock`;
+    let lockFd: number;
+    try { lockFd = openSync(lock, "wx"); } catch { out.lockedShards.push(shard); continue; }
+    try {
+      writeSync(lockFd, `${process.pid} ${new Date().toISOString()}\n`); fsyncSync(lockFd);
+      for (const t of readdirSync(dir)) if (t.startsWith(`${shard}.tmp-`)) unlinkSync(join(dir, t));
+      const old = existsSync(path) ? readFileSync(path) : Buffer.alloc(0);
+      const existing = new Map<string, string>(); let tampered = old.length > 0 && old[old.length - 1] !== 0x0a;
+      for (const line of tampered ? [] : old.toString("utf8").split("\n")) {
+        if (line === "") continue;
+        try {
+          const r = JSON.parse(line) as EvidenceRecord;
+          if (r.schema !== MARKET_EVIDENCE_EXPORT_SCHEMA || !recordSealOk(r) || existing.has(r.row.row_id)) { tampered = true; break; }
+          existing.set(r.row.row_id, r.record_sha256);
+        } catch { tampered = true; break; }
+      }
+      if (tampered) { out.tamperedShards.push(shard); continue; }
+      const lines: string[] = [];
+      for (const r of recs) {
+        if (!recordSealOk(r)) { out.conflicts.push(`${r.row.row_id}:UNSEALED`); continue; }
+        const prev = existing.get(r.row.row_id);
+        if (prev === r.record_sha256) { out.identical += 1; continue; }
+        if (prev !== undefined) { out.conflicts.push(`${r.row.row_id}:CONTENT_DIFFERS`); continue; }
+        existing.set(r.row.row_id, r.record_sha256); lines.push(`${canonicalJson(r)}\n`);
+      }
+      if (lines.length === 0) continue;
+      const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+      const fd = openSync(tmp, "wx");
+      try { writeSync(fd, old); writeSync(fd, lines.join("")); fsyncSync(fd); } finally { closeSync(fd); }
+      renameSync(tmp, path);
+      const dfd = openSync(dirname(path), "r"); try { fsyncSync(dfd); } catch { /* directory fsync unsupported */ } finally { closeSync(dfd); }
+      const after = readFileSync(path);
+      if (!after.subarray(0, old.length).equals(old)) throw new Error(`EVIDENCE_SIDECAR_PREFIX_CHANGED(${basename(path)})`);
+      out.written += lines.length; out.files.push(path);
+    } finally { closeSync(lockFd); unlinkSync(lock); }
+  }
+  return out;
+}
+
+/** Run-level outcome: OK only when every accepted row produced a verified record and nothing was refused. */
+export function evidenceExportStatus(acceptedRows: number, built: { records: EvidenceRecord[]; rejected: string[] }, res: SidecarAppendResult): "OK" | "PARTIAL_EVIDENCE_DEGRADED" {
+  const complete = built.rejected.length === 0 && built.records.length === acceptedRows;
+  const clean = res.conflicts.length === 0 && res.tamperedShards.length === 0 && res.lockedShards.length === 0;
+  return complete && clean ? "OK" : "PARTIAL_EVIDENCE_DEGRADED";
 }

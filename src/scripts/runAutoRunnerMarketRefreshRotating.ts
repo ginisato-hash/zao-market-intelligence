@@ -21,7 +21,8 @@ import {
 } from "../services/bookingRenderedDomProbe";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
-  MARKET_EVIDENCE_SIDECAR_DIR, appendEvidenceSidecar, buildEvidenceForAcceptedRows, isEvidenceSidecarEnabled, type BookingEvidenceInput
+  MARKET_EVIDENCE_SIDECAR_DIR, appendEvidenceSidecar, buildEvidenceForAcceptedRows, captureBookingEvidence, evidenceExportStatus, guardedReader,
+  isEvidenceSidecarEnabled, type BookingCaptureRef
 } from "../services/marketEvidenceSidecar";
 import {
   appendHistoryRowsAtomic,
@@ -168,7 +169,7 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingEvidenceInput[]): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[]): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
@@ -202,7 +203,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
       // Evidence sidecar (ZMI_EVIDENCE_SIDECAR_ENABLED=1 only): keep what this extractor already parsed -- no new request.
-      if (evidenceSink !== undefined) evidenceSink.push(bookingEvidenceInput(t.property_slug, t.checkin, checkout, sanitizeBookingUrl(probeUrl), join(artifactDir, "probe_url_sanitized.txt"), signals));
+      if (evidenceSink !== undefined) captureBookingEvidence(evidenceSink, artifactDir, { slug: t.property_slug, checkin: t.checkin, checkout, collectedAtJst, probeUrl, signals });
 
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
@@ -221,24 +222,15 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
   return rows;
 }
 
-function bookingEvidenceInput(slug: string, checkin: string, checkout: string, probeUrl: string, probeArtifactPath: string, signals: ReturnType<typeof analyzeBookingRenderedDomSignals>): BookingEvidenceInput {
-  const pc = signals.primaryPriceCandidate;
-  return { propertySlug: slug, checkin, checkout, probeUrl, probeArtifactPath,
-    checkinDetected: signals.checkinDetected, checkoutDetected: signals.checkoutDetected, adultCountDetected: signals.adultCountDetected, nightCountDetected: signals.nightCountDetected,
-    primaryPrice: pc === null ? null : { numericValue: pc.numericValue, candidateTypeGuess: pc.candidateTypeGuess, blockGuess: pc.blockGuess, contextBeforeAfter: pc.contextBeforeAfter },
-    originalPriceNumeric: signals.originalPriceNumeric, priceDiscountDetected: signals.priceDiscountDetected,
-    primaryRoomName: signals.primaryRoomName, primaryRoomCardText: signals.primaryRoomCardText, selectedRoomId: null };
-}
-
 /** Sidecar export after an ACCEPTED history append. Never throws into the run: a failure is reported, history is untouched. */
-function exportEvidenceSidecar(acceptedRows: ReadonlyArray<{ rowId: string; shardMonth: string; checkin: string; checkout: string; collectedAtJst: string; sourceSlugOrCode: string; source: string; debugArtifactPath: string }>,
-  booking: readonly BookingEvidenceInput[], runId: string): Record<string, unknown> {
+function exportEvidenceSidecar(acceptedRows: ReadonlyArray<{ rowId: string; rowHash: string; shardMonth: string; checkin: string; checkout: string; collectedAtJst: string; sourceSlugOrCode: string; source: string; debugArtifactPath: string; normalizedTotalPrice: number | null; sourcePrimaryPrice: number | null; isPriceExcludedFromDp: boolean }>,
+  bookingCaptures: readonly BookingCaptureRef[], runId: string): Record<string, unknown> {
   try {
-    const readBytes = (p: string): Buffer | null => { try { return existsSync(p) ? readFileSync(p) : null; } catch { return null; } };
-    const built = buildEvidenceForAcceptedRows({ acceptedRows, booking, runId, readBytes });
+    const read = guardedReader([DEBUG_ROOT]);
+    const built = buildEvidenceForAcceptedRows({ acceptedRows, bookingCaptures, runId, read });
     const res = appendEvidenceSidecar(built.records, MARKET_EVIDENCE_SIDECAR_DIR);
-    return { status: res.conflicts.length === 0 && res.tamperedShards.length === 0 ? "OK" : "PARTIAL_FAIL_CLOSED", accepted_rows: acceptedRows.length,
-      records_built: built.records.length, written: res.written, identical: res.identical, conflicts: res.conflicts, tampered_shards: res.tamperedShards, rejected: built.rejected };
+    return { status: evidenceExportStatus(acceptedRows.length, built, res), accepted_rows: acceptedRows.length, records_built: built.records.length,
+      written: res.written, identical: res.identical, conflicts: res.conflicts, tampered_shards: res.tamperedShards, locked_shards: res.lockedShards, rejected: built.rejected };
   } catch (caught) { return { status: "ERROR_NO_EFFECT_ON_HISTORY", error: caught instanceof Error ? caught.message : String(caught) }; }
 }
 
@@ -264,7 +256,7 @@ async function run(): Promise<void> {
   if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const evidenceOn = isEvidenceSidecarEnabled(env);
-  const bookingEvidence: BookingEvidenceInput[] = [];
+  const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
