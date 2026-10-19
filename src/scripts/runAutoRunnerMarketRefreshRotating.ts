@@ -348,7 +348,7 @@ async function run(): Promise<void> {
       rowsAppended = r.rows_written;
       if (evidenceOn) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
       const after = readState();
-      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows) });
+      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows), EXPECTED_MAX_INSERT_ROWS: String(r.rows_written) });
       dbSynced = sync.status === 0 && Number(sync.parsed["db_after_count"]) === after.history_rows;
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {

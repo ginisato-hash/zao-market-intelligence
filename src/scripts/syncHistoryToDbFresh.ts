@@ -53,6 +53,7 @@ function main(): void {
     debugPath,
     historyToDbSyncGate: process.env["HISTORY_TO_DB_SYNC"],
     expectedHistoryRowCount: process.env["EXPECTED_HISTORY_ROW_COUNT"],
+    expectedMaxInsertRows: process.env["EXPECTED_MAX_INSERT_ROWS"],
     sourceAutoRunner07bArtifact: SOURCE_AUTO_RUNNER07B_ARTIFACT
   });
 
@@ -60,6 +61,7 @@ function main(): void {
   console.log(`history_count=${report.history_summary.row_count}`);
   console.log(`mapped_row_count=${report.fresh_mapping_summary.mapped_row_count}`);
   console.log(`conflicts=${report.fresh_mapping_summary.would_conflict_rows}`);
+  console.log(`gate_reasons=${report.gate_result.reasons.join(";")}`);
   console.log(`db_write_executed=${report.sync_result.db_write_executed}`);
   console.log(`inserted_rows=${report.sync_result.inserted_rows}`);
   console.log(`skipped_identical_rows=${report.sync_result.skipped_identical_rows}`);

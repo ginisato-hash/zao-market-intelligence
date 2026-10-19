@@ -47,6 +47,9 @@ export interface FreshHistoryToDbSyncOptions {
   debugPath: string;
   historyToDbSyncGate: string | undefined;
   expectedHistoryRowCount: string | undefined;
+  // Upper bound on rows this run may INSERT (the caller's own append count).
+  // Required whenever the write gate is on; see evaluateFreshSyncGate.
+  expectedMaxInsertRows?: string | undefined;
   sourceAutoRunner07bArtifact: string;
 }
 
@@ -91,6 +94,9 @@ export interface GateResult {
   env_flag_present: boolean;
   expected_history_row_count: number | null;
   expected_history_row_count_matches: boolean;
+  max_insert_rows: number | null;
+  would_insert_rows: number;
+  db_only_row_count: number;
   reasons: string[];
 }
 
@@ -167,9 +173,12 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     preflightConflicts: preflight.conflicts.length,
     sourceDuplicateConflictCount: sourceDuplicateConflicts.length
   });
+  const historyRowIds = new Set(mappedRows.map((row) => row.row_id));
   const gate = evaluateFreshSyncGate({
     envFlag: options.historyToDbSyncGate,
     expectedHistoryRowCount: options.expectedHistoryRowCount,
+    expectedMaxInsertRows: options.expectedMaxInsertRows,
+    dbOnlyRowCount: existingRows.filter((row) => !historyRowIds.has(row.row_id)).length,
     historyCount: history.loadedRows.length,
     mapping: freshMappingSummary,
     duplicateRowIdCount: sourceDuplicateConflicts.length,
@@ -279,6 +288,8 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
 export function evaluateFreshSyncGate(input: {
   envFlag: string | undefined;
   expectedHistoryRowCount: string | undefined;
+  expectedMaxInsertRows: string | undefined;
+  dbOnlyRowCount: number;
   historyCount: number;
   mapping: FreshMappingSummary;
   duplicateRowIdCount: number;
@@ -287,18 +298,30 @@ export function evaluateFreshSyncGate(input: {
   const reasons: string[] = [];
   const expected = input.expectedHistoryRowCount === undefined || input.expectedHistoryRowCount === "" ? null : Number(input.expectedHistoryRowCount);
   const expectedMatches = expected === null ? true : Number.isInteger(expected) && expected === input.historyCount;
+  const maxInsert = input.expectedMaxInsertRows === undefined || input.expectedMaxInsertRows === "" ? null : Number(input.expectedMaxInsertRows);
+  const wouldInsert = input.mapping.would_insert_rows;
   if (input.historyCount === 0) reasons.push("history row count is 0");
   if (input.duplicateRowIdCount > 0) reasons.push("duplicate row_id in history");
   if (!input.schemaValid) reasons.push("history schema invalid");
   if (!input.mapping.mapped_count_matches_history) reasons.push("mapped row count does not match history row count");
   if (input.mapping.would_conflict_rows > 0) reasons.push("fresh mapping has DB row_hash conflicts");
   if (!expectedMatches) reasons.push("EXPECTED_HISTORY_ROW_COUNT does not match current history count");
+  // Mirror-alignment guards: stop BEFORE any DB mutation when the DB is not an
+  // exact subset of history, or when this run would insert more rows than the
+  // caller says it appended (a hidden catch-up needs its own approval).
+  if (input.dbOnlyRowCount > 0) reasons.push(`DB has ${input.dbOnlyRowCount} row_ids absent from history; approved mirror reconciliation required`);
+  if (input.envFlag === "1" && maxInsert === null) reasons.push("EXPECTED_MAX_INSERT_ROWS not set; write gate requires an explicit insert bound");
+  if (maxInsert !== null && !(Number.isInteger(maxInsert) && maxInsert >= 0)) reasons.push("EXPECTED_MAX_INSERT_ROWS is not a non-negative integer");
+  else if (maxInsert !== null && wouldInsert > maxInsert) reasons.push(`would insert ${wouldInsert} rows > EXPECTED_MAX_INSERT_ROWS ${maxInsert}`);
   if (input.envFlag !== "1") reasons.push("HISTORY_TO_DB_SYNC env flag is not 1");
   return {
     passed: reasons.length === 0,
     env_flag_present: input.envFlag === "1",
     expected_history_row_count: expected,
     expected_history_row_count_matches: expectedMatches,
+    max_insert_rows: maxInsert,
+    would_insert_rows: wouldInsert,
+    db_only_row_count: input.dbOnlyRowCount,
     reasons
   };
 }

@@ -30,7 +30,8 @@ function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "fresh-db-sync-"));
 }
 
-function runHelper(root: string, options: { rows?: Array<Record<string, string>>; dbPath?: string; gate?: string; expected?: string } = {}): FreshHistoryToDbSyncReport {
+// maxInsert defaults to a generous bound; pass null to omit EXPECTED_MAX_INSERT_ROWS.
+function runHelper(root: string, options: { rows?: Array<Record<string, string>>; dbPath?: string; gate?: string; expected?: string; maxInsert?: string | null } = {}): FreshHistoryToDbSyncReport {
   const historyDir = join(root, "history");
   writeHistory(historyDir, options.rows ?? [historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")]);
   return runFreshHistoryToDbSync({
@@ -44,6 +45,7 @@ function runHelper(root: string, options: { rows?: Array<Record<string, string>>
     debugPath: join(root, "debug"),
     historyToDbSyncGate: options.gate,
     expectedHistoryRowCount: options.expected,
+    expectedMaxInsertRows: options.maxInsert === null ? undefined : (options.maxInsert ?? "1000"),
     sourceAutoRunner07bArtifact: join(root, "auto07b.json")
   });
 }
@@ -222,6 +224,48 @@ describe("fresh history-to-DB sync helper", () => {
     expect(report.sync_result.skipped_identical_rows).toBe(1);
   });
 
+  it("write gate fails closed without EXPECTED_MAX_INSERT_ROWS", () => {
+    const root = tempRoot();
+    const dbPath = join(root, "test.sqlite");
+    const report = runHelper(root, { dbPath, gate: "1", maxInsert: null });
+    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
+    expect(report.gate_result.reasons).toContain("EXPECTED_MAX_INSERT_ROWS not set; write gate requires an explicit insert bound");
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(report.db_after_summary.market_signal_history_count).toBe(0);
+  });
+
+  it("stops before writing when the insert would exceed the caller's append count", () => {
+    // DB behind history by 2 rows, caller appended 1: a hidden catch-up, not this run's append.
+    const root = tempRoot();
+    const dbPath = join(root, "test.sqlite");
+    const report = runHelper(root, { dbPath, gate: "1", maxInsert: "1" });
+    expect(report.gate_result.would_insert_rows).toBe(2);
+    expect(report.gate_result.reasons).toContain("would insert 2 rows > EXPECTED_MAX_INSERT_ROWS 1");
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(report.db_after_summary.market_signal_history_count).toBe(0);
+  });
+
+  it("allows an insert exactly equal to the caller's append count", () => {
+    const root = tempRoot();
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
+    const report = runHelper(root, { dbPath, gate: "1", maxInsert: "1" });
+    expect(report.decision).toBe("fresh_history_to_db_sync_success");
+    expect(report.sync_result.inserted_rows).toBe(1);
+  });
+
+  it("stops before writing when the DB holds row_ids absent from history", () => {
+    const root = tempRoot();
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, [mappedRow("row_1", "hash_1"), mappedRow("rolled_back_row", "hash_x")]);
+    const report = runHelper(root, { dbPath, gate: "1", maxInsert: "1000" });
+    expect(report.gate_result.db_only_row_count).toBe(1);
+    expect(report.gate_result.reasons).toContain("DB has 1 row_ids absent from history; approved mirror reconciliation required");
+    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(report.db_after_summary.market_signal_history_count).toBe(2);
+  });
+
   it("hash conflict stops and does not overwrite", () => {
     const root = tempRoot();
     const dbPath = join(root, "test.sqlite");
@@ -278,7 +322,16 @@ describe("fresh history-to-DB sync helper", () => {
 
   it("decision labels are valid", () => {
     expect(VALID_DECISIONS).toContain(runHelper(tempRoot()).decision);
-    expect(evaluateFreshSyncGate({ envFlag: "1", expectedHistoryRowCount: "2", historyCount: 2, mapping: runHelper(tempRoot()).fresh_mapping_summary, duplicateRowIdCount: 0, schemaValid: true }).passed).toBe(true);
+    expect(evaluateFreshSyncGate({ envFlag: "1", expectedHistoryRowCount: "2", expectedMaxInsertRows: "2", dbOnlyRowCount: 0, historyCount: 2, mapping: runHelper(tempRoot()).fresh_mapping_summary, duplicateRowIdCount: 0, schemaValid: true }).passed).toBe(true);
+  });
+
+  it("every live caller bounds the insert with its own append count", () => {
+    for (const script of ["runAutoRunnerMarketRefreshRotating.ts", "runAutoRunnerMarketRefresh.ts"]) {
+      const src = readFileSync(resolve(__dirname, "../src/scripts", script), "utf8");
+      const call = src.slice(src.indexOf('"sync:history-to-db:fresh"'), src.indexOf('"sync:history-to-db:fresh"') + 300);
+      expect(call).toContain('HISTORY_TO_DB_SYNC: "1"');
+      expect(call).toMatch(/EXPECTED_MAX_INSERT_ROWS: String\((r|appendResult\?)\.rows_written/u);
+    }
   });
 
   it("package contains sync script", () => {

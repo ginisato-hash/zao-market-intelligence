@@ -474,7 +474,8 @@ async function run(): Promise<RunnerOutput> {
   if (appendResult !== null || (gate.live_mode_authorized && stateAfterAppend.history_rows !== stateAfterAppend.db_rows)) {
     dbSyncResult = runCommand("npm", ["run", "sync:history-to-db:fresh"], {
       HISTORY_TO_DB_SYNC: "1",
-      EXPECTED_HISTORY_ROW_COUNT: String(stateAfterAppend.history_rows)
+      EXPECTED_HISTORY_ROW_COUNT: String(stateAfterAppend.history_rows),
+      EXPECTED_MAX_INSERT_ROWS: String(appendResult?.rows_written ?? 0)
     });
     if (dbSyncResult.status === 0 && Number(dbSyncResult.parsed["db_after_count"]) === stateAfterAppend.history_rows) {
       aiContextResult = runCommand("npm", ["run", "build:ai-context-packs"]);
