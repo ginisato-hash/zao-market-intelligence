@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 import { chromium } from "playwright";
 import {
   appendHistoryRowsAtomic,
@@ -220,7 +221,7 @@ function readHistoryInventory(): { total: number; sources: Record<string, number
   const keys: ExistingHistoryKey[] = [];
   let total = 0;
   for (const file of files) {
-    const lines = readFileSync(join(HISTORY_DIR, file), "utf8").split(/\r?\n/u).filter((line) => line.length > 0);
+    const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, file), "utf8"));
     const headers = parseCsvLine(lines[0] ?? "");
     const rowIdIdx = headers.indexOf("row_id");
     const rowHashIdx = headers.indexOf("row_hash");

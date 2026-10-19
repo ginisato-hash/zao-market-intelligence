@@ -13,6 +13,7 @@
 import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 import { chromium } from "playwright";
 import {
   analyzeBookingRenderedDomSignals,
@@ -187,7 +188,7 @@ function readState(): StateSummary {
   let history = 0; const ids = new Map<string, number>();
   if (existsSync(HISTORY_DIR)) {
     for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-      const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
+      const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, f), "utf8"));
       const h = parseCsvLine(lines[0] ?? ""); const ri = h.indexOf("row_id");
       for (const line of lines.slice(1)) { history += 1; const id = parseCsvLine(line)[ri] ?? ""; ids.set(id, (ids.get(id) ?? 0) + 1); }
     }
@@ -206,7 +207,7 @@ function readLastCollectedAt(): Map<string, string> {
   const map = new Map<string, string>();
   if (!existsSync(HISTORY_DIR)) return map;
   for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
+    const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, f), "utf8"));
     if (lines.length < 2) continue;
     const h = parseCsvLine(lines[0]!);
     const si = h.indexOf("source"); const slugI = h.indexOf("source_slug_or_code"); const ci = h.indexOf("checkin"); const atI = h.indexOf("collected_at_jst");

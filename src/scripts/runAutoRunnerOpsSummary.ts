@@ -10,6 +10,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 import {
   EXPECTED_BASELINE_ROW_COUNT,
   EXPECTED_LAUNCHD_JOBS,
@@ -78,7 +79,7 @@ function readCounts(): OpsCounts {
   const sources: Record<string, number> = {};
   if (existsSync(HISTORY_DIR)) {
     for (const f of readdirSync(HISTORY_DIR).filter((n) => /^zao_signals_.*\.csv$/u.test(n))) {
-      const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
+      const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, f), "utf8"));
       const headers = parseCsvLine(lines[0] ?? "");
       const rowIdIdx = headers.indexOf("row_id");
       const sourceIdx = headers.indexOf("source");

@@ -16,6 +16,7 @@
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 import { pathToFileURL } from "node:url";
 import { liveTargets } from "../services/marketRefreshTargetUniverse";
 import {
@@ -84,7 +85,7 @@ function readHistoryLastCollected(): { map: Map<string, string>; latest: string;
   const map = new Map<string, string>();
   let latest = ""; let rows = 0;
   for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x)).sort()) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
+    const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, f), "utf8"));
     if (lines.length < 2) continue;
     const h = parseCsvLine(lines[0]!);
     const si = h.indexOf("source"); const slugI = h.indexOf("source_slug_or_code"); const ci = h.indexOf("checkin"); const atI = h.indexOf("collected_at_jst");
