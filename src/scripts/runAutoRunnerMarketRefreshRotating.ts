@@ -19,6 +19,7 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
+import { isVerifiedSyncOutput, writeSyncPermit } from "../services/freshHistoryToDbSync";
 import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
@@ -348,15 +349,21 @@ async function run(): Promise<void> {
       rowsAppended = r.rows_written;
       if (evidenceOn) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
       const after = readState();
-      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows), EXPECTED_MAX_INSERT_ROWS: String(r.rows_written) });
-      dbSynced = sync.status === 0 && Number(sync.parsed["db_after_count"]) === after.history_rows;
+      const permitPath = resolve(debugPath, "history_to_db_sync_permit.json");
+      writeSyncPermit(permitPath, runId, appendPlan.approved_rows.map((row) => row.rowId));
+      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows), HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
+      dbSynced = isVerifiedSyncOutput(sync.status, sync.parsed, after.history_rows);
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {
-      dbSynced = true; aiContextRefreshed = true; // no-change run
+      // No-change run: nothing to write, but "synced" still needs a read-only
+      // exact-mirror check (gate off) rather than being assumed.
+      const check = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "" });
+      dbSynced = check.status === 0 && String(check.parsed["mirror_exact_match"] ?? "") === "true" && Number(check.parsed["history_count"]) === preflight.history_rows;
+      aiContextRefreshed = dbSynced;
     }
 
     const post = readState();
-    const aligned = post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
+    const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";
 
     // Publish only when gated AND aligned AND gh available.

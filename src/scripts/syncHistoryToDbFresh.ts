@@ -7,7 +7,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { DEFAULT_LOCAL_DB_PATH } from "../db/client";
-import { runFreshHistoryToDbSync } from "../services/freshHistoryToDbSync";
+import { runFreshHistoryToDbSync, SYNC_WRITE_OK_DECISIONS } from "../services/freshHistoryToDbSync";
 
 const SOURCE_AUTO_RUNNER07B_ARTIFACT = ".data/reports/automation/auto_runner_fresh_db_sync_proposal_20260605_162934.json";
 const REPORT_DIR = ".data/reports/automation";
@@ -53,7 +53,7 @@ function main(): void {
     debugPath,
     historyToDbSyncGate: process.env["HISTORY_TO_DB_SYNC"],
     expectedHistoryRowCount: process.env["EXPECTED_HISTORY_ROW_COUNT"],
-    expectedMaxInsertRows: process.env["EXPECTED_MAX_INSERT_ROWS"],
+    syncPermitPath: process.env["HISTORY_TO_DB_SYNC_PERMIT_PATH"],
     sourceAutoRunner07bArtifact: SOURCE_AUTO_RUNNER07B_ARTIFACT
   });
 
@@ -61,7 +61,9 @@ function main(): void {
   console.log(`history_count=${report.history_summary.row_count}`);
   console.log(`mapped_row_count=${report.fresh_mapping_summary.mapped_row_count}`);
   console.log(`conflicts=${report.fresh_mapping_summary.would_conflict_rows}`);
-  console.log(`gate_reasons=${report.gate_result.reasons.join(";")}`);
+  console.log(`gate_passed=${report.gate_result.passed}`);
+  console.log(`gate_reasons=${[...report.gate_result.reasons, ...report.gate_result.point_of_use_reasons].join(";")}`);
+  console.log(`mirror_exact_match=${report.mirror_exact_match}`);
   console.log(`db_write_executed=${report.sync_result.db_write_executed}`);
   console.log(`inserted_rows=${report.sync_result.inserted_rows}`);
   console.log(`skipped_identical_rows=${report.sync_result.skipped_identical_rows}`);
@@ -72,6 +74,13 @@ function main(): void {
   console.log(`json_path=${report.json_path}`);
   console.log(`csv_path=${report.csv_path}`);
   console.log(`debug_artifact_path=${report.debug_artifact_path}`);
+  // A write request (HISTORY_TO_DB_SYNC=1) exits non-zero unless the helper
+  // reached an explicit success/noop with an exact mirror. Read-only runs
+  // (gate off) keep exit 0.
+  if (process.env["HISTORY_TO_DB_SYNC"] === "1" && !((SYNC_WRITE_OK_DECISIONS as readonly string[]).includes(report.decision) && report.mirror_exact_match)) {
+    console.log("sync_write_refused=true");
+    process.exitCode = 2;
+  }
 }
 
 main();

@@ -4,6 +4,7 @@
 // run. It writes the DB only when HISTORY_TO_DB_SYNC=1 is supplied by the caller.
 
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { closeDatabase, openLocalDatabase } from "../db/client";
@@ -27,6 +28,19 @@ import {
   type PostSyncValidation,
   type RealSyncResult
 } from "./historyToDbSyncRealRun";
+import { MAX_TOTAL_LIVE_PAGES } from "./autoRunnerMarketRefresh";
+import { MAX_MULTIPLIER, scaleCap } from "./crawlVolumeConfig";
+import { ROTATING_CAPS } from "./rotatingCollectionScopePlanner";
+
+// A natural run may only mirror rows it appended itself, and never more than
+// one run's page cap at the maximum crawl multiplier (rotating 24x5, 09:00 live
+// 30x5). Anything larger is a backfill and needs a separately approved recovery
+// path; there is no such path in this helper.
+export const SYNC_PERMIT_MAX_ROWS = Math.max(
+  scaleCap(ROTATING_CAPS.total_pages_per_run, MAX_MULTIPLIER),
+  scaleCap(MAX_TOTAL_LIVE_PAGES, MAX_MULTIPLIER)
+);
+export const SYNC_WRITE_OK_DECISIONS: readonly FreshHistoryToDbSyncDecision[] = ["fresh_history_to_db_sync_success", "fresh_history_to_db_sync_noop"];
 
 export type FreshHistoryToDbSyncDecision =
   | "fresh_history_to_db_sync_ready_not_run"
@@ -47,10 +61,13 @@ export interface FreshHistoryToDbSyncOptions {
   debugPath: string;
   historyToDbSyncGate: string | undefined;
   expectedHistoryRowCount: string | undefined;
-  // Upper bound on rows this run may INSERT (the caller's own append count).
-  // Required whenever the write gate is on; see evaluateFreshSyncGate.
-  expectedMaxInsertRows?: string | undefined;
+  // JSON {run_id, row_ids} written by the caller: the row_ids it appended in
+  // this run. Required whenever the write gate is on; see evaluateFreshSyncGate.
+  syncPermitPath?: string | undefined;
   sourceAutoRunner07bArtifact: string;
+  // Fault-injection seam for tests only: runs after the gate is evaluated and
+  // before the writer connection is opened.
+  testHooks?: { afterGateEvaluated?: () => void } | undefined;
 }
 
 export interface HistorySummary {
@@ -94,10 +111,14 @@ export interface GateResult {
   env_flag_present: boolean;
   expected_history_row_count: number | null;
   expected_history_row_count_matches: boolean;
-  max_insert_rows: number | null;
+  permit_row_count: number | null;
+  permit_max_rows: number;
   would_insert_rows: number;
+  unpermitted_insert_rows: number;
   db_only_row_count: number;
   reasons: string[];
+  // Reasons found when the gate was re-evaluated under the DB write lock.
+  point_of_use_reasons: string[];
 }
 
 export interface SyncResultSummary {
@@ -126,6 +147,8 @@ export interface FreshHistoryToDbSyncReport {
   db_before_summary: DbSummary;
   fresh_mapping_summary: FreshMappingSummary;
   gate_result: GateResult;
+  // DB row_id->row_hash set equals history exactly (read after the run).
+  mirror_exact_match: boolean;
   sync_result: SyncResultSummary;
   db_after_summary: DbSummary;
   post_sync_validation: PostSyncValidation | null;
@@ -145,6 +168,7 @@ interface LoadedHistory {
   headersByFile: { path: string; headers: string[] }[];
   rowsByFile: Record<string, number>;
   mtimesBefore: Record<string, number>;
+  contentDigest: string;
 }
 
 export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): FreshHistoryToDbSyncReport {
@@ -173,16 +197,19 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     preflightConflicts: preflight.conflicts.length,
     sourceDuplicateConflictCount: sourceDuplicateConflicts.length
   });
-  const historyRowIds = new Set(mappedRows.map((row) => row.row_id));
-  const gate = evaluateFreshSyncGate({
+  const permit = readSyncPermit(options.syncPermitPath);
+  const gateInput = {
     envFlag: options.historyToDbSyncGate,
     expectedHistoryRowCount: options.expectedHistoryRowCount,
-    expectedMaxInsertRows: options.expectedMaxInsertRows,
-    dbOnlyRowCount: existingRows.filter((row) => !historyRowIds.has(row.row_id)).length,
-    historyCount: history.loadedRows.length,
-    mapping: freshMappingSummary,
+    permit,
     duplicateRowIdCount: sourceDuplicateConflicts.length,
     schemaValid: requiredColumnCheck.passed
+  };
+  const gate = evaluateFreshSyncGate({
+    ...gateInput,
+    invariants: evaluateMirrorInvariants(mappedRows, new Map(existingRows.map((row) => [row.row_id, row.row_hash])), permit),
+    historyCount: history.loadedRows.length,
+    mapping: freshMappingSummary
   });
 
   let decision: FreshHistoryToDbSyncDecision = "fresh_history_to_db_sync_ready_not_run";
@@ -199,34 +226,65 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
   } else if (!gate.passed) {
     decision = "fresh_history_to_db_sync_ready_not_run";
   } else {
+    options.testHooks?.afterGateEvaluated?.();
     const db = openLocalDatabase(options.dbPath);
     try {
-      collectorBaselineBefore = readCollectorBaseline(db);
-      schemaPreflight = ensureMirrorSchema(db);
-      syncResult = applyRealSync({
-        db,
-        runId: options.runId,
-        generatedAtJst: options.generatedAtJst,
-        reportPath: options.reportPath,
-        sourceHistoryFiles: history.files,
-        rows: mappedRows
+      // Shared writer protocol: both natural callers (rotating, 09:00 live) go
+      // through this helper. BEGIN IMMEDIATE takes SQLite's cross-process write
+      // lock (released on crash); busy_timeout 0 makes a held lock a refusal.
+      // Under the lock the gate is re-evaluated on fresh history bytes and a
+      // fresh DB read BEFORE any DDL, sync_run record or INSERT.
+      db.pragma("busy_timeout = 0");
+      const write = db.transaction(() => {
+        const freshReasons: string[] = [];
+        if (historyContentDigest(options.historyDir) !== history.contentDigest) freshReasons.push("history changed between gate evaluation and write");
+        const fresh = evaluateFreshSyncGate({ ...gateInput, invariants: evaluateMirrorInvariants(mappedRows, readDbHashes(db), permit), historyCount: history.loadedRows.length, mapping: freshMappingSummary });
+        freshReasons.push(...fresh.reasons);
+        if (fresh.would_insert_rows !== gate.would_insert_rows) freshReasons.push(`insert set changed since gate (${gate.would_insert_rows} -> ${fresh.would_insert_rows})`);
+        if (freshReasons.length > 0) throw new SyncRefusedAtPointOfUse(freshReasons);
+        collectorBaselineBefore = readCollectorBaseline(db);
+        const schema = ensureMirrorSchema(db);
+        const result = applyRealSync({
+          db,
+          runId: options.runId,
+          generatedAtJst: options.generatedAtJst,
+          reportPath: options.reportPath,
+          sourceHistoryFiles: history.files,
+          rows: mappedRows
+        });
+        const validation = validatePostSync({
+          db,
+          sourceRows: mappedRows,
+          syncRunId: result.sync_run_record.sync_run_id,
+          collectorBaselineBefore,
+          historyMtimesUnchanged: historyMtimesUnchanged(history.mtimesBefore)
+        });
+        // Roll the whole write back unless the mirror is exact afterwards.
+        if (result.conflict_rows > 0 || !validation.passed || !mirrorExactMatch(mappedRows, readDbHashes(db))) throw new PostSyncValidationFailed(validation, result, schema);
+        return { schema, result, validation };
       });
-      syncActions = syncResult.actions;
-      postSyncValidation = validatePostSync({
-        db,
-        sourceRows: mappedRows,
-        syncRunId: syncResult.sync_run_record.sync_run_id,
-        collectorBaselineBefore,
-        historyMtimesUnchanged: historyMtimesUnchanged(history.mtimesBefore)
-      });
-      if (syncResult.conflict_rows > 0) {
-        decision = "fresh_history_to_db_sync_conflict";
-      } else if (!postSyncValidation.passed) {
-        decision = "fresh_history_to_db_sync_failed";
-      } else if (syncResult.inserted_rows === 0 && syncResult.skipped_identical_rows === mappedRows.length) {
-        decision = "fresh_history_to_db_sync_noop";
-      } else {
-        decision = "fresh_history_to_db_sync_success";
+      try {
+        const done = write.immediate();
+        schemaPreflight = done.schema;
+        syncResult = done.result;
+        syncActions = done.result.actions;
+        postSyncValidation = done.validation;
+        decision = done.result.inserted_rows === 0 && done.result.skipped_identical_rows === mappedRows.length ? "fresh_history_to_db_sync_noop" : "fresh_history_to_db_sync_success";
+      } catch (error) {
+        if (error instanceof SyncRefusedAtPointOfUse) {
+          gate.passed = false;
+          gate.point_of_use_reasons = error.reasons;
+          decision = "fresh_history_to_db_sync_ready_not_run";
+        } else if (error instanceof PostSyncValidationFailed) {
+          postSyncValidation = error.validation;
+          decision = error.result.conflict_rows > 0 ? "fresh_history_to_db_sync_conflict" : "fresh_history_to_db_sync_failed";
+        } else if ((error as { code?: string }).code === "SQLITE_BUSY") {
+          gate.passed = false;
+          gate.point_of_use_reasons = ["DB write lock held by another writer"];
+          decision = "fresh_history_to_db_sync_ready_not_run";
+        } else {
+          throw error;
+        }
       }
     } finally {
       closeDatabase(db);
@@ -260,6 +318,7 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     db_before_summary: dbBefore,
     fresh_mapping_summary: freshMappingSummary,
     gate_result: gate,
+    mirror_exact_match: mirrorExactMatch(mappedRows, readDbHashesReadOnly(options.dbPath)),
     sync_result: syncSummary,
     db_after_summary: dbAfter,
     post_sync_validation: postSyncValidation,
@@ -288,8 +347,8 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
 export function evaluateFreshSyncGate(input: {
   envFlag: string | undefined;
   expectedHistoryRowCount: string | undefined;
-  expectedMaxInsertRows: string | undefined;
-  dbOnlyRowCount: number;
+  permit: SyncPermit;
+  invariants: ReturnType<typeof evaluateMirrorInvariants>;
   historyCount: number;
   mapping: FreshMappingSummary;
   duplicateRowIdCount: number;
@@ -298,32 +357,48 @@ export function evaluateFreshSyncGate(input: {
   const reasons: string[] = [];
   const expected = input.expectedHistoryRowCount === undefined || input.expectedHistoryRowCount === "" ? null : Number(input.expectedHistoryRowCount);
   const expectedMatches = expected === null ? true : Number.isInteger(expected) && expected === input.historyCount;
-  const maxInsert = input.expectedMaxInsertRows === undefined || input.expectedMaxInsertRows === "" ? null : Number(input.expectedMaxInsertRows);
-  const wouldInsert = input.mapping.would_insert_rows;
+  const inv = input.invariants;
+  const permitRows = input.permit.rowIds === null ? null : input.permit.rowIds.size;
   if (input.historyCount === 0) reasons.push("history row count is 0");
   if (input.duplicateRowIdCount > 0) reasons.push("duplicate row_id in history");
   if (!input.schemaValid) reasons.push("history schema invalid");
   if (!input.mapping.mapped_count_matches_history) reasons.push("mapped row count does not match history row count");
-  if (input.mapping.would_conflict_rows > 0) reasons.push("fresh mapping has DB row_hash conflicts");
+  if (inv.conflictRows > 0) reasons.push("fresh mapping has DB row_hash conflicts");
   if (!expectedMatches) reasons.push("EXPECTED_HISTORY_ROW_COUNT does not match current history count");
   // Mirror-alignment guards: stop BEFORE any DB mutation when the DB is not an
-  // exact subset of history, or when this run would insert more rows than the
-  // caller says it appended (a hidden catch-up needs its own approval).
-  if (input.dbOnlyRowCount > 0) reasons.push(`DB has ${input.dbOnlyRowCount} row_ids absent from history; approved mirror reconciliation required`);
-  if (input.envFlag === "1" && maxInsert === null) reasons.push("EXPECTED_MAX_INSERT_ROWS not set; write gate requires an explicit insert bound");
-  if (maxInsert !== null && !(Number.isInteger(maxInsert) && maxInsert >= 0)) reasons.push("EXPECTED_MAX_INSERT_ROWS is not a non-negative integer");
-  else if (maxInsert !== null && wouldInsert > maxInsert) reasons.push(`would insert ${wouldInsert} rows > EXPECTED_MAX_INSERT_ROWS ${maxInsert}`);
+  // exact subset of history, or when this run would insert any row it did not
+  // append itself (a backfill needs its own approved recovery path).
+  if (inv.dbOnlyRowCount > 0) reasons.push(`DB has ${inv.dbOnlyRowCount} row_ids absent from history; approved mirror reconciliation required`);
+  if (input.envFlag === "1" && input.permit.rowIds === null && input.permit.error === null) reasons.push("HISTORY_TO_DB_SYNC_PERMIT_PATH not set; writes require this run's appended row_ids");
+  if (input.permit.error !== null) reasons.push(input.permit.error);
+  if (permitRows !== null && permitRows > SYNC_PERMIT_MAX_ROWS) reasons.push(`sync permit lists ${permitRows} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
+  if (inv.permitRowsNotInHistory > 0) reasons.push(`sync permit lists ${inv.permitRowsNotInHistory} row_ids absent from history`);
+  if (input.envFlag === "1" && inv.unpermittedInsertRows > 0) reasons.push(`would insert ${inv.unpermittedInsertRows} rows not appended by this run; backfill requires a separately approved recovery`);
   if (input.envFlag !== "1") reasons.push("HISTORY_TO_DB_SYNC env flag is not 1");
   return {
     passed: reasons.length === 0,
     env_flag_present: input.envFlag === "1",
     expected_history_row_count: expected,
     expected_history_row_count_matches: expectedMatches,
-    max_insert_rows: maxInsert,
-    would_insert_rows: wouldInsert,
-    db_only_row_count: input.dbOnlyRowCount,
-    reasons
+    permit_row_count: permitRows,
+    permit_max_rows: SYNC_PERMIT_MAX_ROWS,
+    would_insert_rows: inv.insertRowIds.length,
+    unpermitted_insert_rows: inv.unpermittedInsertRows,
+    db_only_row_count: inv.dbOnlyRowCount,
+    reasons,
+    point_of_use_reasons: []
   };
+}
+
+// Positive success protocol for callers: an explicit success/noop decision AND
+// an exact row_id/row_hash mirror AND the caller's own history count. Counts
+// alone, or a zero exit from a refused write, are never success.
+export function isVerifiedSyncOutput(status: number | null, parsed: Record<string, unknown>, historyRows: number): boolean {
+  return status === 0
+    && (SYNC_WRITE_OK_DECISIONS as readonly string[]).includes(String(parsed["decision"] ?? ""))
+    && String(parsed["mirror_exact_match"] ?? "") === "true"
+    && Number(parsed["history_count"]) === historyRows
+    && Number(parsed["db_after_count"]) === historyRows;
 }
 
 export function renderFreshHistoryToDbSyncReport(report: FreshHistoryToDbSyncReport): string {
@@ -407,13 +482,84 @@ function loadHistoryRows(historyDir: string): LoadedHistory {
   const rowsByFile: Record<string, number> = {};
   const mtimesBefore: Record<string, number> = {};
   for (const file of files) {
-    const table = parseCsvTable(readFileSync(resolve(file), "utf8"));
+    const text = readFileSync(resolve(file), "utf8");
+    const table = parseCsvTable(text);
     headersByFile.push({ path: file, headers: table.headers });
     rowsByFile[file] = table.rows.length;
     mtimesBefore[file] = statSync(resolve(file)).mtimeMs;
     for (const row of table.rows) loadedRows.push({ sourceFile: file, row: { ...row, __source_file: file } });
   }
-  return { files, loadedRows, headersByFile, rowsByFile, mtimesBefore };
+  return { files, loadedRows, headersByFile, rowsByFile, mtimesBefore, contentDigest: historyContentDigest(historyDir) };
+}
+
+// sha256 over the shard names and bytes; re-read under the write lock to prove
+// history did not change between gate evaluation and the first DB mutation.
+function historyContentDigest(historyDir: string): string {
+  const hash = createHash("sha256");
+  for (const name of readdirSync(resolve(historyDir)).filter((n) => /^zao_signals_\d{4}_\d{2}\.csv$/.test(n)).sort()) {
+    hash.update(name).update("\0").update(readFileSync(resolve(historyDir, name))).update("\0");
+  }
+  return hash.digest("hex");
+}
+
+interface SyncPermit { rowIds: Set<string> | null; error: string | null }
+
+export function readSyncPermit(path: string | undefined): SyncPermit {
+  if (path === undefined || path === "") return { rowIds: null, error: null };
+  try {
+    const parsed = JSON.parse(readFileSync(resolve(path), "utf8")) as { row_ids?: unknown };
+    if (!Array.isArray(parsed.row_ids) || !parsed.row_ids.every((id) => typeof id === "string" && id !== "")) return { rowIds: null, error: "sync permit has no valid row_ids array" };
+    const rowIds = new Set(parsed.row_ids as string[]);
+    if (rowIds.size !== parsed.row_ids.length) return { rowIds: null, error: "sync permit has duplicate row_ids" };
+    return { rowIds, error: null };
+  } catch {
+    return { rowIds: null, error: "sync permit unreadable" };
+  }
+}
+
+export function writeSyncPermit(path: string, runId: string, rowIds: readonly string[]): void {
+  mkdirSync(dirname(resolve(path)), { recursive: true });
+  writeFileSync(resolve(path), `${JSON.stringify({ run_id: runId, row_ids: rowIds }, null, 2)}\n`, "utf8");
+}
+
+// Mirror invariants of mapped history rows against a DB row_id->row_hash map.
+export function evaluateMirrorInvariants(mappedRows: readonly { row_id: string; row_hash: string }[], dbHashes: ReadonlyMap<string, string>, permit: SyncPermit): {
+  dbOnlyRowCount: number; conflictRows: number; insertRowIds: string[]; unpermittedInsertRows: number; permitRowsNotInHistory: number;
+} {
+  const historyIds = new Set(mappedRows.map((row) => row.row_id));
+  let conflictRows = 0; const insertRowIds: string[] = [];
+  for (const row of mappedRows) {
+    const existing = dbHashes.get(row.row_id);
+    if (existing === undefined) insertRowIds.push(row.row_id);
+    else if (existing !== row.row_hash) conflictRows += 1;
+  }
+  let dbOnlyRowCount = 0;
+  for (const id of dbHashes.keys()) if (!historyIds.has(id)) dbOnlyRowCount += 1;
+  const unpermittedInsertRows = permit.rowIds === null ? insertRowIds.length : insertRowIds.filter((id) => !permit.rowIds!.has(id)).length;
+  const permitRowsNotInHistory = permit.rowIds === null ? 0 : [...permit.rowIds].filter((id) => !historyIds.has(id)).length;
+  return { dbOnlyRowCount, conflictRows, insertRowIds, unpermittedInsertRows, permitRowsNotInHistory };
+}
+
+function readDbHashes(db: Database.Database): Map<string, string> {
+  if (!tableExists(db, "market_signal_history")) return new Map();
+  return new Map((db.prepare("SELECT row_id, row_hash FROM market_signal_history").all() as { row_id: string; row_hash: string }[]).map((r) => [r.row_id, r.row_hash]));
+}
+
+function readDbHashesReadOnly(dbPath: string): Map<string, string> {
+  if (!existsSync(resolve(dbPath))) return new Map();
+  const db = new Database(resolve(dbPath), { readonly: true, fileMustExist: true });
+  try { return readDbHashes(db); } finally { db.close(); }
+}
+
+function mirrorExactMatch(mappedRows: readonly { row_id: string; row_hash: string }[], dbHashes: ReadonlyMap<string, string>): boolean {
+  return dbHashes.size === mappedRows.length && mappedRows.every((row) => dbHashes.get(row.row_id) === row.row_hash);
+}
+
+class SyncRefusedAtPointOfUse extends Error {
+  constructor(readonly reasons: string[]) { super(reasons.join("; ")); }
+}
+class PostSyncValidationFailed extends Error {
+  constructor(readonly validation: PostSyncValidation, readonly result: RealSyncResult, readonly schema: DbSchemaPreflight) { super("post-sync validation failed"); }
 }
 
 function buildHistorySummary(

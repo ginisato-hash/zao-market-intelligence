@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { isVerifiedSyncOutput, writeSyncPermit } from "../services/freshHistoryToDbSync";
 import { splitCsvRecords } from "../services/historyCsvRecords";
 import { chromium } from "playwright";
 import {
@@ -472,19 +473,21 @@ async function run(): Promise<RunnerOutput> {
   let aiContextResult: RunnerOutput["ai_context_result"] = { skipped: true, reason: "db_sync_not_run" };
   const stateAfterAppend = readState();
   if (appendResult !== null || (gate.live_mode_authorized && stateAfterAppend.history_rows !== stateAfterAppend.db_rows)) {
+    const permitPath = resolve(debugPath, "history_to_db_sync_permit.json");
+    writeSyncPermit(permitPath, runId, appendResult === null ? [] : appendPlan.approved_rows.map((row) => row.rowId));
     dbSyncResult = runCommand("npm", ["run", "sync:history-to-db:fresh"], {
       HISTORY_TO_DB_SYNC: "1",
       EXPECTED_HISTORY_ROW_COUNT: String(stateAfterAppend.history_rows),
-      EXPECTED_MAX_INSERT_ROWS: String(appendResult?.rows_written ?? 0)
+      HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath
     });
-    if (dbSyncResult.status === 0 && Number(dbSyncResult.parsed["db_after_count"]) === stateAfterAppend.history_rows) {
+    if (isVerifiedSyncOutput(dbSyncResult.status, dbSyncResult.parsed, stateAfterAppend.history_rows)) {
       aiContextResult = runCommand("npm", ["run", "build:ai-context-packs"]);
     }
   }
 
   const postState = readState();
   const contextSucceeded = !("skipped" in aiContextResult) && aiContextResult.status === 0;
-  const dbSyncSucceeded = !("skipped" in dbSyncResult) && dbSyncResult.status === 0 && postState.db_rows === postState.history_rows;
+  const dbSyncSucceeded = !("skipped" in dbSyncResult) && isVerifiedSyncOutput(dbSyncResult.status, dbSyncResult.parsed, stateAfterAppend.history_rows) && postState.db_rows === postState.history_rows;
   const postCountsAligned = postState.history_rows === postState.db_rows && postState.db_rows === postState.ai_context_rows;
   const sourceCaution = !bookingSourceCheck.append_allowed || !jalanSourceCheck.append_allowed || appendPlan.rejected_rows.length > 0;
   const decision = decideMarketRefresh({
