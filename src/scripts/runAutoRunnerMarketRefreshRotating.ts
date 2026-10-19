@@ -21,6 +21,10 @@ import {
 } from "../services/bookingRenderedDomProbe";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
+  MARKET_EVIDENCE_SIDECAR_DIR, appendEvidenceSidecar, buildEvidenceForAcceptedRows, captureBookingEvidence, evidenceExportStatus, guardedReader,
+  isEvidenceSidecarEnabled, type BookingCaptureRef
+} from "../services/marketEvidenceSidecar";
+import {
   appendHistoryRowsAtomic,
   buildAppendPlan,
   buildBookingSourceLevelCheck,
@@ -165,7 +169,7 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[]): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
@@ -198,6 +202,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
+      // Evidence sidecar (ZMI_EVIDENCE_SIDECAR_ENABLED=1 only): keep what this extractor already parsed -- no new request.
+      if (evidenceSink !== undefined) captureBookingEvidence(evidenceSink, artifactDir, { slug: t.property_slug, checkin: t.checkin, checkout, collectedAtJst, probeUrl, signals });
 
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
@@ -214,6 +220,18 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
     }
   } finally { await context.close().catch(() => undefined); await browser.close().catch(() => undefined); }
   return rows;
+}
+
+/** Sidecar export after an ACCEPTED history append. Never throws into the run: a failure is reported, history is untouched. */
+function exportEvidenceSidecar(acceptedRows: ReadonlyArray<{ rowId: string; rowHash: string; shardMonth: string; checkin: string; checkout: string; collectedAtJst: string; sourceSlugOrCode: string; source: string; debugArtifactPath: string; normalizedTotalPrice: number | null; sourcePrimaryPrice: number | null; isPriceExcludedFromDp: boolean; availabilityStatus: string }>,
+  bookingCaptures: readonly BookingCaptureRef[], runId: string): Record<string, unknown> {
+  try {
+    const read = guardedReader([DEBUG_ROOT]);
+    const built = buildEvidenceForAcceptedRows({ acceptedRows, bookingCaptures, runId, read });
+    const res = appendEvidenceSidecar(built.records, MARKET_EVIDENCE_SIDECAR_DIR);
+    return { status: evidenceExportStatus(acceptedRows.length, built, res), accepted_rows: acceptedRows.length, records_built: built.records.length,
+      written: res.written, identical: res.identical, conflicts: res.conflicts, tampered_shards: res.tamperedShards, locked_shards: res.lockedShards, rejected: built.rejected };
+  } catch (caught) { return { status: "ERROR_NO_EFFECT_ON_HISTORY", error: caught instanceof Error ? caught.message : String(caught) }; }
 }
 
 function nextDay(iso: string): string {
@@ -237,6 +255,9 @@ async function run(): Promise<void> {
   const forced = resolveForcedCheckinDates(env);
   if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
+  const evidenceOn = isEvidenceSidecarEnabled(env);
+  const bookingEvidence: BookingCaptureRef[] = [];
+  let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
   const liveMode = !dryRun && liveGates && rotationEnabled;
@@ -305,7 +326,7 @@ async function run(): Promise<void> {
     liveExecuted = true;
     const bookingTargets = plan.selected.filter((t) => t.source === "booking");
     const jalanRotating = plan.selected.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso);
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const browser = await chromium.launch({ headless: true });
@@ -346,6 +367,7 @@ async function run(): Promise<void> {
     if (appendPlan.append_allowed && appendPlan.new_row_count > 0) {
       const r = appendHistoryRowsAtomic({ rows: appendPlan.approved_rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows });
       rowsAppended = r.rows_written;
+      if (evidenceOn) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
       const after = readState();
       const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows) });
       dbSynced = sync.status === 0 && Number(sync.parsed["db_after_count"]) === after.history_rows;
@@ -413,6 +435,7 @@ async function run(): Promise<void> {
     blocked_or_captcha_rejected_rows_count: sourceBlockReport.blocked_or_captcha_rejected_rows_count,
     pricing_output_generated: false, pms_output_generated: false,
     winter_sales_lane_enabled: winterLaneEnabled,
+    ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",
     winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,
     winter_lane_selected: plan.winter_lane.selected_count,

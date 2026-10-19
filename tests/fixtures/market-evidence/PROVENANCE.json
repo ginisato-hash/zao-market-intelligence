@@ -1,0 +1,59 @@
+{
+  "note": "Real collector-serialized Jalan classification decisions (probeJalanBoundedCollectionImproved). Structure and every key unchanged; only long free-text fields truncated, raw_json omitted, absolute paths made relative.",
+  "files": [
+    {
+      "fixture": "jalan_decision_no_plan_discount.json",
+      "source_basename": "20261015_060001/jalan/classification_decisions/yad325769_2027-02-20.json",
+      "source_sha256": "e279e694db8af223fcb90618714c7283e28598455ea8b0b7b6f7be0da4bddcb1",
+      "structure_keys": [
+        "target",
+        "pageResult",
+        "row",
+        "candidate"
+      ],
+      "row_evidence_flags": {
+        "tax_included_total_visible": true,
+        "date_condition_confirmed": true,
+        "stay_scope_confirmed": true,
+        "property_identity_confirmed": true,
+        "screenshot_saved": true,
+        "selected_plan_name_visible": true,
+        "room_name_visible": true,
+        "meal_condition_visible": true,
+        "selected_plan_coupon_or_discount_evidence": false,
+        "selected_plan_member_or_point_evidence": false,
+        "page_chrome_coupon_or_discount_evidence": true,
+        "page_chrome_member_or_point_evidence": false,
+        "suspicious_price_evidence": false,
+        "price_inferred": false
+      }
+    },
+    {
+      "fixture": "jalan_decision_plan_discount.json",
+      "source_basename": "20261018_020006/jalan/classification_decisions/yad309590_2026-11-13.json",
+      "source_sha256": "2c1fcbdea6b863bd14dd341a954006f0118556f6339d30e20bd212a70270348d",
+      "structure_keys": [
+        "target",
+        "pageResult",
+        "row",
+        "candidate"
+      ],
+      "row_evidence_flags": {
+        "tax_included_total_visible": true,
+        "date_condition_confirmed": true,
+        "stay_scope_confirmed": true,
+        "property_identity_confirmed": true,
+        "screenshot_saved": true,
+        "selected_plan_name_visible": true,
+        "room_name_visible": false,
+        "meal_condition_visible": true,
+        "selected_plan_coupon_or_discount_evidence": true,
+        "selected_plan_member_or_point_evidence": false,
+        "page_chrome_coupon_or_discount_evidence": false,
+        "page_chrome_member_or_point_evidence": false,
+        "suspicious_price_evidence": false,
+        "price_inferred": false
+      }
+    }
+  ]
+}

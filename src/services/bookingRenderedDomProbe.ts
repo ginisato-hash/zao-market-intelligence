@@ -593,7 +593,7 @@ function detectDate(text: string, iso: string): boolean {
   );
 }
 
-function guessPriceCandidateType(context: string): BookingPriceCandidate["candidateTypeGuess"] {
+export function guessPriceCandidateType(context: string): BookingPriceCandidate["candidateTypeGuess"] {
   if (/税・手数料込み|税込|税金・手数料込|込\s*消費税|taxes and fees included|includes taxes/iu.test(context)) return "total_tax_included";
   if (/税抜|税別|taxes excluded|excludes taxes/iu.test(context)) return "tax_excluded";
   if (/1泊|部屋|room|night/iu.test(context)) return "per_night_or_room";
