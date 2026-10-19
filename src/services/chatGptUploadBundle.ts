@@ -6,6 +6,7 @@
 // history, AI context, or emits pricing/PMS output.
 
 import { createHash } from "node:crypto";
+import { splitCsvRecords } from "./historyCsvRecords";
 
 export type UploadBundleDecision =
   | "chatgpt_upload_bundle_ready"
@@ -315,24 +316,4 @@ function parseCsvLine(line: string): string[] {
   return cells;
 }
 
-// Split CSV text into logical records. Newlines inside quoted fields are treated
-// as field content (not record boundaries), so quoted multi-line values count as
-// ONE row. Quote characters are preserved so parseCsvLine can re-parse each record.
-export function splitCsvRecords(content: string): string[] {
-  const records: string[] = [];
-  let cur = "";
-  let q = false;
-  for (let i = 0; i < content.length; i += 1) {
-    const ch = content[i];
-    if (ch === '"') { q = !q; cur += ch; continue; }
-    if ((ch === "\n" || ch === "\r") && !q) {
-      if (ch === "\r" && content[i + 1] === "\n") i += 1;
-      records.push(cur);
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  if (cur !== "") records.push(cur);
-  return records.filter((r) => r.length > 0);
-}
+export { splitCsvRecords };

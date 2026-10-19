@@ -9,7 +9,7 @@
 
 import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import {
@@ -19,6 +19,7 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
+import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
   MARKET_EVIDENCE_SIDECAR_DIR, appendEvidenceSidecar, buildEvidenceForAcceptedRows, captureBookingEvidence, evidenceExportStatus, guardedReader,
@@ -98,30 +99,13 @@ function jstParts(): { iso: string; date: string; hour: number } {
 }
 function writeJson(path: string, value: unknown): void { writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8"); }
 
-function parseCsvLine(line: string): string[] {
-  const cells: string[] = []; let cur = ""; let q = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"' && q && line[i + 1] === '"') { cur += '"'; i += 1; }
-    else if (ch === '"') q = !q;
-    else if (ch === "," && !q) { cells.push(cur); cur = ""; }
-    else cur += (ch ?? "");
-  }
-  cells.push(cur);
-  return cells;
-}
-
 // Most-recent collected_at per (source|slug|checkin) for 24h cooldown.
 function readLastCollectedAt(): Map<string, string> {
   const map = new Map<string, string>();
   if (!existsSync(HISTORY_DIR)) return map;
-  for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
-    if (lines.length < 2) continue;
-    const h = parseCsvLine(lines[0]!);
+  for (const { header: h, rows } of readHistoryShards(HISTORY_DIR)) {
     const si = h.indexOf("source"); const slugI = h.indexOf("source_slug_or_code"); const ci = h.indexOf("checkin"); const atI = h.indexOf("collected_at_jst");
-    for (const line of lines.slice(1)) {
-      const c = parseCsvLine(line);
+    for (const c of rows) {
       const key = `${c[si]}|${c[slugI]}|${c[ci]}`;
       const at = c[atI] ?? "";
       const prev = map.get(key);
@@ -144,14 +128,9 @@ function writeWinterTransitionLedger(keys: ReadonlySet<string>): void {
 
 interface StateSummary { history_rows: number; db_rows: number; ai_context_rows: number; duplicate_row_id_count: number }
 function readState(): StateSummary {
-  let history = 0; const ids = new Map<string, number>();
-  if (existsSync(HISTORY_DIR)) {
-    for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-      const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
-      const h = parseCsvLine(lines[0] ?? ""); const ri = h.indexOf("row_id");
-      for (const line of lines.slice(1)) { history += 1; const id = parseCsvLine(line)[ri] ?? ""; ids.set(id, (ids.get(id) ?? 0) + 1); }
-    }
-  }
+  // Logical CSV records, not physical lines: the sync service counts records, and
+  // EXPECTED_HISTORY_ROW_COUNT below must use the same unit or the sync never runs.
+  const { history_rows: history, duplicate_row_id_count: duplicateRowIds } = summarizeHistoryRows(HISTORY_DIR);
   let dbRows = 0;
   if (existsSync(DB_PATH)) {
     const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
@@ -159,7 +138,7 @@ function readState(): StateSummary {
   }
   let ai = 0;
   if (existsSync(AI_CONTEXT_PATH)) ai = (JSON.parse(readFileSync(AI_CONTEXT_PATH, "utf8")) as { market_signal_history_row_count?: number }).market_signal_history_row_count ?? 0;
-  return { history_rows: history, db_rows: dbRows, ai_context_rows: ai, duplicate_row_id_count: [...ids.values()].filter((n) => n > 1).length };
+  return { history_rows: history, db_rows: dbRows, ai_context_rows: ai, duplicate_row_id_count: duplicateRowIds };
 }
 
 function runCmd(cmd: string, args: string[], env: Record<string, string | undefined> = {}): { status: number | null; stdout: string; stderr: string; parsed: Record<string, unknown> } {
@@ -196,7 +175,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         await page.waitForTimeout(5_000);
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
-      } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); finalUrl = page.url() || probeUrl; }
+      } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
       finally { await page.close().catch(() => undefined); }
       const signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
@@ -465,14 +444,11 @@ async function run(): Promise<void> {
 function readExistingKeys(): ExistingHistoryKey[] {
   const keys: ExistingHistoryKey[] = [];
   if (!existsSync(HISTORY_DIR)) return keys;
-  for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
-    const h = parseCsvLine(lines[0] ?? "");
+  for (const { header: h, rows } of readHistoryShards(HISTORY_DIR)) {
     const ri = h.indexOf("row_id"); const hi = h.indexOf("row_hash"); const si = h.indexOf("shard_month");
     const pi = h.indexOf("normalized_total_price"); const ai = h.indexOf("availability_status"); const bi = h.indexOf("basis_confidence");
     const ddi = h.indexOf("is_price_usable_for_dp_directional"); const dei = h.indexOf("is_price_excluded_from_dp");
-    for (const line of lines.slice(1)) {
-      const c = parseCsvLine(line);
+    for (const c of rows) {
       const rawPrice = pi >= 0 ? (c[pi] ?? "") : "";
       keys.push({ row_id: c[ri] ?? "", row_hash: c[hi] ?? "", shard_month: c[si] ?? "", normalized_total_price: rawPrice.trim() === "" ? null : Number(rawPrice), availability_status: ai >= 0 ? c[ai] : undefined, basis_confidence: bi >= 0 ? c[bi] : undefined, dp_directional: ddi >= 0 ? (c[ddi] ?? "").toLowerCase() === "true" : undefined, dp_excluded: dei >= 0 ? (c[dei] ?? "").toLowerCase() === "true" : undefined });
     }
