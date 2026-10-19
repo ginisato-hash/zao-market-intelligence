@@ -53,7 +53,7 @@ function main(): void {
     debugPath,
     historyToDbSyncGate: process.env["HISTORY_TO_DB_SYNC"],
     expectedHistoryRowCount: process.env["EXPECTED_HISTORY_ROW_COUNT"],
-    syncPermitPath: process.env["HISTORY_TO_DB_SYNC_PERMIT_PATH"],
+    appendReceiptPath: process.env["HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH"],
     sourceAutoRunner07bArtifact: SOURCE_AUTO_RUNNER07B_ARTIFACT
   });
 

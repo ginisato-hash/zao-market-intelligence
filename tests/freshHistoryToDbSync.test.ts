@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,11 +13,14 @@ import {
   isVerifiedSyncOutput,
   runFreshHistoryToDbSync,
   SYNC_PERMIT_MAX_ROWS,
-  writeSyncPermit,
+  verifyAppendReceipt,
+  writeAppendReceipt,
   type FreshHistoryToDbSyncDecision,
   type FreshHistoryToDbSyncReport
 } from "../src/services/freshHistoryToDbSync";
 import type { MarketSignalHistoryDryRunRow } from "../src/services/historyToDbSyncDryRun";
+import { appendHistoryRowsAtomic, buildAppendReceipt, type AppendReceipt } from "../src/services/autoRunnerMarketRefresh";
+import type { HistoryRow } from "../src/services/localHistorySchemaDesign";
 
 const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/freshHistoryToDbSync.ts"), "utf8");
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/syncHistoryToDbFresh.ts"), "utf8");
@@ -37,16 +40,33 @@ function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "fresh-db-sync-"));
 }
 
-// permit defaults to every history row_id (as if this run appended them all);
-// pass null to omit the permit, or a list for an explicit per-run permit.
-function runHelper(root: string, options: { rows?: Array<Record<string, string>>; dbPath?: string; gate?: string; expected?: string; permit?: string[] | null; hooks?: { afterGateEvaluated?: () => void }; skipHistoryWrite?: boolean } = {}): FreshHistoryToDbSyncReport {
+// Mimics appendHistoryRowsAtomic on the test schema: .bak backup of the shard,
+// append-only write, and the same buildAppendReceipt the production path uses.
+function genuineAppend(historyDir: string, runId: string, rows: Array<Record<string, string>>, receiptPath: string, file = "zao_signals_2026_06.csv"): AppendReceipt {
+  const path = join(historyDir, file);
+  const before = readFileSync(path);
+  const headers = before.toString("utf8").split("\n", 1)[0]!.split(",");
+  const backupDir = join(historyDir, ".backup", runId);
+  mkdirSync(backupDir, { recursive: true });
+  writeFileSync(join(backupDir, `${file}.bak`), before);
+  const after = Buffer.concat([before, Buffer.from(`${rows.map((r) => headers.map((h) => csvCell(r[h] ?? "")).join(",")).join("\n")}\n`, "utf8")]);
+  writeFileSync(path, after);
+  const receipt = buildAppendReceipt(runId, [{ file, before, after }], rows.map((r) => ({ row_id: r["row_id"]!, row_hash: r["row_hash"]!, shard_file: file })));
+  writeAppendReceipt(receiptPath, receipt);
+  return receipt;
+}
+
+// permit = the row_ids this run genuinely appends (default: all rows, appended
+// to a header-only shard); null = no append receipt at all.
+function runHelper(root: string, options: { rows?: Array<Record<string, string>>; dbPath?: string; gate?: string; expected?: string; permit?: string[] | null; hooks?: { afterGateEvaluated?: () => void; afterShardParsed?: (file: string) => void } } = {}): FreshHistoryToDbSyncReport {
   const historyDir = join(root, "history");
   const rows = options.rows ?? [historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")];
-  if (options.skipHistoryWrite !== true) writeHistory(historyDir, rows);
-  let permitPath: string | undefined;
+  const appendIds = new Set(options.permit === null ? [] : (options.permit ?? rows.map((row) => row["row_id"]!)));
+  writeHistory(historyDir, rows.filter((row) => !appendIds.has(row["row_id"]!)));
+  let receiptPath: string | undefined;
   if (options.permit !== null) {
-    permitPath = join(root, `permit_${runSequence + 1}.json`);
-    writeSyncPermit(permitPath, "test", options.permit ?? rows.map((row) => row["row_id"]!));
+    receiptPath = join(root, `receipt_${runSequence + 1}.json`);
+    genuineAppend(historyDir, `test_append_${runSequence + 1}`, rows.filter((row) => appendIds.has(row["row_id"]!)), receiptPath);
   }
   return runFreshHistoryToDbSync({
     runId: `fresh_test_run_${++runSequence}`,
@@ -59,7 +79,7 @@ function runHelper(root: string, options: { rows?: Array<Record<string, string>>
     debugPath: join(root, "debug"),
     historyToDbSyncGate: options.gate,
     expectedHistoryRowCount: options.expected,
-    syncPermitPath: permitPath,
+    appendReceiptPath: receiptPath,
     sourceAutoRunner07bArtifact: join(root, "auto07b.json"),
     testHooks: options.hooks
   });
@@ -239,12 +259,12 @@ describe("fresh history-to-DB sync helper", () => {
     expect(report.sync_result.skipped_identical_rows).toBe(1);
   });
 
-  it("write gate fails closed without a sync permit", () => {
+  it("write gate fails closed without an append receipt", () => {
     const root = tempRoot();
     const dbPath = join(root, "test.sqlite");
     const report = runHelper(root, { dbPath, gate: "1", permit: null });
     expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.reasons).toContain("HISTORY_TO_DB_SYNC_PERMIT_PATH not set; writes require this run's appended row_ids");
+    expect(report.gate_result.reasons).toContain("HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH not set; writes require this run's verified append receipt");
     expect(report.sync_result.db_write_executed).toBe(false);
     expect(report.db_after_summary.market_signal_history_count).toBe(0);
   });
@@ -269,15 +289,6 @@ describe("fresh history-to-DB sync helper", () => {
     expect(report.decision).toBe("fresh_history_to_db_sync_success");
     expect(report.sync_result.inserted_rows).toBe(1);
     expect(report.mirror_exact_match).toBe(true);
-  });
-
-  it("rejects a permit naming row_ids that are not in history", () => {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
-    const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2", "not_in_history"] });
-    expect(report.gate_result.reasons).toContain("sync permit lists 1 row_ids absent from history");
-    expect(report.sync_result.db_write_executed).toBe(false);
   });
 
   it("stops before writing when the DB holds row_ids absent from history", () => {
@@ -353,13 +364,14 @@ describe("fresh history-to-DB sync helper", () => {
     expect(evaluateFreshSyncGate({ envFlag: "1", expectedHistoryRowCount: "2", permit, invariants: evaluateMirrorInvariants(mapped, new Map(), permit), historyCount: 2, mapping: runHelper(tempRoot()).fresh_mapping_summary, duplicateRowIdCount: 0, schemaValid: true }).passed).toBe(true);
   });
 
-  it("both live callers pass a per-run permit and require verified success", () => {
+  it("both live callers pass this run's append receipt and require verified success", () => {
     for (const script of ["runAutoRunnerMarketRefreshRotating.ts", "runAutoRunnerMarketRefresh.ts"]) {
       const src = readFileSync(resolve(__dirname, "../src/scripts", script), "utf8");
       const call = src.slice(src.indexOf('"sync:history-to-db:fresh"'), src.indexOf('"sync:history-to-db:fresh"') + 300);
       expect(call).toContain('HISTORY_TO_DB_SYNC: "1"');
-      expect(call).toContain("HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath");
-      expect(src).toMatch(/writeSyncPermit\(permitPath, runId, .*approved_rows\.map\(\(row\) => row\.rowId\)/u);
+      expect(call).toMatch(/HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: (receiptPath|appendResult === null \? "" : receiptPath)/u);
+      expect(src).toMatch(/writeAppendReceipt\(receiptPath, (r|appendResult)\.receipt\)/u);
+      expect(src).not.toContain("HISTORY_TO_DB_SYNC_PERMIT_PATH");
       expect(src).not.toContain("EXPECTED_MAX_INSERT_ROWS");
       // AI context refresh only behind the positive success protocol, never on counts alone.
       expect(src).not.toMatch(/status === 0 && Number\([a-zA-Z.]*parsed\["db_after_count"\]\)/u);
@@ -404,19 +416,19 @@ function mutateInChildProcess(dbPath: string, sql: string): void {
 }
 
 function runCli(cwd: string, env: Record<string, string>): { status: number | null; parsed: Record<string, string>; stdout: string } {
-  const r = spawnSync(process.execPath, ["--import", TSX_LOADER, CLI], { cwd, encoding: "utf8", env: { ...process.env, HISTORY_TO_DB_SYNC: "", EXPECTED_HISTORY_ROW_COUNT: "", HISTORY_TO_DB_SYNC_PERMIT_PATH: "", EXPECTED_MAX_INSERT_ROWS: "", ...env } });
+  const r = spawnSync(process.execPath, ["--import", TSX_LOADER, CLI], { cwd, encoding: "utf8", env: { ...process.env, HISTORY_TO_DB_SYNC: "", EXPECTED_HISTORY_ROW_COUNT: "", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: "", EXPECTED_MAX_INSERT_ROWS: "", ...env } });
   const parsed: Record<string, string> = {};
   for (const line of (r.stdout ?? "").split(/\r?\n/u)) { const i = line.indexOf("="); if (i > 0) parsed[line.slice(0, i)] = line.slice(i + 1); }
   return { status: r.status, parsed, stdout: r.stdout + r.stderr };
 }
 
 // CLI fixture: cwd with .data/history and .data/zao-market-intelligence.sqlite.
-function cliRoot(rows: Array<Record<string, string>>, dbRows: MarketSignalHistoryDryRunRow[]): { root: string; dbPath: string } {
+function cliRoot(rows: Array<Record<string, string>>, dbRows: MarketSignalHistoryDryRunRow[]): { root: string; dbPath: string; historyDir: string } {
   const root = tempRoot();
   writeHistory(join(root, ".data/history"), rows);
   const dbPath = join(root, ".data/zao-market-intelligence.sqlite");
   seedDb(dbPath, dbRows);
-  return { root, dbPath };
+  return { root, dbPath, historyDir: join(root, ".data/history") };
 }
 
 describe("P0-G1 write-time consistency under a shared write lock", () => {
@@ -484,28 +496,28 @@ describe("P0-G2 insert bound is this run's appended row_ids, not a caller-chosen
     const before = dbSnapshot(dbPath);
     const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), EXPECTED_MAX_INSERT_ROWS: "68129" });
     expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(cli.parsed["gate_reasons"]).toContain("HISTORY_TO_DB_SYNC_PERMIT_PATH not set");
+    expect(cli.parsed["gate_reasons"]).toContain("HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH not set");
     expect(cli.status).toBe(2);
     expect(dbSnapshot(dbPath)).toBe(before);
   }, 120_000);
 
-  it("refuses a permit listing the whole 68,000-row backlog (over the per-run cap)", () => {
+  it("refuses a forged receipt listing the whole 68,000-row backlog", () => {
     const { root, dbPath } = cliRoot(rows, dbRows);
     const before = dbSnapshot(dbPath);
-    const permitPath = join(root, "permit.json");
-    writeSyncPermit(permitPath, "forged", rows.slice(100).map((row) => row["row_id"]!));
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
-    expect(cli.parsed["gate_reasons"]).toContain(`sync permit lists ${BACKLOG} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
+    const receiptPath = join(root, "receipt.json");
+    writeAppendReceipt(receiptPath, { version: 1, run_id: "forged", shards: [{ file: "zao_signals_2026_06.csv", before_sha256: "0", before_size: 1, after_sha256: "0", after_size: 1 }], rows: rows.slice(100).map((row) => ({ row_id: row["row_id"]!, row_hash: row["row_hash"]!, shard_file: "zao_signals_2026_06.csv" })) });
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
+    expect(cli.parsed["gate_reasons"]).toContain(`append receipt rejected: ${BACKLOG} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
     expect(cli.status).toBe(2);
     expect(dbSnapshot(dbPath)).toBe(before);
   }, 120_000);
 
-  it("refuses the backlog when the permit only covers this run's 63 rows", () => {
-    const { root, dbPath } = cliRoot(rows, dbRows);
+  it("refuses the backlog when the genuine receipt only covers this run's 63 rows", () => {
+    const { root, dbPath, historyDir } = cliRoot(rows.slice(0, -63), dbRows);
+    const receiptPath = join(root, "receipt.json");
+    genuineAppend(historyDir, "natural_run", rows.slice(-63), receiptPath);
     const before = dbSnapshot(dbPath);
-    const permitPath = join(root, "permit.json");
-    writeSyncPermit(permitPath, "natural", rows.slice(-63).map((row) => row["row_id"]!));
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
     expect(cli.parsed["gate_reasons"]).toContain(`would insert ${BACKLOG - 63} rows not appended by this run`);
     expect(cli.status).toBe(2);
     expect(dbSnapshot(dbPath)).toBe(before);
@@ -518,26 +530,24 @@ describe("P0-G2 insert bound is this run's appended row_ids, not a caller-chosen
 
 describe("P0-G3 a refused or unverified sync is never success", () => {
   it("CLI: read-only run exits 0; refused write exits 2; verified write exits 0", () => {
-    const { root } = cliRoot([historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")], [mappedRow("row_1", "hash_1")]);
+    const { root } = cliRoot([historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")], [mappedRow("row_1", "hash_1"), { ...mappedRow("row_2", "hash_2"), source: "booking" }]);
     expect(runCli(root, {}).status).toBe(0);
     const refused = runCli(root, { HISTORY_TO_DB_SYNC: "1" });
     expect(refused.status).toBe(2);
     expect(refused.parsed["sync_write_refused"]).toBe("true");
-    const permitPath = join(root, "permit.json");
-    writeSyncPermit(permitPath, "natural", ["row_2"]);
-    const ok = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
+    const receiptPath = join(root, "receipt.json");
+    genuineAppend(join(root, ".data/history"), "natural_run", [historyRow("row_3", "hash_3")], receiptPath);
+    const ok = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
     expect(ok.status).toBe(0);
     expect(ok.parsed["decision"]).toBe("fresh_history_to_db_sync_success");
     expect(ok.parsed["mirror_exact_match"]).toBe("true");
-    expect(isVerifiedSyncOutput(ok.status, ok.parsed, 2)).toBe(true);
+    expect(isVerifiedSyncOutput(ok.status, ok.parsed, 3)).toBe(true);
   }, 60_000);
 
   it("equal DB/history counts with a row_hash mismatch is refused and not verified", () => {
     const { root, dbPath } = cliRoot([historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")], [mappedRow("row_1", "hash_1"), mappedRow("row_2", "hash_OTHER")]);
     const before = dbSnapshot(dbPath);
-    const permitPath = join(root, "permit.json");
-    writeSyncPermit(permitPath, "natural", []);
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1" });
     expect(cli.parsed["history_count"]).toBe(cli.parsed["db_after_count"]); // counts alone would look "aligned"
     expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_conflict");
     expect(cli.parsed["mirror_exact_match"]).toBe("false");
@@ -546,13 +556,11 @@ describe("P0-G3 a refused or unverified sync is never success", () => {
     expect(dbSnapshot(dbPath)).toBe(before);
   }, 60_000);
 
-  it("equal DB/history counts with an insufficient permit is refused and not verified", () => {
+  it("equal DB/history counts without an append receipt for the missing row is refused and not verified", () => {
     // DB holds one stale row and lacks row_2: 2 == 2 by count, yet not a mirror.
     const { root, dbPath } = cliRoot([historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")], [mappedRow("row_1", "hash_1"), mappedRow("stale_only", "hash_s")]);
     const before = dbSnapshot(dbPath);
-    const permitPath = join(root, "permit.json");
-    writeSyncPermit(permitPath, "natural", []);
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1" });
     expect(cli.parsed["history_count"]).toBe(cli.parsed["db_after_count"]);
     expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_ready_not_run");
     expect(cli.status).toBe(2);
@@ -571,3 +579,164 @@ describe("P0-G3 a refused or unverified sync is never success", () => {
     expect(isVerifiedSyncOutput(0, ok, 3)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TD 2026-10-20 #6279266712: P0-G2 receipt provenance, P0-G1 parsed-bytes digest.
+
+describe("P0-G2 append receipt must prove this run's append", () => {
+  // DB-only 0, one old unsynced history row (old_2) that no current run appended.
+  function oldBacklog(): { root: string; dbPath: string; historyDir: string } {
+    const root = tempRoot();
+    const historyDir = join(root, "history");
+    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2")]);
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]);
+    return { root, dbPath, historyDir };
+  }
+  function syncWith(root: string, dbPath: string, receiptPath: string | undefined): FreshHistoryToDbSyncReport {
+    return runFreshHistoryToDbSync({ runId: `g2_${++runSequence}`, generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir: join(root, "history"), dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, appendReceiptPath: receiptPath, sourceAutoRunner07bArtifact: join(root, "none.json") });
+  }
+  function expectNoWrite(report: FreshHistoryToDbSyncReport, dbPath: string, before: string, reason: RegExp): void {
+    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
+    expect(report.gate_result.reasons.join("|")).toMatch(reason);
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(report.sync_result.inserted_rows).toBe(0);
+    expect(dbSnapshot(dbPath)).toBe(before); // all tables, schema and sync_runs unchanged
+  }
+
+  it("rejects a forged 1-row receipt for an old unsynced row (no backup evidence)", () => {
+    const { root, dbPath } = oldBacklog();
+    const before = dbSnapshot(dbPath);
+    const receiptPath = join(root, "forged.json");
+    writeAppendReceipt(receiptPath, { version: 1, run_id: "forged-or-stale", shards: [{ file: "zao_signals_2026_06.csv", before_sha256: "x", before_size: 10, after_sha256: "y", after_size: 20 }], rows: [{ row_id: "old_2", row_hash: "hash_o2", shard_file: "zao_signals_2026_06.csv" }] });
+    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /append receipt rejected/u);
+  });
+
+  it("rejects the old {run_id,row_ids} permit format", () => {
+    const { root, dbPath } = oldBacklog();
+    const before = dbSnapshot(dbPath);
+    const receiptPath = join(root, "old_format.json");
+    writeFileSync(receiptPath, JSON.stringify({ run_id: "forged-or-stale", row_ids: ["old_2"] }));
+    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /append receipt rejected: bad version or run_id/u);
+  });
+
+  it("rejects a forged receipt that reuses a genuine run's backup but claims an older row", () => {
+    const { root, dbPath, historyDir } = oldBacklog();
+    const genuine = genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], join(root, "genuine.json"));
+    seedDb(dbPath, [{ ...mappedRow("new_3", "hash_n3") }], "run_a_sync");
+    const before = dbSnapshot(dbPath);
+    const receiptPath = join(root, "forged.json");
+    writeAppendReceipt(receiptPath, { ...genuine, rows: [{ row_id: "old_2", row_hash: "hash_o2", shard_file: "zao_signals_2026_06.csv" }] });
+    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /appended records do not match the receipt rows/u);
+  });
+
+  it("rejects a replayed genuine receipt once the shard was appended again", () => {
+    const { root, dbPath, historyDir } = oldBacklog();
+    const receiptA = join(root, "a.json");
+    genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], receiptA); // run_a's own sync never happened
+    genuineAppend(historyDir, "run_b", [historyRow("new_4", "hash_n4")], join(root, "b.json"));
+    const before = dbSnapshot(dbPath);
+    expectNoWrite(syncWith(root, dbPath, receiptA), dbPath, before, /changed after this append \(stale or forged\)/u);
+  });
+
+  it("rejects a genuine receipt that is no longer current (append older than the freshness window)", () => {
+    const { root, dbPath, historyDir } = oldBacklog();
+    seedDb(dbPath, [mappedRow("old_2", "hash_o2")], "old_2_synced"); // DB == history before the append
+    const receiptPath = join(root, "a.json");
+    genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], receiptPath);
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(join(historyDir, ".backup", "run_a", "zao_signals_2026_06.csv.bak"), old, old);
+    utimesSync(join(historyDir, "zao_signals_2026_06.csv"), old, old);
+    const before = dbSnapshot(dbPath);
+    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /not from a current append|not written by a current append/u);
+  });
+
+  it("still syncs a genuine current append (positive case, 63 rows)", () => {
+    const root = tempRoot();
+    const historyDir = join(root, "history");
+    const base = Array.from({ length: 10 }, (_, i) => historyRow(`base_${i}`, `hb_${i}`));
+    writeHistory(historyDir, base);
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, base.map((r) => mappedRow(r["row_id"]!, r["row_hash"]!)));
+    const receiptPath = join(root, "natural.json");
+    genuineAppend(historyDir, "natural_run", Array.from({ length: 63 }, (_, i) => historyRow(`new_${i}`, `hn_${i}`)), receiptPath);
+    const report = syncWith(root, dbPath, receiptPath);
+    expect(report.decision).toBe("fresh_history_to_db_sync_success");
+    expect(report.sync_result.inserted_rows).toBe(63);
+    expect(report.mirror_exact_match).toBe(true);
+  });
+
+  it("verifies the receipt produced by the real appendHistoryRowsAtomic", () => {
+    const root = tempRoot();
+    const historyDir = join(root, "history");
+    const dbPath = join(root, "test.sqlite");
+    const backup = (runId: string): string => join(historyDir, ".backup", runId);
+    const first = appendHistoryRowsAtomic({ rows: [liveHistoryRow("live_1"), liveHistoryRow("live_2")], historyDir, backupDir: backup("run_1"), historyBefore: 0 });
+    writeAppendReceipt(join(root, "r1.json"), first.receipt);
+    expect(syncWith(root, dbPath, join(root, "r1.json")).decision).toBe("fresh_history_to_db_sync_success");
+    const second = appendHistoryRowsAtomic({ rows: [liveHistoryRow("live_3")], historyDir, backupDir: backup("run_2"), historyBefore: 2 });
+    writeAppendReceipt(join(root, "r2.json"), second.receipt);
+    const before = dbSnapshot(dbPath);
+    expect(syncWith(root, dbPath, join(root, "r1.json")).gate_result.reasons.join("|")).toMatch(/changed after this append/u); // replay of run_1
+    expect(dbSnapshot(dbPath)).toBe(before);
+    const ok = syncWith(root, dbPath, join(root, "r2.json"));
+    expect(ok.decision).toBe("fresh_history_to_db_sync_success");
+    expect(ok.sync_result.inserted_rows).toBe(1);
+    expect(ok.mirror_exact_match).toBe(true);
+    expect(verifyAppendReceipt(join(root, "r2.json"), { shards: [] }, historyDir, Date.now()).error).toMatch(/not in history/u);
+  });
+});
+
+describe("P0-G1 source digest is bound to the parsed bytes", () => {
+  it("stops before any write when another process appends between the first shard read and digest finalisation", () => {
+    const root = tempRoot();
+    const historyDir = join(root, "history");
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
+    writeHistory(historyDir, [historyRow("row_1", "hash_1")]);
+    const receiptPath = join(root, "receipt.json");
+    genuineAppend(historyDir, "natural_run", [historyRow("row_2", "hash_2")], receiptPath);
+    // A second shard that is read AFTER the first one.
+    writeFileSync(join(historyDir, "zao_signals_2026_07.csv"), readFileSync(join(historyDir, "zao_signals_2026_06.csv"), "utf8").split("\n", 1)[0] + "\n");
+    const before = dbSnapshot(dbPath);
+    let injected = false;
+    const report = runFreshHistoryToDbSync({ runId: "g1_race", generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, appendReceiptPath: receiptPath, sourceAutoRunner07bArtifact: join(root, "none.json"),
+      testHooks: { afterShardParsed: (file) => {
+        if (injected || !file.endsWith("zao_signals_2026_06.csv")) return;
+        injected = true; // another OS process appends to the shard that was just parsed
+        const line = `${["row_late", "hash_late"].map(csvCell).join(",")}\n`;
+        const r = spawnSync(process.execPath, ["-e", `require("node:fs").appendFileSync(${JSON.stringify(join(historyDir, "zao_signals_2026_06.csv"))}, ${JSON.stringify(line)})`], { encoding: "utf8" });
+        if (r.status !== 0) throw new Error(r.stderr);
+      } } });
+    expect(injected).toBe(true);
+    expect(report.history_summary.row_count).toBe(2); // mappedRows = the bytes parsed before the append
+    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
+    expect(report.gate_result.point_of_use_reasons).toContain("history changed between gate evaluation and write");
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(dbSnapshot(dbPath)).toBe(before);
+  });
+
+  it("rolls the whole write back when an insert fails inside the locked transaction", () => {
+    const root = tempRoot();
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
+    const db = new Database(dbPath);
+    db.exec("CREATE TRIGGER inject_fail AFTER INSERT ON market_signal_history WHEN NEW.row_id = 'row_2' BEGIN SELECT RAISE(ABORT, 'injected_failure'); END;");
+    db.close();
+    const before = dbSnapshot(dbPath);
+    expect(() => runHelper(root, { dbPath, gate: "1", permit: ["row_2"] })).toThrow(/injected_failure/u);
+    expect(dbSnapshot(dbPath)).toBe(before); // no row, no sync_run, no schema change
+  });
+});
+
+function liveHistoryRow(rowId: string): HistoryRow {
+  return {
+    rowId, rowHash: `hash_${rowId}`, shardMonth: "2026_11", collectedDateJst: "2026-10-20", collectedAtJst: "2026-10-20T08:00:00+09:00", normalizedAtJst: "2026-10-20T08:00:00+09:00",
+    source: "booking", sourcePhase: "test", collectorStage: "test", canonicalPropertyName: "蔵王国際ホテル", sourcePropertyName: "蔵王国際ホテル", propertyIdentityMatch: true,
+    sourcePropertyId: "zao-kokusai", sourceSlugOrCode: "zao-kokusai", checkin: "2026-11-07", checkout: "2026-11-08", stayNights: 1, groupAdults: 2, noRooms: 1, groupChildren: 0,
+    currency: "JPY", language: "ja", stayScope: "2_adults_1_room_1_night", availabilityStatus: "available", soldOutStatus: "available", normalizedTotalPrice: 30000,
+    normalizedTotalPriceSource: "test", normalizedTotalPriceBasis: "test", normalizedTotalPriceConfidence: "B", basisConfidence: "B", basisNote: "test", sourcePrimaryPrice: 30000,
+    sourceSecondaryPriceOrAdder: null, sourceComputedTotal: 30000, sourceTaxOrFeeClassification: "test", sourceClassification: "test", isPriceUsableForDpDirect: false,
+    isPriceUsableForDpDirectional: true, isPriceExcludedFromDp: false, dpExclusionReason: null, warningFlags: "", sourceReportPath: "", sourceCsvPath: "", debugArtifactPath: "", schemaVersion: "zao_local_history_v1"
+  };
+}

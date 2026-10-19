@@ -19,7 +19,7 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
-import { isVerifiedSyncOutput, writeSyncPermit } from "../services/freshHistoryToDbSync";
+import { isVerifiedSyncOutput, writeAppendReceipt } from "../services/freshHistoryToDbSync";
 import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
@@ -349,9 +349,9 @@ async function run(): Promise<void> {
       rowsAppended = r.rows_written;
       if (evidenceOn) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
       const after = readState();
-      const permitPath = resolve(debugPath, "history_to_db_sync_permit.json");
-      writeSyncPermit(permitPath, runId, appendPlan.approved_rows.map((row) => row.rowId));
-      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows), HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath });
+      const receiptPath = resolve(debugPath, "history_append_receipt.json");
+      writeAppendReceipt(receiptPath, r.receipt);
+      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows), HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
       dbSynced = isVerifiedSyncOutput(sync.status, sync.parsed, after.history_rows);
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {

@@ -5,8 +5,9 @@
 // companion script. This module enforces caps and append policy and never emits
 // pricing/PMS output.
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   buildRowHash,
   buildRowId,
@@ -815,6 +816,27 @@ export interface HistoryAppendResult {
   history_before: number;
   history_after: number;
   touched_shards: string[];
+  // Proof of exactly what this append wrote; the DB sync helper re-verifies it
+  // against the .bak backup and the live shard bytes before mirroring any row.
+  receipt: AppendReceipt;
+}
+
+export interface AppendReceipt {
+  version: 1;
+  run_id: string; // == basename of backupDir (<historyDir>/.backup/<run_id>)
+  shards: { file: string; before_sha256: string; before_size: number; after_sha256: string; after_size: number }[];
+  rows: { row_id: string; row_hash: string; shard_file: string }[];
+}
+
+const sha256Hex = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+
+export function buildAppendReceipt(runId: string, shards: readonly { file: string; before: Buffer; after: Buffer }[], rows: readonly { row_id: string; row_hash: string; shard_file: string }[]): AppendReceipt {
+  return {
+    version: 1,
+    run_id: runId,
+    shards: shards.map((s) => ({ file: s.file, before_sha256: sha256Hex(s.before), before_size: s.before.length, after_sha256: sha256Hex(s.after), after_size: s.after.length })),
+    rows: rows.map((r) => ({ ...r }))
+  };
 }
 
 export function appendHistoryRowsAtomic(input: { rows: readonly HistoryRow[]; historyDir: string; backupDir: string; historyBefore: number }): HistoryAppendResult {
@@ -827,6 +849,7 @@ export function appendHistoryRowsAtomic(input: { rows: readonly HistoryRow[]; hi
   }
   let filesUpdated = 0;
   let backupsCreated = 0;
+  const receiptShards: { file: string; before: Buffer; after: Buffer }[] = [];
   for (const [shard, rows] of byShard) {
     const path = join(input.historyDir, `zao_signals_${shard}.csv`);
     const before = existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -843,6 +866,7 @@ export function appendHistoryRowsAtomic(input: { rows: readonly HistoryRow[]; hi
     writeFileSync(tmp, next, "utf8");
     renameSync(tmp, path);
     filesUpdated += 1;
+    receiptShards.push({ file: basename(path), before: Buffer.from(before, "utf8"), after: Buffer.from(next, "utf8") });
   }
   return {
     rows_written: input.rows.length,
@@ -850,7 +874,8 @@ export function appendHistoryRowsAtomic(input: { rows: readonly HistoryRow[]; hi
     backups_created: backupsCreated,
     history_before: input.historyBefore,
     history_after: input.historyBefore + input.rows.length,
-    touched_shards: [...byShard.keys()].sort()
+    touched_shards: [...byShard.keys()].sort(),
+    receipt: buildAppendReceipt(basename(input.backupDir), receiptShards, input.rows.map((row) => ({ row_id: row.rowId, row_hash: row.rowHash, shard_file: `zao_signals_${row.shardMonth}.csv` })))
   };
 }
 

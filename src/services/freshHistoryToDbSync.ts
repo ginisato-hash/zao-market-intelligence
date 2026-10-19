@@ -6,7 +6,7 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { closeDatabase, openLocalDatabase } from "../db/client";
 import {
   buildHistoryToDbSyncDryRun,
@@ -28,7 +28,7 @@ import {
   type PostSyncValidation,
   type RealSyncResult
 } from "./historyToDbSyncRealRun";
-import { MAX_TOTAL_LIVE_PAGES } from "./autoRunnerMarketRefresh";
+import { MAX_TOTAL_LIVE_PAGES, type AppendReceipt } from "./autoRunnerMarketRefresh";
 import { MAX_MULTIPLIER, scaleCap } from "./crawlVolumeConfig";
 import { ROTATING_CAPS } from "./rotatingCollectionScopePlanner";
 
@@ -61,13 +61,13 @@ export interface FreshHistoryToDbSyncOptions {
   debugPath: string;
   historyToDbSyncGate: string | undefined;
   expectedHistoryRowCount: string | undefined;
-  // JSON {run_id, row_ids} written by the caller: the row_ids it appended in
-  // this run. Required whenever the write gate is on; see evaluateFreshSyncGate.
-  syncPermitPath?: string | undefined;
+  // AppendReceipt JSON produced by this run's history append. Required
+  // whenever the write gate is on; verified by verifyAppendReceipt.
+  appendReceiptPath?: string | undefined;
   sourceAutoRunner07bArtifact: string;
   // Fault-injection seam for tests only: runs after the gate is evaluated and
   // before the writer connection is opened.
-  testHooks?: { afterGateEvaluated?: () => void } | undefined;
+  testHooks?: { afterGateEvaluated?: () => void; afterShardParsed?: (file: string) => void } | undefined;
 }
 
 export interface HistorySummary {
@@ -169,12 +169,13 @@ interface LoadedHistory {
   rowsByFile: Record<string, number>;
   mtimesBefore: Record<string, number>;
   contentDigest: string;
+  shards: LoadedShard[];
 }
 
 export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): FreshHistoryToDbSyncReport {
   mkdirSync(dirname(options.reportPath), { recursive: true });
   mkdirSync(options.debugPath, { recursive: true });
-  const history = loadHistoryRows(options.historyDir);
+  const history = loadHistoryRows(options.historyDir, options.testHooks?.afterShardParsed);
   const requiredColumnCheck = validateRequiredColumns(history.headersByFile);
   const mappedRows = history.loadedRows.map((entry) => mapHistoryRowToMarketSignalHistoryRow(entry.row, options.generatedAtJst));
   const sourceDuplicateConflicts = findDuplicateRowIdConflicts(mappedRows);
@@ -197,7 +198,7 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     preflightConflicts: preflight.conflicts.length,
     sourceDuplicateConflictCount: sourceDuplicateConflicts.length
   });
-  const permit = readSyncPermit(options.syncPermitPath);
+  const permit = verifyAppendReceipt(options.appendReceiptPath, history, options.historyDir, Date.now());
   const gateInput = {
     envFlag: options.historyToDbSyncGate,
     expectedHistoryRowCount: options.expectedHistoryRowCount,
@@ -237,8 +238,11 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
       db.pragma("busy_timeout = 0");
       const write = db.transaction(() => {
         const freshReasons: string[] = [];
+        // history.contentDigest was computed from the exact bytes that were
+        // parsed into mappedRows; a re-read that differs means mappedRows is stale.
         if (historyContentDigest(options.historyDir) !== history.contentDigest) freshReasons.push("history changed between gate evaluation and write");
-        const fresh = evaluateFreshSyncGate({ ...gateInput, invariants: evaluateMirrorInvariants(mappedRows, readDbHashes(db), permit), historyCount: history.loadedRows.length, mapping: freshMappingSummary });
+        const freshPermit = verifyAppendReceipt(options.appendReceiptPath, history, options.historyDir, Date.now());
+        const fresh = evaluateFreshSyncGate({ ...gateInput, permit: freshPermit, invariants: evaluateMirrorInvariants(mappedRows, readDbHashes(db), freshPermit), historyCount: history.loadedRows.length, mapping: freshMappingSummary });
         freshReasons.push(...fresh.reasons);
         if (fresh.would_insert_rows !== gate.would_insert_rows) freshReasons.push(`insert set changed since gate (${gate.would_insert_rows} -> ${fresh.would_insert_rows})`);
         if (freshReasons.length > 0) throw new SyncRefusedAtPointOfUse(freshReasons);
@@ -257,7 +261,7 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
           sourceRows: mappedRows,
           syncRunId: result.sync_run_record.sync_run_id,
           collectorBaselineBefore,
-          historyMtimesUnchanged: historyMtimesUnchanged(history.mtimesBefore)
+          historyMtimesUnchanged: historyContentDigest(options.historyDir) === history.contentDigest
         });
         // Roll the whole write back unless the mirror is exact afterwards.
         if (result.conflict_rows > 0 || !validation.passed || !mirrorExactMatch(mappedRows, readDbHashes(db))) throw new PostSyncValidationFailed(validation, result, schema);
@@ -369,10 +373,10 @@ export function evaluateFreshSyncGate(input: {
   // exact subset of history, or when this run would insert any row it did not
   // append itself (a backfill needs its own approved recovery path).
   if (inv.dbOnlyRowCount > 0) reasons.push(`DB has ${inv.dbOnlyRowCount} row_ids absent from history; approved mirror reconciliation required`);
-  if (input.envFlag === "1" && input.permit.rowIds === null && input.permit.error === null) reasons.push("HISTORY_TO_DB_SYNC_PERMIT_PATH not set; writes require this run's appended row_ids");
+  if (input.envFlag === "1" && input.permit.rowIds === null && input.permit.error === null) reasons.push("HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH not set; writes require this run's verified append receipt");
   if (input.permit.error !== null) reasons.push(input.permit.error);
-  if (permitRows !== null && permitRows > SYNC_PERMIT_MAX_ROWS) reasons.push(`sync permit lists ${permitRows} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
-  if (inv.permitRowsNotInHistory > 0) reasons.push(`sync permit lists ${inv.permitRowsNotInHistory} row_ids absent from history`);
+  if (permitRows !== null && permitRows > SYNC_PERMIT_MAX_ROWS) reasons.push(`append receipt lists ${permitRows} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
+  if (inv.permitRowsNotInHistory > 0) reasons.push(`append receipt lists ${inv.permitRowsNotInHistory} row_ids absent from history`);
   if (input.envFlag === "1" && inv.unpermittedInsertRows > 0) reasons.push(`would insert ${inv.unpermittedInsertRows} rows not appended by this run; backfill requires a separately approved recovery`);
   if (input.envFlag !== "1") reasons.push("HISTORY_TO_DB_SYNC env flag is not 1");
   return {
@@ -471,7 +475,7 @@ export function renderFreshHistoryToDbSyncCsv(report: FreshHistoryToDbSyncReport
   return `${headers.join(",")}\n${rows.join("\n")}\n`;
 }
 
-function loadHistoryRows(historyDir: string): LoadedHistory {
+function loadHistoryRows(historyDir: string, afterShardParsed?: (file: string) => void): LoadedHistory {
   const fullDir = resolve(historyDir);
   const files = readdirSync(fullDir)
     .filter((name) => /^zao_signals_\d{4}_\d{2}\.csv$/.test(name))
@@ -481,19 +485,30 @@ function loadHistoryRows(historyDir: string): LoadedHistory {
   const headersByFile: { path: string; headers: string[] }[] = [];
   const rowsByFile: Record<string, number> = {};
   const mtimesBefore: Record<string, number> = {};
+  const shards: LoadedShard[] = [];
+  const digest = createHash("sha256");
   for (const file of files) {
-    const text = readFileSync(resolve(file), "utf8");
-    const table = parseCsvTable(text);
+    // One read per shard: the same bytes are parsed AND digested, so the digest
+    // is a proof of exactly what mappedRows was built from.
+    const bytes = readFileSync(resolve(file));
+    const table = parseCsvTable(bytes.toString("utf8"));
+    const name = file.slice(file.lastIndexOf("/") + 1);
+    digest.update(name).update("\0").update(bytes).update("\0");
+    shards.push({ name, bytes, sha256: sha256Hex(bytes) });
     headersByFile.push({ path: file, headers: table.headers });
     rowsByFile[file] = table.rows.length;
     mtimesBefore[file] = statSync(resolve(file)).mtimeMs;
     for (const row of table.rows) loadedRows.push({ sourceFile: file, row: { ...row, __source_file: file } });
+    afterShardParsed?.(file);
   }
-  return { files, loadedRows, headersByFile, rowsByFile, mtimesBefore, contentDigest: historyContentDigest(historyDir) };
+  return { files, loadedRows, headersByFile, rowsByFile, mtimesBefore, contentDigest: digest.digest("hex"), shards };
 }
 
-// sha256 over the shard names and bytes; re-read under the write lock to prove
-// history did not change between gate evaluation and the first DB mutation.
+interface LoadedShard { name: string; bytes: Buffer; sha256: string }
+const sha256Hex = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+
+// Same formula as loadHistoryRows' digest, from a fresh read; used under the
+// write lock (and before commit) to prove history still equals the parsed bytes.
 function historyContentDigest(historyDir: string): string {
   const hash = createHash("sha256");
   for (const name of readdirSync(resolve(historyDir)).filter((n) => /^zao_signals_\d{4}_\d{2}\.csv$/.test(n)).sort()) {
@@ -504,22 +519,61 @@ function historyContentDigest(historyDir: string): string {
 
 interface SyncPermit { rowIds: Set<string> | null; error: string | null }
 
-export function readSyncPermit(path: string | undefined): SyncPermit {
+export const APPEND_RECEIPT_MAX_AGE_MS = 30 * 60 * 1000;
+
+// Turns this run's AppendReceipt into the set of row_ids it may mirror, but only
+// if every claim is independently confirmed: the receipt is the canonical one
+// for <historyDir>/.backup/<run_id>; each shard's .bak backup has the recorded
+// "before" bytes; the bytes parsed into mappedRows are exactly "before" + the
+// appended records; those records are exactly the receipt rows (row_id and
+// row_hash); and the append happened within APPEND_RECEIPT_MAX_AGE_MS. A forged,
+// copied or replayed receipt (shard appended since, or too old) yields no rows.
+export function verifyAppendReceipt(path: string | undefined, history: Pick<LoadedHistory, "shards">, historyDir: string, nowMs: number): SyncPermit {
   if (path === undefined || path === "") return { rowIds: null, error: null };
-  try {
-    const parsed = JSON.parse(readFileSync(resolve(path), "utf8")) as { row_ids?: unknown };
-    if (!Array.isArray(parsed.row_ids) || !parsed.row_ids.every((id) => typeof id === "string" && id !== "")) return { rowIds: null, error: "sync permit has no valid row_ids array" };
-    const rowIds = new Set(parsed.row_ids as string[]);
-    if (rowIds.size !== parsed.row_ids.length) return { rowIds: null, error: "sync permit has duplicate row_ids" };
-    return { rowIds, error: null };
-  } catch {
-    return { rowIds: null, error: "sync permit unreadable" };
+  const fail = (why: string): SyncPermit => ({ rowIds: null, error: `append receipt rejected: ${why}` });
+  let receipt: AppendReceipt;
+  try { receipt = JSON.parse(readFileSync(resolve(path), "utf8")) as AppendReceipt; } catch { return fail("unreadable"); }
+  if (receipt?.version !== 1 || typeof receipt.run_id !== "string" || !/^[A-Za-z0-9_.-]+$/u.test(receipt.run_id) || receipt.run_id.startsWith(".")) return fail("bad version or run_id");
+  if (!Array.isArray(receipt.shards) || receipt.shards.length === 0 || !Array.isArray(receipt.rows) || receipt.rows.length === 0) return fail("no shards or rows");
+  if (receipt.rows.length > SYNC_PERMIT_MAX_ROWS) return fail(`${receipt.rows.length} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
+  const ids = new Set(receipt.rows.map((r) => r.row_id));
+  if (ids.size !== receipt.rows.length) return fail("duplicate row_ids");
+  const backupDir = resolve(historyDir, ".backup", receipt.run_id);
+  if (!existsSync(backupDir)) return fail(`no backup directory for run ${receipt.run_id}`);
+  const loaded = new Map(history.shards.map((s) => [s.name, s]));
+  const shardNames = new Set(receipt.shards.map((s) => s.file));
+  if (receipt.rows.some((r) => !shardNames.has(r.shard_file))) return fail("row in an undeclared shard");
+  for (const shard of receipt.shards) {
+    const current = loaded.get(shard.file);
+    if (current === undefined || !/^zao_signals_\d{4}_\d{2}\.csv$/u.test(shard.file)) return fail(`shard ${shard.file} not in history`);
+    if (current.sha256 !== shard.after_sha256 || current.bytes.length !== shard.after_size) return fail(`${shard.file} changed after this append (stale or forged)`);
+    const shardMtime = statSync(resolve(historyDir, shard.file)).mtimeMs;
+    let deltaText: string;
+    if (shard.before_size > 0) {
+      const bakPath = join(backupDir, `${shard.file}.bak`);
+      if (!existsSync(bakPath)) return fail(`missing backup ${shard.file}.bak`);
+      const bak = readFileSync(bakPath);
+      if (bak.length !== shard.before_size || sha256Hex(bak) !== shard.before_sha256) return fail(`backup ${shard.file}.bak does not match the receipt`);
+      if (sha256Hex(current.bytes.subarray(0, shard.before_size)) !== shard.before_sha256) return fail(`${shard.file} is not an append to its backup`);
+      const bakAge = nowMs - statSync(bakPath).mtimeMs;
+      if (bakAge > APPEND_RECEIPT_MAX_AGE_MS || bakAge < -60_000) return fail(`backup ${shard.file}.bak is not from a current append`);
+      const header = current.bytes.toString("utf8").split(/\r?\n/u, 1)[0] ?? "";
+      deltaText = `${header}\n${current.bytes.subarray(shard.before_size).toString("utf8")}`;
+    } else {
+      deltaText = current.bytes.toString("utf8"); // new shard: everything below the header was appended
+    }
+    const shardAge = nowMs - shardMtime;
+    if (shardAge > APPEND_RECEIPT_MAX_AGE_MS || shardAge < -60_000) return fail(`${shard.file} was not written by a current append`);
+    const appended = parseCsvTable(deltaText).rows.map((row) => `${row["row_id"]}\u0000${row["row_hash"]}`).sort();
+    const claimed = receipt.rows.filter((r) => r.shard_file === shard.file).map((r) => `${r.row_id}\u0000${r.row_hash}`).sort();
+    if (appended.length !== claimed.length || appended.some((v, i) => v !== claimed[i])) return fail(`${shard.file} appended records do not match the receipt rows`);
   }
+  return { rowIds: ids, error: null };
 }
 
-export function writeSyncPermit(path: string, runId: string, rowIds: readonly string[]): void {
+export function writeAppendReceipt(path: string, receipt: AppendReceipt): void {
   mkdirSync(dirname(resolve(path)), { recursive: true });
-  writeFileSync(resolve(path), `${JSON.stringify({ run_id: runId, row_ids: rowIds }, null, 2)}\n`, "utf8");
+  writeFileSync(resolve(path), `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
 }
 
 // Mirror invariants of mapped history rows against a DB row_id->row_hash map.
@@ -775,10 +829,6 @@ function findDuplicateRowIdConflicts(rows: MarketSignalHistoryDryRunRow[]): Arra
   return [...hashesById.entries()]
     .filter(([, hashes]) => hashes.size > 1)
     .map(([row_id, hashes]) => ({ row_id, hashes: [...hashes].sort() }));
-}
-
-function historyMtimesUnchanged(before: Record<string, number>): boolean {
-  return Object.entries(before).every(([file, mtime]) => existsSync(resolve(file)) && statSync(resolve(file)).mtimeMs === mtime);
 }
 
 function tableExists(db: Database.Database, table: string): boolean {

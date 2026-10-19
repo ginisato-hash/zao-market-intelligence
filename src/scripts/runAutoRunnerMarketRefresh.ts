@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isVerifiedSyncOutput, writeSyncPermit } from "../services/freshHistoryToDbSync";
+import { isVerifiedSyncOutput, writeAppendReceipt } from "../services/freshHistoryToDbSync";
 import { splitCsvRecords } from "../services/historyCsvRecords";
 import { chromium } from "playwright";
 import {
@@ -473,12 +473,13 @@ async function run(): Promise<RunnerOutput> {
   let aiContextResult: RunnerOutput["ai_context_result"] = { skipped: true, reason: "db_sync_not_run" };
   const stateAfterAppend = readState();
   if (appendResult !== null || (gate.live_mode_authorized && stateAfterAppend.history_rows !== stateAfterAppend.db_rows)) {
-    const permitPath = resolve(debugPath, "history_to_db_sync_permit.json");
-    writeSyncPermit(permitPath, runId, appendResult === null ? [] : appendPlan.approved_rows.map((row) => row.rowId));
+    // Without an append there is no receipt, so the helper refuses any write.
+    const receiptPath = resolve(debugPath, "history_append_receipt.json");
+    if (appendResult !== null) writeAppendReceipt(receiptPath, appendResult.receipt);
     dbSyncResult = runCommand("npm", ["run", "sync:history-to-db:fresh"], {
       HISTORY_TO_DB_SYNC: "1",
       EXPECTED_HISTORY_ROW_COUNT: String(stateAfterAppend.history_rows),
-      HISTORY_TO_DB_SYNC_PERMIT_PATH: permitPath
+      HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: appendResult === null ? "" : receiptPath
     });
     if (isVerifiedSyncOutput(dbSyncResult.status, dbSyncResult.parsed, stateAfterAppend.history_rows)) {
       aiContextResult = runCommand("npm", ["run", "build:ai-context-packs"]);
