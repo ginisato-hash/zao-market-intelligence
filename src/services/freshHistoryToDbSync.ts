@@ -543,23 +543,35 @@ export function verifyAppendReceipt(path: string | undefined, history: Pick<Load
   const loaded = new Map(history.shards.map((s) => [s.name, s]));
   const shardNames = new Set(receipt.shards.map((s) => s.file));
   if (receipt.rows.some((r) => !shardNames.has(r.shard_file))) return fail("row in an undeclared shard");
+  const isSize = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  const isSha = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/u.test(v);
   for (const shard of receipt.shards) {
+    // Malformed sizes/hashes must never fall through to the new-shard branch.
+    if (!isSize(shard.before_size) || !isSize(shard.after_size) || !isSha(shard.before_sha256) || !isSha(shard.after_sha256) || shard.after_size <= shard.before_size) return fail(`${String(shard.file)} has invalid sizes or hashes`);
     const current = loaded.get(shard.file);
     if (current === undefined || !/^zao_signals_\d{4}_\d{2}\.csv$/u.test(shard.file)) return fail(`shard ${shard.file} not in history`);
     if (current.sha256 !== shard.after_sha256 || current.bytes.length !== shard.after_size) return fail(`${shard.file} changed after this append (stale or forged)`);
     const shardMtime = statSync(resolve(historyDir, shard.file)).mtimeMs;
+    // The pre-append state is always proven from the producer's .bak, also for
+    // before_size=0 (a new shard leaves an empty .bak): a missing backup is
+    // never evidence of a new shard, and a real non-empty backup cannot be
+    // claimed away by a receipt that says before_size=0.
+    const bakPath = join(backupDir, `${shard.file}.bak`);
+    if (!existsSync(bakPath)) return fail(`missing backup ${shard.file}.bak`);
+    const bak = readFileSync(bakPath);
+    if (bak.length !== shard.before_size || sha256Hex(bak) !== shard.before_sha256) return fail(`backup ${shard.file}.bak does not match the receipt's before state`);
+    if (sha256Hex(current.bytes.subarray(0, shard.before_size)) !== shard.before_sha256) return fail(`${shard.file} is not an append to its backup`);
+    const bakAge = nowMs - statSync(bakPath).mtimeMs;
+    if (bakAge > APPEND_RECEIPT_MAX_AGE_MS || bakAge < -60_000) return fail(`backup ${shard.file}.bak is not from a current append`);
     let deltaText: string;
     if (shard.before_size > 0) {
-      const bakPath = join(backupDir, `${shard.file}.bak`);
-      if (!existsSync(bakPath)) return fail(`missing backup ${shard.file}.bak`);
-      const bak = readFileSync(bakPath);
-      if (bak.length !== shard.before_size || sha256Hex(bak) !== shard.before_sha256) return fail(`backup ${shard.file}.bak does not match the receipt`);
-      if (sha256Hex(current.bytes.subarray(0, shard.before_size)) !== shard.before_sha256) return fail(`${shard.file} is not an append to its backup`);
-      const bakAge = nowMs - statSync(bakPath).mtimeMs;
-      if (bakAge > APPEND_RECEIPT_MAX_AGE_MS || bakAge < -60_000) return fail(`backup ${shard.file}.bak is not from a current append`);
       const header = current.bytes.toString("utf8").split(/\r?\n/u, 1)[0] ?? "";
       deltaText = `${header}\n${current.bytes.subarray(shard.before_size).toString("utf8")}`;
     } else {
+      // A new shard must not have had content backed up by any other run.
+      const backupRoot = resolve(historyDir, ".backup");
+      const prior = readdirSync(backupRoot).find((run) => run !== receipt.run_id && existsSync(join(backupRoot, run, `${shard.file}.bak`)) && statSync(join(backupRoot, run, `${shard.file}.bak`)).size > 0);
+      if (prior !== undefined) return fail(`${shard.file} claims to be new but run ${prior} backed up earlier content`);
       deltaText = current.bytes.toString("utf8"); // new shard: everything below the header was appended
     }
     const shardAge = nowMs - shardMtime;

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -740,3 +741,91 @@ function liveHistoryRow(rowId: string): HistoryRow {
     isPriceUsableForDpDirectional: true, isPriceExcludedFromDp: false, dpExclusionReason: null, warningFlags: "", sourceReportPath: "", sourceCsvPath: "", debugArtifactPath: "", schemaVersion: "zao_local_history_v1"
   };
 }
+
+// ---------------------------------------------------------------------------
+// TD 2026-10-20 follow-up: the pre-append state must be proven, not declared.
+
+describe("P0-G2 before-state proof: before_size=0 is never self-declared", () => {
+  const SHARD = "zao_signals_2026_06.csv";
+  const sha = (b: Buffer): string => createHash("sha256").update(b).digest("hex");
+  // old_1 synced, old_2 unsynced; run_a genuinely appended new_3 (non-empty .bak).
+  function scenario(): { root: string; historyDir: string; dbPath: string; current: Buffer } {
+    const root = tempRoot();
+    const historyDir = join(root, ".data/history");
+    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2")]);
+    genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], join(root, "genuine.json"));
+    const dbPath = join(root, ".data/zao-market-intelligence.sqlite");
+    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]);
+    return { root, historyDir, dbPath, current: readFileSync(join(historyDir, SHARD)) };
+  }
+  // Counterexample: claim the whole shard is new so every row (incl. old_2) becomes "this run's".
+  function wholeShardClaim(runId: string, current: Buffer, beforeSize: unknown = 0): AppendReceipt {
+    return { version: 1, run_id: runId, shards: [{ file: SHARD, before_sha256: sha(Buffer.alloc(0)), before_size: beforeSize as number, after_sha256: sha(current), after_size: current.length }],
+      rows: [["old_1", "hash_o1"], ["old_2", "hash_o2"], ["new_3", "hash_n3"]].map(([row_id, row_hash]) => ({ row_id: row_id!, row_hash: row_hash!, shard_file: SHARD })) };
+  }
+  function refusedWithoutChange(root: string, dbPath: string, receipt: AppendReceipt, reason: RegExp): void {
+    const receiptPath = join(root, "claim.json");
+    writeAppendReceipt(receiptPath, receipt);
+    const before = dbSnapshot(dbPath);
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
+    expect(cli.parsed["gate_reasons"]).toMatch(reason);
+    expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_ready_not_run");
+    expect(cli.parsed["inserted_rows"]).toBe("0");
+    expect(cli.status).toBe(2);
+    expect(cli.parsed["sync_write_refused"]).toBe("true");
+    // Both runners gate AI context refresh and publish on exactly this check.
+    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 3)).toBe(false);
+    expect(dbSnapshot(dbPath)).toBe(before); // rows, schema, indexes and sync_runs unchanged
+  }
+
+  it("rejects before_size=0 when the run holds a real non-empty backup of the shard", () => {
+    const { root, dbPath, current } = scenario();
+    refusedWithoutChange(root, dbPath, wholeShardClaim("run_a", current), /backup zao_signals_2026_06\.csv\.bak does not match the receipt's before state/u);
+  }, 60_000);
+
+  it("does not treat a missing backup as a new shard", () => {
+    const { root, historyDir, dbPath, current } = scenario();
+    rmSync(join(historyDir, ".backup", "run_a", `${SHARD}.bak`));
+    refusedWithoutChange(root, dbPath, wholeShardClaim("run_a", current), /missing backup zao_signals_2026_06\.csv\.bak/u);
+  }, 60_000);
+
+  it("rejects a forged empty backup when another run backed up earlier content of the shard", () => {
+    const { root, historyDir, dbPath, current } = scenario();
+    mkdirSync(join(historyDir, ".backup", "forged_run"), { recursive: true });
+    writeFileSync(join(historyDir, ".backup", "forged_run", `${SHARD}.bak`), "");
+    refusedWithoutChange(root, dbPath, wholeShardClaim("forged_run", current), /claims to be new but run run_a backed up earlier content/u);
+  }, 60_000);
+
+  it.each([["missing", "omit"], ["negative", -1], ["fractional", 0.5], ["string", "0"]])("rejects a %s before_size instead of taking the new-shard branch", (_label, size) => {
+    const { root, dbPath, current } = scenario();
+    const receipt = wholeShardClaim("run_a", current, size);
+    if (size === "omit") delete (receipt.shards[0] as Partial<AppendReceipt["shards"][number]>).before_size;
+    expect(JSON.stringify(receipt).includes('"before_size"')).toBe(size !== "omit");
+    refusedWithoutChange(root, dbPath, receipt, /has invalid sizes or hashes/u);
+  }, 60_000);
+
+  it("still syncs a normal append to an existing shard", () => {
+    const { root, historyDir, dbPath } = scenario();
+    seedDb(dbPath, [mappedRow("old_2", "hash_o2"), mappedRow("new_3", "hash_n3")], "caught_up");
+    const receiptPath = join(root, "normal.json");
+    genuineAppend(historyDir, "run_b", [historyRow("new_4", "hash_n4")], receiptPath);
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
+    expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_success");
+    expect(cli.parsed["inserted_rows"]).toBe("1");
+    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 4)).toBe(true);
+  }, 60_000);
+
+  it("still syncs a genuinely new shard created by appendHistoryRowsAtomic (empty .bak = empty before state)", () => {
+    const root = tempRoot();
+    const historyDir = join(root, "history");
+    const dbPath = join(root, "test.sqlite");
+    const result = appendHistoryRowsAtomic({ rows: [liveHistoryRow("live_1")], historyDir, backupDir: join(historyDir, ".backup", "run_new"), historyBefore: 0 });
+    expect(result.receipt.shards[0]!.before_size).toBe(0);
+    expect(readFileSync(join(historyDir, ".backup", "run_new", "zao_signals_2026_11.csv.bak")).length).toBe(0);
+    expect(result.backups_created).toBe(0); // reported count of content backups is unchanged
+    writeAppendReceipt(join(root, "r.json"), result.receipt);
+    const report = runFreshHistoryToDbSync({ runId: "new_shard", generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json.out"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, appendReceiptPath: join(root, "r.json"), sourceAutoRunner07bArtifact: join(root, "none.json") });
+    expect(report.decision).toBe("fresh_history_to_db_sync_success");
+    expect(report.mirror_exact_match).toBe(true);
+  });
+});

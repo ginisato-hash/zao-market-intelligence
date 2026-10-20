@@ -854,10 +854,11 @@ export function appendHistoryRowsAtomic(input: { rows: readonly HistoryRow[]; hi
     const path = join(input.historyDir, `zao_signals_${shard}.csv`);
     const before = existsSync(path) ? readFileSync(path, "utf8") : "";
     const backupPath = join(input.backupDir, `zao_signals_${shard}.csv.bak`);
-    if (before !== "") {
-      writeFileSync(backupPath, before, "utf8");
-      backupsCreated += 1;
-    }
+    // Always record the pre-append state, including an empty one for a new
+    // shard: the DB sync helper verifies size, hash and freshness of this .bak
+    // for every shard in the receipt.
+    writeFileSync(backupPath, before, "utf8");
+    if (before !== "") backupsCreated += 1;
     const rendered = renderHistoryCsv([...rows]);
     const body = rendered.split(/\r?\n/u).slice(1).filter((line) => line.length > 0).join("\n") + "\n";
     const next = before === "" ? rendered : `${before.endsWith("\n") ? before : `${before}\n`}${body}`;
