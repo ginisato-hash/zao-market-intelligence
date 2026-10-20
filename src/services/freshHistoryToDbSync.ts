@@ -28,7 +28,8 @@ import {
   type PostSyncValidation,
   type RealSyncResult
 } from "./historyToDbSyncRealRun";
-import { MAX_TOTAL_LIVE_PAGES, type AppendReceipt } from "./autoRunnerMarketRefresh";
+import { MAX_TOTAL_LIVE_PAGES } from "./autoRunnerMarketRefresh";
+import type { HistoryRow } from "./localHistorySchemaDesign";
 import { MAX_MULTIPLIER, scaleCap } from "./crawlVolumeConfig";
 import { ROTATING_CAPS } from "./rotatingCollectionScopePlanner";
 
@@ -61,9 +62,11 @@ export interface FreshHistoryToDbSyncOptions {
   debugPath: string;
   historyToDbSyncGate: string | undefined;
   expectedHistoryRowCount: string | undefined;
-  // AppendReceipt JSON produced by this run's history append. Required
-  // whenever the write gate is on; verified by verifyAppendReceipt.
-  appendReceiptPath?: string | undefined;
+  // In-memory only: row_ids an in-process trusted caller just appended. Never
+  // read from a file, env var or CLI argument (the CLI cannot set it), so no
+  // external input can authorize an INSERT. Production writers use
+  // trustedAppendAndMirror instead; this path is kept for its accepted G1 tests.
+  trustedRowIds?: ReadonlySet<string> | undefined;
   sourceAutoRunner07bArtifact: string;
   // Fault-injection seam for tests only: runs after the gate is evaluated and
   // before the writer connection is opened.
@@ -198,7 +201,7 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     preflightConflicts: preflight.conflicts.length,
     sourceDuplicateConflictCount: sourceDuplicateConflicts.length
   });
-  const permit = verifyAppendReceipt(options.appendReceiptPath, history, options.historyDir, Date.now());
+  const permit: SyncPermit = options.trustedRowIds === undefined ? { rowIds: null, error: null } : { rowIds: new Set(options.trustedRowIds), error: null };
   const gateInput = {
     envFlag: options.historyToDbSyncGate,
     expectedHistoryRowCount: options.expectedHistoryRowCount,
@@ -241,7 +244,7 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
         // history.contentDigest was computed from the exact bytes that were
         // parsed into mappedRows; a re-read that differs means mappedRows is stale.
         if (historyContentDigest(options.historyDir) !== history.contentDigest) freshReasons.push("history changed between gate evaluation and write");
-        const freshPermit = verifyAppendReceipt(options.appendReceiptPath, history, options.historyDir, Date.now());
+        const freshPermit = permit;
         const fresh = evaluateFreshSyncGate({ ...gateInput, permit: freshPermit, invariants: evaluateMirrorInvariants(mappedRows, readDbHashes(db), freshPermit), historyCount: history.loadedRows.length, mapping: freshMappingSummary });
         freshReasons.push(...fresh.reasons);
         if (fresh.would_insert_rows !== gate.would_insert_rows) freshReasons.push(`insert set changed since gate (${gate.would_insert_rows} -> ${fresh.would_insert_rows})`);
@@ -373,10 +376,10 @@ export function evaluateFreshSyncGate(input: {
   // exact subset of history, or when this run would insert any row it did not
   // append itself (a backfill needs its own approved recovery path).
   if (inv.dbOnlyRowCount > 0) reasons.push(`DB has ${inv.dbOnlyRowCount} row_ids absent from history; approved mirror reconciliation required`);
-  if (input.envFlag === "1" && input.permit.rowIds === null && input.permit.error === null) reasons.push("HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH not set; writes require this run's verified append receipt");
+  if (input.envFlag === "1" && input.permit.rowIds === null && input.permit.error === null) reasons.push("no in-process trusted row set; DB writes only happen inside trustedAppendAndMirror");
   if (input.permit.error !== null) reasons.push(input.permit.error);
-  if (permitRows !== null && permitRows > SYNC_PERMIT_MAX_ROWS) reasons.push(`append receipt lists ${permitRows} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
-  if (inv.permitRowsNotInHistory > 0) reasons.push(`append receipt lists ${inv.permitRowsNotInHistory} row_ids absent from history`);
+  if (permitRows !== null && permitRows > SYNC_PERMIT_MAX_ROWS) reasons.push(`trusted row set lists ${permitRows} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
+  if (inv.permitRowsNotInHistory > 0) reasons.push(`trusted row set lists ${inv.permitRowsNotInHistory} row_ids absent from history`);
   if (input.envFlag === "1" && inv.unpermittedInsertRows > 0) reasons.push(`would insert ${inv.unpermittedInsertRows} rows not appended by this run; backfill requires a separately approved recovery`);
   if (input.envFlag !== "1") reasons.push("HISTORY_TO_DB_SYNC env flag is not 1");
   return {
@@ -518,75 +521,6 @@ function historyContentDigest(historyDir: string): string {
 }
 
 interface SyncPermit { rowIds: Set<string> | null; error: string | null }
-
-export const APPEND_RECEIPT_MAX_AGE_MS = 30 * 60 * 1000;
-
-// Turns this run's AppendReceipt into the set of row_ids it may mirror, but only
-// if every claim is independently confirmed: the receipt is the canonical one
-// for <historyDir>/.backup/<run_id>; each shard's .bak backup has the recorded
-// "before" bytes; the bytes parsed into mappedRows are exactly "before" + the
-// appended records; those records are exactly the receipt rows (row_id and
-// row_hash); and the append happened within APPEND_RECEIPT_MAX_AGE_MS. A forged,
-// copied or replayed receipt (shard appended since, or too old) yields no rows.
-export function verifyAppendReceipt(path: string | undefined, history: Pick<LoadedHistory, "shards">, historyDir: string, nowMs: number): SyncPermit {
-  if (path === undefined || path === "") return { rowIds: null, error: null };
-  const fail = (why: string): SyncPermit => ({ rowIds: null, error: `append receipt rejected: ${why}` });
-  let receipt: AppendReceipt;
-  try { receipt = JSON.parse(readFileSync(resolve(path), "utf8")) as AppendReceipt; } catch { return fail("unreadable"); }
-  if (receipt?.version !== 1 || typeof receipt.run_id !== "string" || !/^[A-Za-z0-9_.-]+$/u.test(receipt.run_id) || receipt.run_id.startsWith(".")) return fail("bad version or run_id");
-  if (!Array.isArray(receipt.shards) || receipt.shards.length === 0 || !Array.isArray(receipt.rows) || receipt.rows.length === 0) return fail("no shards or rows");
-  if (receipt.rows.length > SYNC_PERMIT_MAX_ROWS) return fail(`${receipt.rows.length} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
-  const ids = new Set(receipt.rows.map((r) => r.row_id));
-  if (ids.size !== receipt.rows.length) return fail("duplicate row_ids");
-  const backupDir = resolve(historyDir, ".backup", receipt.run_id);
-  if (!existsSync(backupDir)) return fail(`no backup directory for run ${receipt.run_id}`);
-  const loaded = new Map(history.shards.map((s) => [s.name, s]));
-  const shardNames = new Set(receipt.shards.map((s) => s.file));
-  if (receipt.rows.some((r) => !shardNames.has(r.shard_file))) return fail("row in an undeclared shard");
-  const isSize = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-  const isSha = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/u.test(v);
-  for (const shard of receipt.shards) {
-    // Malformed sizes/hashes must never fall through to the new-shard branch.
-    if (!isSize(shard.before_size) || !isSize(shard.after_size) || !isSha(shard.before_sha256) || !isSha(shard.after_sha256) || shard.after_size <= shard.before_size) return fail(`${String(shard.file)} has invalid sizes or hashes`);
-    const current = loaded.get(shard.file);
-    if (current === undefined || !/^zao_signals_\d{4}_\d{2}\.csv$/u.test(shard.file)) return fail(`shard ${shard.file} not in history`);
-    if (current.sha256 !== shard.after_sha256 || current.bytes.length !== shard.after_size) return fail(`${shard.file} changed after this append (stale or forged)`);
-    const shardMtime = statSync(resolve(historyDir, shard.file)).mtimeMs;
-    // The pre-append state is always proven from the producer's .bak, also for
-    // before_size=0 (a new shard leaves an empty .bak): a missing backup is
-    // never evidence of a new shard, and a real non-empty backup cannot be
-    // claimed away by a receipt that says before_size=0.
-    const bakPath = join(backupDir, `${shard.file}.bak`);
-    if (!existsSync(bakPath)) return fail(`missing backup ${shard.file}.bak`);
-    const bak = readFileSync(bakPath);
-    if (bak.length !== shard.before_size || sha256Hex(bak) !== shard.before_sha256) return fail(`backup ${shard.file}.bak does not match the receipt's before state`);
-    if (sha256Hex(current.bytes.subarray(0, shard.before_size)) !== shard.before_sha256) return fail(`${shard.file} is not an append to its backup`);
-    const bakAge = nowMs - statSync(bakPath).mtimeMs;
-    if (bakAge > APPEND_RECEIPT_MAX_AGE_MS || bakAge < -60_000) return fail(`backup ${shard.file}.bak is not from a current append`);
-    let deltaText: string;
-    if (shard.before_size > 0) {
-      const header = current.bytes.toString("utf8").split(/\r?\n/u, 1)[0] ?? "";
-      deltaText = `${header}\n${current.bytes.subarray(shard.before_size).toString("utf8")}`;
-    } else {
-      // A new shard must not have had content backed up by any other run.
-      const backupRoot = resolve(historyDir, ".backup");
-      const prior = readdirSync(backupRoot).find((run) => run !== receipt.run_id && existsSync(join(backupRoot, run, `${shard.file}.bak`)) && statSync(join(backupRoot, run, `${shard.file}.bak`)).size > 0);
-      if (prior !== undefined) return fail(`${shard.file} claims to be new but run ${prior} backed up earlier content`);
-      deltaText = current.bytes.toString("utf8"); // new shard: everything below the header was appended
-    }
-    const shardAge = nowMs - shardMtime;
-    if (shardAge > APPEND_RECEIPT_MAX_AGE_MS || shardAge < -60_000) return fail(`${shard.file} was not written by a current append`);
-    const appended = parseCsvTable(deltaText).rows.map((row) => `${row["row_id"]}\u0000${row["row_hash"]}`).sort();
-    const claimed = receipt.rows.filter((r) => r.shard_file === shard.file).map((r) => `${r.row_id}\u0000${r.row_hash}`).sort();
-    if (appended.length !== claimed.length || appended.some((v, i) => v !== claimed[i])) return fail(`${shard.file} appended records do not match the receipt rows`);
-  }
-  return { rowIds: ids, error: null };
-}
-
-export function writeAppendReceipt(path: string, receipt: AppendReceipt): void {
-  mkdirSync(dirname(resolve(path)), { recursive: true });
-  writeFileSync(resolve(path), `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-}
 
 // Mirror invariants of mapped history rows against a DB row_id->row_hash map.
 export function evaluateMirrorInvariants(mappedRows: readonly { row_id: string; row_hash: string }[], dbHashes: ReadonlyMap<string, string>, permit: SyncPermit): {
@@ -867,4 +801,268 @@ function safeReadJson(path: string): unknown {
 
 function csvEscape(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
+}
+
+// ---------------------------------------------------------------------------
+// P0-G2 trusted append + mirror (TD private #13, design #6280295102).
+//
+// Every scheduled history writer (rotating, 09:00 live, pricing-critical own and
+// competitor, booking-market-recrawl) calls this AFTER collection. The rows it
+// INSERTs are the rows this process itself appended, taken from the history
+// re-read under the same locks; nothing outside the process (file, env, CLI,
+// backup, receipt) can widen that set.
+//
+// Lock order (fixed, every writer): history-writer lock -> DB BEGIN IMMEDIATE ->
+// the append primitive's own lock (runRealAppend's .append.lock, which never
+// waits). The history-writer lock is an EXCLUSIVE transaction on a dedicated
+// SQLite file: an OS lock that the kernel releases when the holder exits or
+// crashes, so a live writer's lock is never broken by age and a dead one never
+// blocks the next run.
+
+export type TrustedAppendStatus =
+  | "MIRRORED" // appended W, DB == history exactly, committed
+  | "NOTHING_TO_APPEND" // every row already in history with the same row_hash
+  | "HISTORY_APPENDED_MIRROR_DISABLED" // DB == history but the mirror flag is off: append-only
+  | "HISTORY_APPENDED_MIRROR_BLOCKED" // DB != history (confirmed): append-only, DB untouched
+  | "HISTORY_APPEND_FAILED_MIRROR_BLOCKED" // the append threw (history may be partial); no DB change
+  | "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED" // history after != before + W; no DB change
+  | "MIRROR_FAILED_ROLLED_BACK" // post-sync validation/exact mirror failed; DB rolled back
+  | "LOCK_BUSY_CAPTURE_PRESERVED" // history or DB writer lock not obtained: no append
+  | "STATE_UNKNOWN_CAPTURE_PRESERVED" // history/DB could not be read: no append
+  | "APPEND_CONFLICT_CAPTURE_PRESERVED"; // a row_id already exists with another row_hash: no append
+
+export interface TrustedAppendResult {
+  status: TrustedAppendStatus;
+  state: "consistent" | "inconsistent" | "unknown" | "not_evaluated";
+  mirror_enabled: boolean;
+  rows_requested: number;
+  rows_skipped_identical: number;
+  rows_appended: number;
+  inserted_rows: number;
+  history_rows_before: number | null;
+  history_rows_after: number | null;
+  db_rows_before: number | null;
+  db_rows_after: number | null;
+  mirror_exact_match: boolean;
+  lock_wait_ms: number;
+  capture_path: string | null;
+  reasons: string[];
+}
+
+// Measured on the 70,051-row production snapshot (scratch copies, 2026-10-20):
+// one locked append+mirror holds the history-writer lock 7.8-11.6 s (two full
+// history reads, 63-row append/rebuild, insert, post-validation); a second
+// writer started at the same time waited 9.7 s and then mirrored normally. At
+// most two writers collide (rotating at even hours vs 09:00 live / 13:35
+// pricing-critical / 14:35 recrawl), so 120 s is >10x the longest measured hold
+// and far below every job's own period (2 h / 1 day).
+export const HISTORY_WRITER_LOCK_WAIT_MS = 120_000;
+export const TRUSTED_MIRROR_FLAG = "ZMI_TRUSTED_MIRROR_ENABLED";
+
+export function historyWriterLockPath(historyDir: string): string {
+  return join(dirname(resolve(historyDir)), "locks", "history_writer.lock.sqlite");
+}
+
+// True only for an explicit, verified mirror: the G3 positive-success rule for
+// callers deciding on AI context refresh / publish.
+export function isVerifiedTrustedMirror(result: TrustedAppendResult): boolean {
+  return result.mirror_enabled && result.mirror_exact_match && (result.status === "MIRRORED" || (result.status === "NOTHING_TO_APPEND" && result.state === "consistent"));
+}
+
+function isBusy(error: unknown): boolean {
+  const code = (error as { code?: string }).code ?? "";
+  return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED";
+}
+
+function rowWithoutSource(row: Record<string, string>): string {
+  return JSON.stringify(Object.entries(row).filter(([k]) => k !== "__source_file").sort(([a], [b]) => a.localeCompare(b)));
+}
+
+export function trustedAppendAndMirror(input: {
+  historyDir: string;
+  dbPath: string;
+  runId: string;
+  generatedAtJst: string;
+  rows: readonly HistoryRow[]; // in-memory rows this process collected and approved
+  write: (rows: HistoryRow[]) => void; // the caller's real append primitive (injected; this module never writes history)
+  mirrorEnabled: boolean; // default OFF: callers pass env[TRUSTED_MIRROR_FLAG] === "1"
+  captureDir: string; // where unappended rows are preserved
+  lockWaitMs?: number;
+  hooks?: { afterLock?: () => void; afterAppend?: () => void; beforeCommit?: () => void; afterCommit?: () => void } | undefined;
+}): TrustedAppendResult {
+  const waitMs = input.lockWaitMs ?? HISTORY_WRITER_LOCK_WAIT_MS;
+  const result: TrustedAppendResult = {
+    status: "NOTHING_TO_APPEND", state: "not_evaluated", mirror_enabled: input.mirrorEnabled, rows_requested: input.rows.length,
+    rows_skipped_identical: 0, rows_appended: 0, inserted_rows: 0, history_rows_before: null, history_rows_after: null,
+    db_rows_before: null, db_rows_after: null, mirror_exact_match: false, lock_wait_ms: 0, capture_path: null, reasons: []
+  };
+  const preserve = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): TrustedAppendResult => {
+    result.status = status;
+    result.reasons.push(reason);
+    try {
+      mkdirSync(resolve(input.captureDir), { recursive: true });
+      const path = resolve(input.captureDir, `trusted_append_unappended_${input.runId}.json`);
+      writeFileSync(path, `${JSON.stringify({ run_id: input.runId, status, reason, rows }, null, 2)}\n`, "utf8");
+      result.capture_path = path;
+    } catch (error) {
+      result.reasons.push(`capture not written: ${(error as Error).message}`);
+    }
+    return result;
+  };
+  if (input.rows.length === 0) return result;
+
+  // 1. History-writer lock (after collection, before reading canonical state).
+  const lockPath = historyWriterLockPath(input.historyDir);
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const lock = new Database(lockPath);
+  const t0 = Date.now();
+  try {
+    lock.pragma(`busy_timeout = ${waitMs}`);
+    lock.exec("BEGIN EXCLUSIVE");
+  } catch (error) {
+    lock.close();
+    result.lock_wait_ms = Date.now() - t0;
+    if (isBusy(error)) return preserve("LOCK_BUSY_CAPTURE_PRESERVED", "history writer lock busy", input.rows);
+    return preserve("STATE_UNKNOWN_CAPTURE_PRESERVED", `history writer lock error: ${(error as Error).message}`, input.rows);
+  }
+  result.lock_wait_ms = Date.now() - t0;
+  let db: ReturnType<typeof openLocalDatabase> | null = null;
+  try {
+    input.hooks?.afterLock?.();
+    // 2. Classify under the lock: read history (G1 single-pass bytes) and DB.
+    let before: LoadedHistory;
+    let dbHashes: Map<string, string>;
+    try {
+      before = loadHistoryRows(input.historyDir);
+      dbHashes = readDbHashesReadOnly(input.dbPath);
+    } catch (error) {
+      result.state = "unknown";
+      return preserve("STATE_UNKNOWN_CAPTURE_PRESERVED", `history/DB read failed: ${(error as Error).message}`, input.rows);
+    }
+    const mappedBefore = before.loadedRows.map((e) => mapHistoryRowToMarketSignalHistoryRow(e.row, input.generatedAtJst));
+    const beforeById = new Map(before.loadedRows.map((e) => [e.row["row_id"] ?? "", e.row]));
+    const historyDuplicates = beforeById.size !== before.loadedRows.length;
+    result.history_rows_before = before.loadedRows.length;
+    result.db_rows_before = dbHashes.size;
+    result.state = !historyDuplicates && mirrorExactMatch(mappedBefore, dbHashes) ? "consistent" : "inconsistent";
+    if (result.state === "inconsistent") result.reasons.push(historyDuplicates ? "history has duplicate row_ids" : "DB is not an exact mirror of history (mirror blocked; no backfill)");
+
+    // 3. Point-of-use plan against canonical history.
+    const toWrite: HistoryRow[] = [];
+    for (const row of input.rows) {
+      const existing = beforeById.get(row.rowId);
+      if (existing === undefined) toWrite.push(row);
+      else if (existing["row_hash"] === row.rowHash) result.rows_skipped_identical += 1;
+      else return preserve("APPEND_CONFLICT_CAPTURE_PRESERVED", `row_id ${row.rowId} already in history with another row_hash`, input.rows);
+    }
+    if (new Set(toWrite.map((r) => r.rowId)).size !== toWrite.length) return preserve("APPEND_CONFLICT_CAPTURE_PRESERVED", "duplicate row_ids in this run's rows", input.rows);
+    if (toWrite.length === 0) {
+      result.mirror_exact_match = result.state === "consistent";
+      result.history_rows_after = result.history_rows_before;
+      result.db_rows_after = result.db_rows_before;
+      return result; // NOTHING_TO_APPEND
+    }
+
+    // 4. Normal mode takes the DB writer lock BEFORE appending: if it cannot be
+    //    had, canonical history is not touched.
+    const normal = result.state === "consistent" && input.mirrorEnabled;
+    if (normal) {
+      db = openLocalDatabase(input.dbPath);
+      db.pragma(`busy_timeout = ${Math.max(0, waitMs - result.lock_wait_ms)}`);
+      try {
+        db.exec("BEGIN IMMEDIATE");
+      } catch (error) {
+        if (isBusy(error)) return preserve("LOCK_BUSY_CAPTURE_PRESERVED", "DB writer lock busy", input.rows);
+        throw error;
+      }
+      const dbNow = readDbHashes(db);
+      if (dbNow.size !== dbHashes.size || [...dbHashes].some(([id, h]) => dbNow.get(id) !== h)) {
+        return preserve("STATE_UNKNOWN_CAPTURE_PRESERVED", "DB changed between classification and write lock", input.rows);
+      }
+    }
+
+    // 5. The real append, in this process.
+    let appendError: Error | null = null;
+    try {
+      input.write(toWrite);
+    } catch (error) {
+      appendError = error as Error;
+    }
+    input.hooks?.afterAppend?.();
+
+    // 6. Derive W from canonical history before/after, never from the writer's claims.
+    const after = loadHistoryRows(input.historyDir);
+    result.history_rows_after = after.loadedRows.length;
+    const intended = new Map(toWrite.map((r) => [r.rowId, r.rowHash]));
+    const afterById = new Map<string, Record<string, string>>();
+    const problems: string[] = [];
+    for (const e of after.loadedRows) {
+      const id = e.row["row_id"] ?? "";
+      if (afterById.has(id)) problems.push(`duplicate row_id after append: ${id}`);
+      afterById.set(id, e.row);
+    }
+    for (const [id, row] of beforeById) {
+      const now = afterById.get(id);
+      if (now === undefined) problems.push(`existing row removed: ${id}`);
+      else if (rowWithoutSource(now) !== rowWithoutSource(row)) problems.push(`existing row changed: ${id}`);
+    }
+    const appended: string[] = [];
+    for (const [id, row] of afterById) {
+      if (beforeById.has(id)) continue;
+      if (intended.get(id) !== row["row_hash"]) problems.push(`unexpected row appended: ${id}`);
+      else appended.push(id);
+    }
+    result.rows_appended = appended.length;
+    if (appendError === null && appended.length !== toWrite.length) problems.push(`${toWrite.length - appended.length} intended rows missing after append`);
+    if (appendError !== null) {
+      result.reasons.push(`append failed: ${appendError.message}`, ...problems.slice(0, 5));
+      result.status = "HISTORY_APPEND_FAILED_MIRROR_BLOCKED";
+      return result;
+    }
+    if (problems.length > 0) {
+      result.reasons.push(...problems.slice(0, 10));
+      result.status = "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED";
+      return result;
+    }
+    if (!normal) {
+      result.status = result.state === "consistent" ? "HISTORY_APPENDED_MIRROR_DISABLED" : "HISTORY_APPENDED_MIRROR_BLOCKED";
+      if (result.state === "consistent") result.reasons.push(`${TRUSTED_MIRROR_FLAG} is not 1 (default OFF)`);
+      return result;
+    }
+
+    // 7. Mirror exactly W inside the open DB transaction, validate, commit.
+    const d = db!;
+    const mappedAfter = after.loadedRows.map((e) => mapHistoryRowToMarketSignalHistoryRow(e.row, input.generatedAtJst));
+    const appendedSet = new Set(appended);
+    const collectorBaselineBefore = readCollectorBaseline(d);
+    ensureMirrorSchema(d);
+    const sync = applyRealSync({ db: d, runId: input.runId, generatedAtJst: input.generatedAtJst, reportPath: "", sourceHistoryFiles: after.files, rows: mappedAfter.filter((r) => appendedSet.has(r.row_id)) });
+    const validation = validatePostSync({ db: d, sourceRows: mappedAfter, syncRunId: sync.sync_run_record.sync_run_id, collectorBaselineBefore, historyMtimesUnchanged: historyContentDigest(input.historyDir) === after.contentDigest });
+    const exact = mirrorExactMatch(mappedAfter, readDbHashes(d));
+    if (sync.conflict_rows > 0 || sync.inserted_rows !== appended.length || !validation.passed || !exact) {
+      d.exec("ROLLBACK");
+      result.reasons.push(...validation.errors, ...(exact ? [] : ["DB is not an exact mirror after insert"]));
+      result.status = "MIRROR_FAILED_ROLLED_BACK";
+      return result;
+    }
+    input.hooks?.beforeCommit?.();
+    d.exec("COMMIT");
+    input.hooks?.afterCommit?.();
+    result.inserted_rows = sync.inserted_rows;
+    result.status = "MIRRORED";
+    // Re-read after commit (still under the history-writer lock) for the report.
+    result.mirror_exact_match = mirrorExactMatch(mappedAfter, readDbHashesReadOnly(input.dbPath));
+    result.db_rows_after = mappedAfter.length;
+    return result;
+  } finally {
+    if (db !== null) {
+      if (db.inTransaction) db.exec("ROLLBACK");
+      closeDatabase(db);
+    }
+    if (result.db_rows_after === null && result.db_rows_before !== null) {
+      try { result.db_rows_after = readDbHashesReadOnly(input.dbPath).size; } catch { /* report only */ }
+    }
+    try { lock.exec("ROLLBACK"); } catch { /* already released */ }
+    lock.close();
+  }
 }

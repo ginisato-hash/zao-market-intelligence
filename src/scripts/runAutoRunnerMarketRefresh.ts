@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isVerifiedSyncOutput, writeAppendReceipt } from "../services/freshHistoryToDbSync";
+import { isVerifiedTrustedMirror, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { splitCsvRecords } from "../services/historyCsvRecords";
 import { chromium } from "playwright";
 import {
@@ -103,6 +103,7 @@ interface RunnerOutput {
   append_plan: AppendPlan;
   append_result: HistoryAppendResult | null;
   db_sync_result: CommandResult | { skipped: true; reason: string };
+  trusted_append: TrustedAppendResult | null;
   ai_context_result: CommandResult | { skipped: true; reason: string };
   post_run_validation: Record<string, unknown>;
   monitoring: {
@@ -460,35 +461,27 @@ async function run(): Promise<RunnerOutput> {
   });
 
   let appendResult: HistoryAppendResult | null = null;
+  let trustedAppend: TrustedAppendResult | null = null;
   if (gate.live_mode_authorized && preflightOk && appendPlan.append_allowed && appendPlan.new_row_count > 0) {
-    appendResult = appendHistoryRowsAtomic({
-      rows: appendPlan.approved_rows,
-      historyDir: HISTORY_DIR,
-      backupDir: resolve(HISTORY_DIR, ".backup", runId),
-      historyBefore: preflight.history_rows
+    // Append and DB mirror in this process under the shared history-writer
+    // lock; only the rows this append wrote can reach the DB (P0-G2). Without an
+    // append nothing is synced: there is no other DB write path.
+    trustedAppend = trustedAppendAndMirror({
+      historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: appendPlan.approved_rows, captureDir: debugPath,
+      mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
+      write: (rows) => { appendResult = appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
     });
   }
 
-  let dbSyncResult: RunnerOutput["db_sync_result"] = { skipped: true, reason: "no_append_or_not_authorized" };
+  const dbSyncResult: RunnerOutput["db_sync_result"] = { skipped: true, reason: trustedAppend === null ? "no_append_or_not_authorized" : `trusted_append:${trustedAppend.status}` };
   let aiContextResult: RunnerOutput["ai_context_result"] = { skipped: true, reason: "db_sync_not_run" };
   const stateAfterAppend = readState();
-  if (appendResult !== null || (gate.live_mode_authorized && stateAfterAppend.history_rows !== stateAfterAppend.db_rows)) {
-    // Without an append there is no receipt, so the helper refuses any write.
-    const receiptPath = resolve(debugPath, "history_append_receipt.json");
-    if (appendResult !== null) writeAppendReceipt(receiptPath, appendResult.receipt);
-    dbSyncResult = runCommand("npm", ["run", "sync:history-to-db:fresh"], {
-      HISTORY_TO_DB_SYNC: "1",
-      EXPECTED_HISTORY_ROW_COUNT: String(stateAfterAppend.history_rows),
-      HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: appendResult === null ? "" : receiptPath
-    });
-    if (isVerifiedSyncOutput(dbSyncResult.status, dbSyncResult.parsed, stateAfterAppend.history_rows)) {
-      aiContextResult = runCommand("npm", ["run", "build:ai-context-packs"]);
-    }
-  }
+  const mirrorVerified = trustedAppend !== null && isVerifiedTrustedMirror(trustedAppend);
+  if (mirrorVerified) aiContextResult = runCommand("npm", ["run", "build:ai-context-packs"]);
 
   const postState = readState();
   const contextSucceeded = !("skipped" in aiContextResult) && aiContextResult.status === 0;
-  const dbSyncSucceeded = !("skipped" in dbSyncResult) && isVerifiedSyncOutput(dbSyncResult.status, dbSyncResult.parsed, stateAfterAppend.history_rows) && postState.db_rows === postState.history_rows;
+  const dbSyncSucceeded = mirrorVerified && postState.db_rows === postState.history_rows && stateAfterAppend.history_rows === postState.history_rows;
   const postCountsAligned = postState.history_rows === postState.db_rows && postState.db_rows === postState.ai_context_rows;
   const sourceCaution = !bookingSourceCheck.append_allowed || !jalanSourceCheck.append_allowed || appendPlan.rejected_rows.length > 0;
   const decision = decideMarketRefresh({
@@ -531,6 +524,7 @@ async function run(): Promise<RunnerOutput> {
     append_plan: appendPlan,
     append_result: appendResult,
     db_sync_result: dbSyncResult,
+    trusted_append: trustedAppend,
     ai_context_result: aiContextResult,
     post_run_validation: {
       post_counts_aligned: postCountsAligned,

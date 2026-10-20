@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,13 +14,18 @@ import {
   isVerifiedSyncOutput,
   runFreshHistoryToDbSync,
   SYNC_PERMIT_MAX_ROWS,
-  verifyAppendReceipt,
-  writeAppendReceipt,
+  historyWriterLockPath,
+  isVerifiedTrustedMirror,
+  TRUSTED_MIRROR_FLAG,
+  trustedAppendAndMirror,
+  type TrustedAppendResult,
   type FreshHistoryToDbSyncDecision,
   type FreshHistoryToDbSyncReport
 } from "../src/services/freshHistoryToDbSync";
 import type { MarketSignalHistoryDryRunRow } from "../src/services/historyToDbSyncDryRun";
-import { appendHistoryRowsAtomic, buildAppendReceipt, type AppendReceipt } from "../src/services/autoRunnerMarketRefresh";
+import { appendHistoryRowsAtomic } from "../src/services/autoRunnerMarketRefresh";
+import { runRealAppend } from "../src/services/localHistoryRealAppend";
+import { groupRowsToSourceShards } from "../src/services/bookingPreviewHistoryAppendRealRun";
 import type { HistoryRow } from "../src/services/localHistorySchemaDesign";
 
 const SERVICE_SOURCE = readFileSync(resolve(__dirname, "../src/services/freshHistoryToDbSync.ts"), "utf8");
@@ -41,9 +46,10 @@ function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "fresh-db-sync-"));
 }
 
-// Mimics appendHistoryRowsAtomic on the test schema: .bak backup of the shard,
-// append-only write, and the same buildAppendReceipt the production path uses.
-function genuineAppend(historyDir: string, runId: string, rows: Array<Record<string, string>>, receiptPath: string, file = "zao_signals_2026_06.csv"): AppendReceipt {
+// Mimics an append on the test schema (.bak backup + append-only write) and
+// leaves a receipt-style JSON artifact next to it. Since P0-G2 final, such
+// artifacts are untrusted: nothing reads them to authorize an INSERT.
+function genuineAppend(historyDir: string, runId: string, rows: Array<Record<string, string>>, artifactPath: string, file = "zao_signals_2026_06.csv"): void {
   const path = join(historyDir, file);
   const before = readFileSync(path);
   const headers = before.toString("utf8").split("\n", 1)[0]!.split(",");
@@ -52,23 +58,21 @@ function genuineAppend(historyDir: string, runId: string, rows: Array<Record<str
   writeFileSync(join(backupDir, `${file}.bak`), before);
   const after = Buffer.concat([before, Buffer.from(`${rows.map((r) => headers.map((h) => csvCell(r[h] ?? "")).join(",")).join("\n")}\n`, "utf8")]);
   writeFileSync(path, after);
-  const receipt = buildAppendReceipt(runId, [{ file, before, after }], rows.map((r) => ({ row_id: r["row_id"]!, row_hash: r["row_hash"]!, shard_file: file })));
-  writeAppendReceipt(receiptPath, receipt);
-  return receipt;
+  writeFileSync(artifactPath, JSON.stringify({ version: 1, run_id: runId, shards: [{ file, before_sha256: sha256Hex(before), before_size: before.length, after_sha256: sha256Hex(after), after_size: after.length }], rows: rows.map((r) => ({ row_id: r["row_id"], row_hash: r["row_hash"], shard_file: file })) }));
+}
+
+function sha256Hex(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex");
 }
 
 // permit = the row_ids this run genuinely appends (default: all rows, appended
-// to a header-only shard); null = no append receipt at all.
+// to a header-only shard), handed over IN MEMORY as trustedRowIds; null = none.
 function runHelper(root: string, options: { rows?: Array<Record<string, string>>; dbPath?: string; gate?: string; expected?: string; permit?: string[] | null; hooks?: { afterGateEvaluated?: () => void; afterShardParsed?: (file: string) => void } } = {}): FreshHistoryToDbSyncReport {
   const historyDir = join(root, "history");
   const rows = options.rows ?? [historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")];
   const appendIds = new Set(options.permit === null ? [] : (options.permit ?? rows.map((row) => row["row_id"]!)));
   writeHistory(historyDir, rows.filter((row) => !appendIds.has(row["row_id"]!)));
-  let receiptPath: string | undefined;
-  if (options.permit !== null) {
-    receiptPath = join(root, `receipt_${runSequence + 1}.json`);
-    genuineAppend(historyDir, `test_append_${runSequence + 1}`, rows.filter((row) => appendIds.has(row["row_id"]!)), receiptPath);
-  }
+  if (options.permit !== null) genuineAppend(historyDir, `test_append_${runSequence + 1}`, rows.filter((row) => appendIds.has(row["row_id"]!)), join(root, `artifact_${runSequence + 1}.json`));
   return runFreshHistoryToDbSync({
     runId: `fresh_test_run_${++runSequence}`,
     generatedAtJst: "2026-06-05T16:40:00+09:00",
@@ -80,7 +84,7 @@ function runHelper(root: string, options: { rows?: Array<Record<string, string>>
     debugPath: join(root, "debug"),
     historyToDbSyncGate: options.gate,
     expectedHistoryRowCount: options.expected,
-    appendReceiptPath: receiptPath,
+    trustedRowIds: options.permit === null ? undefined : appendIds,
     sourceAutoRunner07bArtifact: join(root, "auto07b.json"),
     testHooks: options.hooks
   });
@@ -265,7 +269,7 @@ describe("fresh history-to-DB sync helper", () => {
     const dbPath = join(root, "test.sqlite");
     const report = runHelper(root, { dbPath, gate: "1", permit: null });
     expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.reasons).toContain("HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH not set; writes require this run's verified append receipt");
+    expect(report.gate_result.reasons).toContain("no in-process trusted row set; DB writes only happen inside trustedAppendAndMirror");
     expect(report.sync_result.db_write_executed).toBe(false);
     expect(report.db_after_summary.market_signal_history_count).toBe(0);
   });
@@ -365,24 +369,34 @@ describe("fresh history-to-DB sync helper", () => {
     expect(evaluateFreshSyncGate({ envFlag: "1", expectedHistoryRowCount: "2", permit, invariants: evaluateMirrorInvariants(mapped, new Map(), permit), historyCount: 2, mapping: runHelper(tempRoot()).fresh_mapping_summary, duplicateRowIdCount: 0, schemaValid: true }).passed).toBe(true);
   });
 
-  it("both live callers pass this run's append receipt and require verified success", () => {
-    for (const script of ["runAutoRunnerMarketRefreshRotating.ts", "runAutoRunnerMarketRefresh.ts"]) {
+  it("all five scheduled append entries go through trustedAppendAndMirror; none spawns a DB-writing sync", () => {
+    const entries = ["runAutoRunnerMarketRefreshRotating.ts", "runAutoRunnerMarketRefresh.ts", "runPricingCriticalRecrawl.ts", "runBookingMarketRecrawlAppendPlan.ts"];
+    for (const script of entries) {
       const src = readFileSync(resolve(__dirname, "../src/scripts", script), "utf8");
-      const call = src.slice(src.indexOf('"sync:history-to-db:fresh"'), src.indexOf('"sync:history-to-db:fresh"') + 300);
-      expect(call).toContain('HISTORY_TO_DB_SYNC: "1"');
-      expect(call).toMatch(/HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: (receiptPath|appendResult === null \? "" : receiptPath)/u);
-      expect(src).toMatch(/writeAppendReceipt\(receiptPath, (r|appendResult)\.receipt\)/u);
-      expect(src).not.toContain("HISTORY_TO_DB_SYNC_PERMIT_PATH");
-      expect(src).not.toContain("EXPECTED_MAX_INSERT_ROWS");
-      // AI context refresh only behind the positive success protocol, never on counts alone.
-      expect(src).not.toMatch(/status === 0 && Number\([a-zA-Z.]*parsed\["db_after_count"\]\)/u);
-      const ctx = src.indexOf('"build:ai-context-packs"');
-      expect(src.slice(Math.max(0, ctx - 400), ctx)).toMatch(/isVerifiedSyncOutput\(|if \(dbSynced\)/u);
+      expect(src).toContain("trustedAppendAndMirror({");
+      expect(src).toMatch(/mirrorEnabled: (env|process\.env)\[TRUSTED_MIRROR_FLAG\] === "1"/u);
+      // Every real append call sits inside the trusted writer closure.
+      for (const m of src.matchAll(/(appendHistoryRowsAtomic|runRealAppend)\(\{/gu)) {
+        expect(src.slice(Math.max(0, m.index! - 220), m.index!)).toMatch(/write: \(r?s?o?w?s?\) => \{/u);
+      }
+      expect(src).not.toMatch(/HISTORY_TO_DB_SYNC: "1"/u);
+      expect(src).not.toMatch(/HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH|EXPECTED_MAX_INSERT_ROWS|writeAppendReceipt/u);
     }
+    // pricing-critical's competitor append runs the recrawl append-plan script (5th entry).
+    expect(readFileSync(resolve(__dirname, "../src/scripts/runPricingCriticalRecrawl.ts"), "utf8")).toContain('"plan:booking-market-recrawl-append"');
     const rotating = readFileSync(resolve(__dirname, "../src/scripts/runAutoRunnerMarketRefreshRotating.ts"), "utf8");
-    expect(rotating).toContain("dbSynced = isVerifiedSyncOutput(sync.status, sync.parsed, after.history_rows);");
+    expect(rotating).toContain("dbSynced = isVerifiedTrustedMirror(trustedAppend);");
     expect(rotating).toContain("const aligned = dbSynced && aiContextRefreshed && ");
     expect(rotating).not.toContain("dbSynced = true");
+    const live = readFileSync(resolve(__dirname, "../src/scripts/runAutoRunnerMarketRefresh.ts"), "utf8");
+    expect(live).toContain("if (mirrorVerified) aiContextResult = runCommand(\"npm\", [\"run\", \"build:ai-context-packs\"]);");
+  });
+
+  it("the trusted mirror is default OFF: no source, script or launchd template sets its flag", () => {
+    const { readdirSync } = require("node:fs") as typeof import("node:fs");
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+    const files = [...walk(resolve(__dirname, "../src")), ...walk(resolve(__dirname, "../ops")), resolve(__dirname, "../package.json")];
+    for (const f of files) expect(readFileSync(f, "utf8")).not.toMatch(new RegExp(`${TRUSTED_MIRROR_FLAG}=1|${TRUSTED_MIRROR_FLAG}: "1"`, "u"));
   });
 
   it("package contains sync script", () => {
@@ -497,29 +511,31 @@ describe("P0-G2 insert bound is this run's appended row_ids, not a caller-chosen
     const before = dbSnapshot(dbPath);
     const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), EXPECTED_MAX_INSERT_ROWS: "68129" });
     expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(cli.parsed["gate_reasons"]).toContain("HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH not set");
+    expect(cli.parsed["sync_write_refused"]).toBe("true");
     expect(cli.status).toBe(2);
     expect(dbSnapshot(dbPath)).toBe(before);
   }, 120_000);
 
-  it("refuses a forged receipt listing the whole 68,000-row backlog", () => {
+  it("refuses a forged receipt artifact listing the whole 68,000-row backlog", () => {
     const { root, dbPath } = cliRoot(rows, dbRows);
     const before = dbSnapshot(dbPath);
     const receiptPath = join(root, "receipt.json");
-    writeAppendReceipt(receiptPath, { version: 1, run_id: "forged", shards: [{ file: "zao_signals_2026_06.csv", before_sha256: "0", before_size: 1, after_sha256: "0", after_size: 1 }], rows: rows.slice(100).map((row) => ({ row_id: row["row_id"]!, row_hash: row["row_hash"]!, shard_file: "zao_signals_2026_06.csv" })) });
+    writeFileSync(receiptPath, JSON.stringify({ version: 1, run_id: "forged", shards: [], rows: rows.slice(100).map((row) => ({ row_id: row["row_id"], row_hash: row["row_hash"], shard_file: "zao_signals_2026_06.csv" })) }));
     const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-    expect(cli.parsed["gate_reasons"]).toContain(`append receipt rejected: ${BACKLOG} rows > per-run cap ${SYNC_PERMIT_MAX_ROWS}`);
+    expect(cli.parsed["sync_write_refused"]).toBe("true");
+    expect(cli.parsed["inserted_rows"]).toBe("0");
     expect(cli.status).toBe(2);
     expect(dbSnapshot(dbPath)).toBe(before);
   }, 120_000);
 
-  it("refuses the backlog when the genuine receipt only covers this run's 63 rows", () => {
+  it("refuses the backlog even with a genuine append's artifact for this run's 63 rows", () => {
     const { root, dbPath, historyDir } = cliRoot(rows.slice(0, -63), dbRows);
     const receiptPath = join(root, "receipt.json");
     genuineAppend(historyDir, "natural_run", rows.slice(-63), receiptPath);
     const before = dbSnapshot(dbPath);
     const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(rows.length), HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-    expect(cli.parsed["gate_reasons"]).toContain(`would insert ${BACKLOG - 63} rows not appended by this run`);
+    expect(cli.parsed["sync_write_refused"]).toBe("true");
+    expect(cli.parsed["inserted_rows"]).toBe("0");
     expect(cli.status).toBe(2);
     expect(dbSnapshot(dbPath)).toBe(before);
   }, 120_000);
@@ -530,7 +546,7 @@ describe("P0-G2 insert bound is this run's appended row_ids, not a caller-chosen
 });
 
 describe("P0-G3 a refused or unverified sync is never success", () => {
-  it("CLI: read-only run exits 0; refused write exits 2; verified write exits 0", () => {
+  it("CLI: read-only run exits 0; any write request exits 2, even after a genuine append", () => {
     const { root } = cliRoot([historyRow("row_1", "hash_1"), historyRow("row_2", "hash_2", "booking")], [mappedRow("row_1", "hash_1"), { ...mappedRow("row_2", "hash_2"), source: "booking" }]);
     expect(runCli(root, {}).status).toBe(0);
     const refused = runCli(root, { HISTORY_TO_DB_SYNC: "1" });
@@ -538,11 +554,14 @@ describe("P0-G3 a refused or unverified sync is never success", () => {
     expect(refused.parsed["sync_write_refused"]).toBe("true");
     const receiptPath = join(root, "receipt.json");
     genuineAppend(join(root, ".data/history"), "natural_run", [historyRow("row_3", "hash_3")], receiptPath);
-    const ok = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-    expect(ok.status).toBe(0);
-    expect(ok.parsed["decision"]).toBe("fresh_history_to_db_sync_success");
-    expect(ok.parsed["mirror_exact_match"]).toBe("true");
-    expect(isVerifiedSyncOutput(ok.status, ok.parsed, 3)).toBe(true);
+    const still = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
+    expect(still.status).toBe(2);
+    expect(still.parsed["inserted_rows"]).toBe("0");
+    expect(still.parsed["sync_write_refused_reason"]).toContain("direct CLI DB writes are disabled");
+    expect(isVerifiedSyncOutput(still.status, still.parsed, 3)).toBe(false);
+    const readOnly = runCli(root, {});
+    expect(readOnly.status).toBe(0);
+    expect(readOnly.parsed["mirror_exact_match"]).toBe("false"); // row_3 is not mirrored by the CLI
   }, 60_000);
 
   it("equal DB/history counts with a row_hash mismatch is refused and not verified", () => {
@@ -582,111 +601,313 @@ describe("P0-G3 a refused or unverified sync is never success", () => {
 });
 
 // ---------------------------------------------------------------------------
-// TD 2026-10-20 #6279266712: P0-G2 receipt provenance, P0-G1 parsed-bytes digest.
+// TD 2026-10-20 P0-G2 final (private #13 #6280295102, implementation GO):
+// the DB is written only by trustedAppendAndMirror, in the process that did the
+// append, under the shared history-writer lock. Files, env and the CLI can never
+// authorize an INSERT.
 
-describe("P0-G2 append receipt must prove this run's append", () => {
-  // DB-only 0, one old unsynced history row (old_2) that no current run appended.
-  function oldBacklog(): { root: string; dbPath: string; historyDir: string } {
+describe("P0-G2 final: caller-forged backup + receipt without any append (formerly it.fails)", () => {
+  const SHARD = "zao_signals_2026_06.csv";
+  function forged(beforeRows: Array<Record<string, string>> | null, claimed: Array<[string, string]>): { root: string; dbPath: string; historyDir: string; receiptPath: string } {
     const root = tempRoot();
-    const historyDir = join(root, "history");
-    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2")]);
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]);
-    return { root, dbPath, historyDir };
-  }
-  function syncWith(root: string, dbPath: string, receiptPath: string | undefined): FreshHistoryToDbSyncReport {
-    return runFreshHistoryToDbSync({ runId: `g2_${++runSequence}`, generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir: join(root, "history"), dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, appendReceiptPath: receiptPath, sourceAutoRunner07bArtifact: join(root, "none.json") });
-  }
-  function expectNoWrite(report: FreshHistoryToDbSyncReport, dbPath: string, before: string, reason: RegExp): void {
-    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.reasons.join("|")).toMatch(reason);
-    expect(report.sync_result.db_write_executed).toBe(false);
-    expect(report.sync_result.inserted_rows).toBe(0);
-    expect(dbSnapshot(dbPath)).toBe(before); // all tables, schema and sync_runs unchanged
-  }
-
-  it("rejects a forged 1-row receipt for an old unsynced row (no backup evidence)", () => {
-    const { root, dbPath } = oldBacklog();
-    const before = dbSnapshot(dbPath);
+    const historyDir = join(root, ".data/history");
+    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2"), historyRow("new_3", "hash_n3")]); // no append is executed
+    const dbPath = join(root, ".data/zao-market-intelligence.sqlite");
+    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]); // DB-only 0
+    const current = readFileSync(join(historyDir, SHARD));
+    const header = `${current.toString("utf8").split("\n", 1)[0]}\n`;
+    const bak = beforeRows === null ? Buffer.alloc(0) : Buffer.from(header + beforeRows.map((r) => historyCsvLine(r)).join("\n") + "\n");
+    mkdirSync(join(historyDir, ".backup", "forged_run"), { recursive: true });
+    writeFileSync(join(historyDir, ".backup", "forged_run", `${SHARD}.bak`), bak);
     const receiptPath = join(root, "forged.json");
-    writeAppendReceipt(receiptPath, { version: 1, run_id: "forged-or-stale", shards: [{ file: "zao_signals_2026_06.csv", before_sha256: "x", before_size: 10, after_sha256: "y", after_size: 20 }], rows: [{ row_id: "old_2", row_hash: "hash_o2", shard_file: "zao_signals_2026_06.csv" }] });
-    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /append receipt rejected/u);
-  });
-
-  it("rejects the old {run_id,row_ids} permit format", () => {
-    const { root, dbPath } = oldBacklog();
+    writeFileSync(receiptPath, JSON.stringify({ version: 1, run_id: "forged_run", shards: [{ file: SHARD, before_sha256: sha256Hex(bak), before_size: bak.length, after_sha256: sha256Hex(current), after_size: current.length }], rows: claimed.map(([row_id, row_hash]) => ({ row_id, row_hash, shard_file: SHARD })) }));
+    return { root, dbPath, historyDir, receiptPath };
+  }
+  function expectRefusedUnchanged(root: string, dbPath: string, receiptPath: string): void {
     const before = dbSnapshot(dbPath);
-    const receiptPath = join(root, "old_format.json");
-    writeFileSync(receiptPath, JSON.stringify({ run_id: "forged-or-stale", row_ids: ["old_2"] }));
-    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /append receipt rejected: bad version or run_id/u);
-  });
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath, EXPECTED_MAX_INSERT_ROWS: "68129" });
+    expect(cli.parsed["inserted_rows"]).toBe("0");
+    expect(cli.status).toBe(2);
+    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 3)).toBe(false); // no AI context refresh / publish
+    expect(dbSnapshot(dbPath)).toBe(before); // rows, schema, sync_runs unchanged
+  }
 
-  it("rejects a forged receipt that reuses a genuine run's backup but claims an older row", () => {
-    const { root, dbPath, historyDir } = oldBacklog();
-    const genuine = genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], join(root, "genuine.json"));
-    seedDb(dbPath, [{ ...mappedRow("new_3", "hash_n3") }], "run_a_sync");
+  it("forged .bak = header + old_1 and receipt claiming old_2, new_3 authorizes no INSERT", () => {
+    const { root, dbPath, receiptPath } = forged([historyRow("old_1", "hash_o1")], [["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
+    expectRefusedUnchanged(root, dbPath, receiptPath);
+  }, 60_000);
+
+  it("forged empty .bak for a shard never backed up promotes nothing", () => {
+    const { root, dbPath, receiptPath } = forged(null, [["old_1", "hash_o1"], ["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
+    expectRefusedUnchanged(root, dbPath, receiptPath);
+  }, 60_000);
+
+  it("the trusted path ignores those artifacts: a real new append on that DB is append-only (no backfill of old_2/new_3)", () => {
+    const { root, dbPath, historyDir } = forged([historyRow("old_1", "hash_o1")], [["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
     const before = dbSnapshot(dbPath);
-    const receiptPath = join(root, "forged.json");
-    writeAppendReceipt(receiptPath, { ...genuine, rows: [{ row_id: "old_2", row_hash: "hash_o2", shard_file: "zao_signals_2026_06.csv" }] });
-    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /appended records do not match the receipt rows/u);
-  });
-
-  it("rejects a replayed genuine receipt once the shard was appended again", () => {
-    const { root, dbPath, historyDir } = oldBacklog();
-    const receiptA = join(root, "a.json");
-    genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], receiptA); // run_a's own sync never happened
-    genuineAppend(historyDir, "run_b", [historyRow("new_4", "hash_n4")], join(root, "b.json"));
-    const before = dbSnapshot(dbPath);
-    expectNoWrite(syncWith(root, dbPath, receiptA), dbPath, before, /changed after this append \(stale or forged\)/u);
-  });
-
-  it("rejects a genuine receipt that is no longer current (append older than the freshness window)", () => {
-    const { root, dbPath, historyDir } = oldBacklog();
-    seedDb(dbPath, [mappedRow("old_2", "hash_o2")], "old_2_synced"); // DB == history before the append
-    const receiptPath = join(root, "a.json");
-    genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], receiptPath);
-    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    utimesSync(join(historyDir, ".backup", "run_a", "zao_signals_2026_06.csv.bak"), old, old);
-    utimesSync(join(historyDir, "zao_signals_2026_06.csv"), old, old);
-    const before = dbSnapshot(dbPath);
-    expectNoWrite(syncWith(root, dbPath, receiptPath), dbPath, before, /not from a current append|not written by a current append/u);
-  });
-
-  it("still syncs a genuine current append (positive case, 63 rows)", () => {
-    const root = tempRoot();
-    const historyDir = join(root, "history");
-    const base = Array.from({ length: 10 }, (_, i) => historyRow(`base_${i}`, `hb_${i}`));
-    writeHistory(historyDir, base);
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, base.map((r) => mappedRow(r["row_id"]!, r["row_hash"]!)));
-    const receiptPath = join(root, "natural.json");
-    genuineAppend(historyDir, "natural_run", Array.from({ length: 63 }, (_, i) => historyRow(`new_${i}`, `hn_${i}`)), receiptPath);
-    const report = syncWith(root, dbPath, receiptPath);
-    expect(report.decision).toBe("fresh_history_to_db_sync_success");
-    expect(report.sync_result.inserted_rows).toBe(63);
-    expect(report.mirror_exact_match).toBe(true);
-  });
-
-  it("verifies the receipt produced by the real appendHistoryRowsAtomic", () => {
-    const root = tempRoot();
-    const historyDir = join(root, "history");
-    const dbPath = join(root, "test.sqlite");
-    const backup = (runId: string): string => join(historyDir, ".backup", runId);
-    const first = appendHistoryRowsAtomic({ rows: [liveHistoryRow("live_1"), liveHistoryRow("live_2")], historyDir, backupDir: backup("run_1"), historyBefore: 0 });
-    writeAppendReceipt(join(root, "r1.json"), first.receipt);
-    expect(syncWith(root, dbPath, join(root, "r1.json")).decision).toBe("fresh_history_to_db_sync_success");
-    const second = appendHistoryRowsAtomic({ rows: [liveHistoryRow("live_3")], historyDir, backupDir: backup("run_2"), historyBefore: 2 });
-    writeAppendReceipt(join(root, "r2.json"), second.receipt);
-    const before = dbSnapshot(dbPath);
-    expect(syncWith(root, dbPath, join(root, "r1.json")).gate_result.reasons.join("|")).toMatch(/changed after this append/u); // replay of run_1
+    const r = trustedAppendAndMirror({ historyDir, dbPath, runId: "real_run", generatedAtJst: "2026-10-20T10:00:00+09:00", rows: [], captureDir: join(root, "cap"), mirrorEnabled: true, write: () => { throw new Error("not called"); } });
+    expect(r.status).toBe("NOTHING_TO_APPEND");
+    expect(isVerifiedTrustedMirror(r)).toBe(false);
     expect(dbSnapshot(dbPath)).toBe(before);
-    const ok = syncWith(root, dbPath, join(root, "r2.json"));
-    expect(ok.decision).toBe("fresh_history_to_db_sync_success");
-    expect(ok.sync_result.inserted_rows).toBe(1);
-    expect(ok.mirror_exact_match).toBe(true);
-    expect(verifyAppendReceipt(join(root, "r2.json"), { shards: [] }, historyDir, Date.now()).error).toMatch(/not in history/u);
   });
 });
+
+function historyCsvLine(row: Record<string, string>): string {
+  const headers = ["row_id", "row_hash", "shard_month", "collected_date_jst", "collected_at_jst", "normalized_at_jst", "source", "canonical_property_name", "source_property_id", "checkin", "checkout", "stay_scope", "availability_status", "basis_confidence", "debug_artifact_path", "schema_version", "source_url", "normalized_total_jpy", "price_basis", "dp_usage", "classification", "exclusion_reason"];
+  return headers.map((h) => csvCell(row[h] ?? "")).join(",");
+}
+
+describe("P0-G2 final: trusted in-process append + mirror", () => {
+  const AT = "2026-10-20T10:00:00+09:00";
+  interface Fx { root: string; historyDir: string; dbPath: string }
+  function atomicWriter(historyDir: string, runId: string): (rows: HistoryRow[]) => void {
+    return (rows) => { appendHistoryRowsAtomic({ rows, historyDir, backupDir: join(historyDir, ".backup", runId), historyBefore: 0 }); };
+  }
+  function run(fx: Fx, runId: string, rows: HistoryRow[], opts: { mirror?: boolean; write?: (rows: HistoryRow[]) => void; lockWaitMs?: number } = {}): TrustedAppendResult {
+    return trustedAppendAndMirror({ historyDir: fx.historyDir, dbPath: fx.dbPath, runId, generatedAtJst: AT, rows, captureDir: join(fx.root, "capture"), mirrorEnabled: opts.mirror ?? true, lockWaitMs: opts.lockWaitMs ?? 2_000, write: opts.write ?? atomicWriter(fx.historyDir, runId) });
+  }
+  // History and DB start as an exact mirror (both built by the trusted path).
+  function mirrored(): Fx {
+    const root = tempRoot();
+    const fx = { root, historyDir: join(root, ".data/history"), dbPath: join(root, ".data/zao-market-intelligence.sqlite") };
+    mkdirSync(fx.historyDir, { recursive: true });
+    const r = run(fx, "seed_run", [liveHistoryRow("live_1"), liveHistoryRow("live_2")]);
+    expect(r.status).toBe("MIRRORED");
+    return fx;
+  }
+  const shardText = (fx: Fx, shard = "2026_11"): string => (existsSync(join(fx.historyDir, `zao_signals_${shard}.csv`)) ? readFileSync(join(fx.historyDir, `zao_signals_${shard}.csv`), "utf8") : "");
+
+  it("normal append to an existing shard mirrors exactly W", () => {
+    const fx = mirrored();
+    const r = run(fx, "run_a", [liveHistoryRow("live_3")]);
+    expect(r).toMatchObject({ status: "MIRRORED", state: "consistent", rows_appended: 1, inserted_rows: 1, mirror_exact_match: true });
+    expect(isVerifiedTrustedMirror(r)).toBe(true);
+  });
+
+  it("normal append creating a new shard mirrors exactly W", () => {
+    const fx = mirrored();
+    const r = run(fx, "run_new", [liveHistoryRow("live_dec", "2026_12")]);
+    expect(r).toMatchObject({ status: "MIRRORED", rows_appended: 1, inserted_rows: 1, mirror_exact_match: true });
+    expect(shardText(fx, "2026_12")).toContain("live_dec");
+  });
+
+  it("runRealAppend (whole-shard rebuild) is verified against before/after history and mirrored", () => {
+    const fx = mirrored();
+    const r = run(fx, "recrawl_run", [liveHistoryRow("recrawl_1")], { write: (rows) => {
+      const res = runRealAppend({ historyDir: fx.historyDir, runId: "recrawl_run", backupTimestamp: "20261020_100000", sourceShards: groupRowsToSourceShards(rows) });
+      if (res.decision !== "local_history_real_append_success") throw new Error(res.decision);
+    } });
+    expect(r).toMatchObject({ status: "MIRRORED", rows_appended: 1, inserted_rows: 1, mirror_exact_match: true });
+  });
+
+  it.each([
+    ["changes an existing row", (fx: Fx) => (rows: HistoryRow[]) => { appendHistoryRowsAtomic({ rows, historyDir: fx.historyDir, backupDir: join(fx.historyDir, ".backup", "x"), historyBefore: 0 }); writeFileSync(join(fx.historyDir, "zao_signals_2026_11.csv"), shardText(fx).replace("蔵王国際ホテル", "改ざん")); }, /existing row changed/u],
+    ["removes an existing row", (fx: Fx) => (rows: HistoryRow[]) => { appendHistoryRowsAtomic({ rows, historyDir: fx.historyDir, backupDir: join(fx.historyDir, ".backup", "x"), historyBefore: 0 }); const lines = shardText(fx).split("\n"); writeFileSync(join(fx.historyDir, "zao_signals_2026_11.csv"), [lines[0], ...lines.slice(2)].join("\n")); }, /existing row removed/u],
+    ["appends an extra unintended row", (fx: Fx) => (rows: HistoryRow[]) => { appendHistoryRowsAtomic({ rows: [...rows, liveHistoryRow("extra_backfill")], historyDir: fx.historyDir, backupDir: join(fx.historyDir, ".backup", "x"), historyBefore: 0 }); }, /unexpected row appended: extra_backfill/u]
+  ])("refuses to mirror when the writer %s", (_label, makeWriter, reason) => {
+    const fx = mirrored();
+    const before = dbSnapshot(fx.dbPath);
+    const r = run(fx, "bad_run", [liveHistoryRow("live_9")], { write: makeWriter(fx) });
+    expect(r.status).toBe("HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED");
+    expect(r.reasons.join("|")).toMatch(reason);
+    expect(isVerifiedTrustedMirror(r)).toBe(false);
+    expect(dbSnapshot(fx.dbPath)).toBe(before); // rows, schema, sync_runs
+  });
+
+  it("re-processing the same observation appends nothing and stays verified", () => {
+    const fx = mirrored();
+    const r = run(fx, "rerun", [liveHistoryRow("live_1")]);
+    expect(r).toMatchObject({ status: "NOTHING_TO_APPEND", rows_skipped_identical: 1, mirror_exact_match: true });
+    expect(isVerifiedTrustedMirror(r)).toBe(true);
+  });
+
+  it("a row_id already in history with another row_hash appends nothing and preserves the capture", () => {
+    const fx = mirrored();
+    const historyBefore = shardText(fx);
+    const r = run(fx, "conflict_run", [{ ...liveHistoryRow("live_1"), rowHash: "different" }]);
+    expect(r.status).toBe("APPEND_CONFLICT_CAPTURE_PRESERVED");
+    expect(shardText(fx)).toBe(historyBefore);
+    expect(existsSync(r.capture_path!)).toBe(true);
+  });
+
+  it("default OFF: a consistent DB is not written when the mirror flag is off (append-only)", () => {
+    const fx = mirrored();
+    const before = dbSnapshot(fx.dbPath);
+    const r = run(fx, "flag_off", [liveHistoryRow("live_4")], { mirror: false });
+    expect(r.status).toBe("HISTORY_APPENDED_MIRROR_DISABLED");
+    expect(r.reasons.join("|")).toContain(`${TRUSTED_MIRROR_FLAG} is not 1`);
+    expect(shardText(fx)).toContain("live_4");
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+  });
+
+  it("current production shape (DB-only rows): append-only, DB/schema/sync_runs untouched, no backfill, not verified", () => {
+    const fx = mirrored();
+    seedDb(fx.dbPath, [mappedRow("rolled_back_488_like", "h")], "db_only_seed"); // DB-only row like the 488
+    const before = dbSnapshot(fx.dbPath);
+    const r = run(fx, "degraded", [liveHistoryRow("live_5")]);
+    expect(r).toMatchObject({ status: "HISTORY_APPENDED_MIRROR_BLOCKED", state: "inconsistent", rows_appended: 1, inserted_rows: 0 });
+    expect(isVerifiedTrustedMirror(r)).toBe(false); // no AI context / publish
+    expect(shardText(fx)).toContain("live_5");
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+  });
+
+  it("an unreadable DB is STATE_UNKNOWN: no append at all", () => {
+    const fx = mirrored();
+    writeFileSync(fx.dbPath, "not a database");
+    const historyBefore = shardText(fx);
+    const r = run(fx, "unknown", [liveHistoryRow("live_6")]);
+    expect(r.status).toBe("STATE_UNKNOWN_CAPTURE_PRESERVED");
+    expect(shardText(fx)).toBe(historyBefore);
+  });
+
+  it("history-writer lock held by another writer: no append (consistent and degraded state)", () => {
+    for (const degraded of [false, true]) {
+      const fx = mirrored();
+      if (degraded) seedDb(fx.dbPath, [mappedRow("db_only", "h")], "db_only_seed");
+      const before = dbSnapshot(fx.dbPath);
+      const historyBefore = shardText(fx);
+      const other = new Database(historyWriterLockPath(fx.historyDir));
+      other.exec("BEGIN EXCLUSIVE");
+      try {
+        const r = run(fx, "contended", [liveHistoryRow("live_7")], { lockWaitMs: 300 });
+        expect(r.status).toBe("LOCK_BUSY_CAPTURE_PRESERVED");
+        expect(r.reasons).toContain("history writer lock busy");
+        expect(existsSync(r.capture_path!)).toBe(true);
+      } finally {
+        other.exec("ROLLBACK");
+        other.close();
+      }
+      expect(shardText(fx)).toBe(historyBefore);
+      expect(dbSnapshot(fx.dbPath)).toBe(before);
+    }
+  });
+
+  it("DB writer lock held by another connection: no append in the normal state", () => {
+    const fx = mirrored();
+    const before = dbSnapshot(fx.dbPath);
+    const historyBefore = shardText(fx);
+    const other = new Database(fx.dbPath);
+    other.exec("BEGIN IMMEDIATE");
+    try {
+      const r = run(fx, "db_contended", [liveHistoryRow("live_8")], { lockWaitMs: 300 });
+      expect(r.status).toBe("LOCK_BUSY_CAPTURE_PRESERVED");
+      expect(r.reasons).toContain("DB writer lock busy");
+    } finally {
+      other.exec("ROLLBACK");
+      other.close();
+    }
+    expect(shardText(fx)).toBe(historyBefore);
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+  });
+
+  it("a multi-shard append failing midway leaves the DB unchanged and later runs mirror-blocked (no auto-repair)", () => {
+    const fx = mirrored();
+    const before = dbSnapshot(fx.dbPath);
+    const r = run(fx, "partial", [liveHistoryRow("nov_ok"), liveHistoryRow("dec_fail", "2026_12")], { write: (rows) => {
+      appendHistoryRowsAtomic({ rows: rows.filter((x) => x.shardMonth === "2026_11"), historyDir: fx.historyDir, backupDir: join(fx.historyDir, ".backup", "partial"), historyBefore: 0 });
+      throw new Error("disk error on second shard");
+    } });
+    expect(r.status).toBe("HISTORY_APPEND_FAILED_MIRROR_BLOCKED");
+    expect(r.rows_appended).toBe(1);
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+    expect(shardText(fx)).toContain("nov_ok"); // the partial row stays: nothing is deleted or restored
+    const next = run(fx, "after_partial", [liveHistoryRow("live_10")]);
+    expect(next.status).toBe("HISTORY_APPENDED_MIRROR_BLOCKED");
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+  });
+
+  // Crash injection: a separate OS process runs the trusted path and dies at a hook.
+  function childRun(fx: Fx, runId: string, rows: HistoryRow[], extra: { exitAt?: string; holdMs?: number } = {}): { status: number | null; result: TrustedAppendResult | null; stderr: string } {
+    const script = join(fx.root, `child_${runId}.mts`);
+    writeFileSync(script, `
+import { join } from "node:path";
+const svc = await import(${JSON.stringify(resolve(REPO_ROOT, "src/services/freshHistoryToDbSync.ts"))});
+const arm = await import(${JSON.stringify(resolve(REPO_ROOT, "src/services/autoRunnerMarketRefresh.ts"))});
+const cfg = ${JSON.stringify({ historyDir: fx.historyDir, dbPath: fx.dbPath, runId, rows, captureDir: join(fx.root, "capture"), ...extra })};
+const hooks: Record<string, () => void> = {};
+if (cfg.exitAt) hooks[cfg.exitAt] = () => process.exit(9);
+if (cfg.holdMs) hooks.afterLock = () => { const end = Date.now() + cfg.holdMs; while (Date.now() < end) { /* hold the lock */ } };
+const r = svc.trustedAppendAndMirror({ historyDir: cfg.historyDir, dbPath: cfg.dbPath, runId: cfg.runId, generatedAtJst: ${JSON.stringify(AT)}, rows: cfg.rows, captureDir: cfg.captureDir, mirrorEnabled: true, lockWaitMs: 20000, hooks,
+  write: (rows: unknown[]) => { arm.appendHistoryRowsAtomic({ rows, historyDir: cfg.historyDir, backupDir: join(cfg.historyDir, ".backup", cfg.runId), historyBefore: 0 }); } });
+console.log("RESULT=" + JSON.stringify(r));
+`);
+    const r = spawnSync(process.execPath, ["--import", TSX_LOADER, script], { cwd: REPO_ROOT, encoding: "utf8" });
+    const line = (r.stdout ?? "").split("\n").find((l) => l.startsWith("RESULT="));
+    return { status: r.status, result: line === undefined ? null : JSON.parse(line.slice(7)) as TrustedAppendResult, stderr: r.stderr };
+  }
+
+  it.each([["afterAppend"], ["beforeCommit"]])("crash at %s: DB unchanged, lock released, next run mirror-blocked", (exitAt) => {
+    const fx = mirrored();
+    const before = dbSnapshot(fx.dbPath);
+    const child = childRun(fx, `crash_${exitAt}`, [liveHistoryRow(`crash_${exitAt}`)], { exitAt });
+    expect(child.status).toBe(9);
+    expect(shardText(fx)).toContain(`crash_${exitAt}`); // the CSV rename survived the crash
+    expect(dbSnapshot(fx.dbPath)).toBe(before); // uncommitted DB work rolled back by SQLite
+    const db = new Database(fx.dbPath, { readonly: true });
+    expect(db.pragma("integrity_check", { simple: true })).toBe("ok");
+    db.close();
+    const next = run(fx, `after_${exitAt}`, [liveHistoryRow(`next_${exitAt}`)], { lockWaitMs: 1_000 }); // lock was released by the OS
+    expect(next.status).toBe("HISTORY_APPENDED_MIRROR_BLOCKED");
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+  }, 60_000);
+
+  it("crash right after COMMIT: DB == history, next run mirrors normally", () => {
+    const fx = mirrored();
+    const child = childRun(fx, "crash_afterCommit", [liveHistoryRow("committed_then_crash")], { exitAt: "afterCommit" });
+    expect(child.status).toBe(9);
+    const next = run(fx, "after_commit_crash", [liveHistoryRow("next_after_commit")], { lockWaitMs: 1_000 });
+    expect(next).toMatchObject({ status: "MIRRORED", inserted_rows: 1, mirror_exact_match: true });
+  }, 60_000);
+
+  it("two concurrent writer processes are serialized and both mirrored exactly", () => {
+    const fx = mirrored();
+    // A starts first and holds the lock for 1.5 s; B starts 0.4 s later and must wait, not fail.
+    const results = parallelChildren(fx, [["par_a", [liveHistoryRow("par_a")], 1500], ["par_b", [liveHistoryRow("par_b")], 0]]);
+    expect(results.map((r) => r?.status).sort()).toEqual(["MIRRORED", "MIRRORED"]);
+    const db = new Database(fx.dbPath, { readonly: true });
+    expect((db.prepare("SELECT COUNT(*) c FROM market_signal_history").get() as { c: number }).c).toBe(4);
+    db.close();
+    const check = run(fx, "post_parallel", [liveHistoryRow("par_a")]);
+    expect(check).toMatchObject({ status: "NOTHING_TO_APPEND", mirror_exact_match: true });
+  }, 60_000);
+
+  function parallelChildren(fx: Fx, jobs: Array<[string, HistoryRow[], number]>): Array<TrustedAppendResult | null> {
+    // Launch every child before waiting on any, via a tiny bash fan-out.
+    const scripts = jobs.map(([runId, rows, holdMs]) => {
+      const script = join(fx.root, `child_${runId}.mts`);
+      writeFileSync(script, `
+import { join } from "node:path";
+const svc = await import(${JSON.stringify(resolve(REPO_ROOT, "src/services/freshHistoryToDbSync.ts"))});
+const arm = await import(${JSON.stringify(resolve(REPO_ROOT, "src/services/autoRunnerMarketRefresh.ts"))});
+const hooks = ${holdMs} > 0 ? { afterLock: () => { const end = Date.now() + ${holdMs}; while (Date.now() < end) { /* hold */ } } } : {};
+const r = svc.trustedAppendAndMirror({ historyDir: ${JSON.stringify(fx.historyDir)}, dbPath: ${JSON.stringify(fx.dbPath)}, runId: ${JSON.stringify(runId)}, generatedAtJst: ${JSON.stringify(AT)}, rows: ${JSON.stringify(rows)}, captureDir: ${JSON.stringify(join(fx.root, "capture"))}, mirrorEnabled: true, lockWaitMs: 20000, hooks,
+  write: (rows: unknown[]) => { arm.appendHistoryRowsAtomic({ rows, historyDir: ${JSON.stringify(fx.historyDir)}, backupDir: join(${JSON.stringify(fx.historyDir)}, ".backup", ${JSON.stringify(runId)}), historyBefore: 0 }); } });
+console.log("RESULT=" + JSON.stringify(r));
+`);
+      return script;
+    });
+    const cmd = scripts.map((sc, i) => `("${process.execPath}" --import "${TSX_LOADER}" "${sc}" > "${sc}.out" 2>&1) & ${i === 0 ? "sleep 0.4;" : ""}`).join(" ") + " wait";
+    spawnSync("bash", ["-c", cmd], { cwd: REPO_ROOT, encoding: "utf8" });
+    return scripts.map((sc) => {
+      const line = readFileSync(`${sc}.out`, "utf8").split("\n").find((l) => l.startsWith("RESULT="));
+      return line === undefined ? null : JSON.parse(line.slice(7)) as TrustedAppendResult;
+    });
+  }
+
+  it("isVerifiedTrustedMirror is false for every non-mirrored outcome", () => {
+    const base: TrustedAppendResult = { status: "MIRRORED", state: "consistent", mirror_enabled: true, rows_requested: 1, rows_skipped_identical: 0, rows_appended: 1, inserted_rows: 1, history_rows_before: 1, history_rows_after: 2, db_rows_before: 1, db_rows_after: 2, mirror_exact_match: true, lock_wait_ms: 0, capture_path: null, reasons: [] };
+    expect(isVerifiedTrustedMirror(base)).toBe(true);
+    for (const status of ["HISTORY_APPENDED_MIRROR_DISABLED", "HISTORY_APPENDED_MIRROR_BLOCKED", "HISTORY_APPEND_FAILED_MIRROR_BLOCKED", "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED", "MIRROR_FAILED_ROLLED_BACK", "LOCK_BUSY_CAPTURE_PRESERVED", "STATE_UNKNOWN_CAPTURE_PRESERVED", "APPEND_CONFLICT_CAPTURE_PRESERVED"] as const) {
+      expect(isVerifiedTrustedMirror({ ...base, status })).toBe(false);
+    }
+    expect(isVerifiedTrustedMirror({ ...base, mirror_exact_match: false })).toBe(false);
+    expect(isVerifiedTrustedMirror({ ...base, mirror_enabled: false })).toBe(false);
+    expect(isVerifiedTrustedMirror({ ...base, status: "NOTHING_TO_APPEND", state: "inconsistent" })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TD 2026-10-20: P0-G1 parsed-bytes digest (accepted) on the in-process write path.
 
 describe("P0-G1 source digest is bound to the parsed bytes", () => {
   it("stops before any write when another process appends between the first shard read and digest finalisation", () => {
@@ -695,13 +916,12 @@ describe("P0-G1 source digest is bound to the parsed bytes", () => {
     const dbPath = join(root, "test.sqlite");
     seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
     writeHistory(historyDir, [historyRow("row_1", "hash_1")]);
-    const receiptPath = join(root, "receipt.json");
-    genuineAppend(historyDir, "natural_run", [historyRow("row_2", "hash_2")], receiptPath);
+    genuineAppend(historyDir, "natural_run", [historyRow("row_2", "hash_2")], join(root, "artifact.json"));
     // A second shard that is read AFTER the first one.
     writeFileSync(join(historyDir, "zao_signals_2026_07.csv"), readFileSync(join(historyDir, "zao_signals_2026_06.csv"), "utf8").split("\n", 1)[0] + "\n");
     const before = dbSnapshot(dbPath);
     let injected = false;
-    const report = runFreshHistoryToDbSync({ runId: "g1_race", generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, appendReceiptPath: receiptPath, sourceAutoRunner07bArtifact: join(root, "none.json"),
+    const report = runFreshHistoryToDbSync({ runId: "g1_race", generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, trustedRowIds: new Set(["row_2"]), sourceAutoRunner07bArtifact: join(root, "none.json"),
       testHooks: { afterShardParsed: (file) => {
         if (injected || !file.endsWith("zao_signals_2026_06.csv")) return;
         injected = true; // another OS process appends to the shard that was just parsed
@@ -730,9 +950,9 @@ describe("P0-G1 source digest is bound to the parsed bytes", () => {
   });
 });
 
-function liveHistoryRow(rowId: string): HistoryRow {
+function liveHistoryRow(rowId: string, shardMonth = "2026_11"): HistoryRow {
   return {
-    rowId, rowHash: `hash_${rowId}`, shardMonth: "2026_11", collectedDateJst: "2026-10-20", collectedAtJst: "2026-10-20T08:00:00+09:00", normalizedAtJst: "2026-10-20T08:00:00+09:00",
+    rowId, rowHash: `hash_${rowId}`, shardMonth, collectedDateJst: "2026-10-20", collectedAtJst: "2026-10-20T08:00:00+09:00", normalizedAtJst: "2026-10-20T08:00:00+09:00",
     source: "booking", sourcePhase: "test", collectorStage: "test", canonicalPropertyName: "蔵王国際ホテル", sourcePropertyName: "蔵王国際ホテル", propertyIdentityMatch: true,
     sourcePropertyId: "zao-kokusai", sourceSlugOrCode: "zao-kokusai", checkin: "2026-11-07", checkout: "2026-11-08", stayNights: 1, groupAdults: 2, noRooms: 1, groupChildren: 0,
     currency: "JPY", language: "ja", stayScope: "2_adults_1_room_1_night", availabilityStatus: "available", soldOutStatus: "available", normalizedTotalPrice: 30000,
@@ -741,139 +961,3 @@ function liveHistoryRow(rowId: string): HistoryRow {
     isPriceUsableForDpDirectional: true, isPriceExcludedFromDp: false, dpExclusionReason: null, warningFlags: "", sourceReportPath: "", sourceCsvPath: "", debugArtifactPath: "", schemaVersion: "zao_local_history_v1"
   };
 }
-
-// ---------------------------------------------------------------------------
-// TD 2026-10-20 follow-up: the pre-append state must be proven, not declared.
-
-describe("P0-G2 before-state proof: before_size=0 is never self-declared", () => {
-  const SHARD = "zao_signals_2026_06.csv";
-  const sha = (b: Buffer): string => createHash("sha256").update(b).digest("hex");
-  // old_1 synced, old_2 unsynced; run_a genuinely appended new_3 (non-empty .bak).
-  function scenario(): { root: string; historyDir: string; dbPath: string; current: Buffer } {
-    const root = tempRoot();
-    const historyDir = join(root, ".data/history");
-    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2")]);
-    genuineAppend(historyDir, "run_a", [historyRow("new_3", "hash_n3")], join(root, "genuine.json"));
-    const dbPath = join(root, ".data/zao-market-intelligence.sqlite");
-    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]);
-    return { root, historyDir, dbPath, current: readFileSync(join(historyDir, SHARD)) };
-  }
-  // Counterexample: claim the whole shard is new so every row (incl. old_2) becomes "this run's".
-  function wholeShardClaim(runId: string, current: Buffer, beforeSize: unknown = 0): AppendReceipt {
-    return { version: 1, run_id: runId, shards: [{ file: SHARD, before_sha256: sha(Buffer.alloc(0)), before_size: beforeSize as number, after_sha256: sha(current), after_size: current.length }],
-      rows: [["old_1", "hash_o1"], ["old_2", "hash_o2"], ["new_3", "hash_n3"]].map(([row_id, row_hash]) => ({ row_id: row_id!, row_hash: row_hash!, shard_file: SHARD })) };
-  }
-  function refusedWithoutChange(root: string, dbPath: string, receipt: AppendReceipt, reason: RegExp): void {
-    const receiptPath = join(root, "claim.json");
-    writeAppendReceipt(receiptPath, receipt);
-    const before = dbSnapshot(dbPath);
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-    expect(cli.parsed["gate_reasons"]).toMatch(reason);
-    expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(cli.parsed["inserted_rows"]).toBe("0");
-    expect(cli.status).toBe(2);
-    expect(cli.parsed["sync_write_refused"]).toBe("true");
-    // Both runners gate AI context refresh and publish on exactly this check.
-    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 3)).toBe(false);
-    expect(dbSnapshot(dbPath)).toBe(before); // rows, schema, indexes and sync_runs unchanged
-  }
-
-  it("rejects before_size=0 when the run holds a real non-empty backup of the shard", () => {
-    const { root, dbPath, current } = scenario();
-    refusedWithoutChange(root, dbPath, wholeShardClaim("run_a", current), /backup zao_signals_2026_06\.csv\.bak does not match the receipt's before state/u);
-  }, 60_000);
-
-  it("does not treat a missing backup as a new shard", () => {
-    const { root, historyDir, dbPath, current } = scenario();
-    rmSync(join(historyDir, ".backup", "run_a", `${SHARD}.bak`));
-    refusedWithoutChange(root, dbPath, wholeShardClaim("run_a", current), /missing backup zao_signals_2026_06\.csv\.bak/u);
-  }, 60_000);
-
-  it("rejects a forged empty backup when another run backed up earlier content of the shard", () => {
-    const { root, historyDir, dbPath, current } = scenario();
-    mkdirSync(join(historyDir, ".backup", "forged_run"), { recursive: true });
-    writeFileSync(join(historyDir, ".backup", "forged_run", `${SHARD}.bak`), "");
-    refusedWithoutChange(root, dbPath, wholeShardClaim("forged_run", current), /claims to be new but run run_a backed up earlier content/u);
-  }, 60_000);
-
-  it.each([["missing", "omit"], ["negative", -1], ["fractional", 0.5], ["string", "0"]])("rejects a %s before_size instead of taking the new-shard branch", (_label, size) => {
-    const { root, dbPath, current } = scenario();
-    const receipt = wholeShardClaim("run_a", current, size);
-    if (size === "omit") delete (receipt.shards[0] as Partial<AppendReceipt["shards"][number]>).before_size;
-    expect(JSON.stringify(receipt).includes('"before_size"')).toBe(size !== "omit");
-    refusedWithoutChange(root, dbPath, receipt, /has invalid sizes or hashes/u);
-  }, 60_000);
-
-  it("still syncs a normal append to an existing shard", () => {
-    const { root, historyDir, dbPath } = scenario();
-    seedDb(dbPath, [mappedRow("old_2", "hash_o2"), mappedRow("new_3", "hash_n3")], "caught_up");
-    const receiptPath = join(root, "normal.json");
-    genuineAppend(historyDir, "run_b", [historyRow("new_4", "hash_n4")], receiptPath);
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-    expect(cli.parsed["decision"]).toBe("fresh_history_to_db_sync_success");
-    expect(cli.parsed["inserted_rows"]).toBe("1");
-    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 4)).toBe(true);
-  }, 60_000);
-
-  it("still syncs a genuinely new shard created by appendHistoryRowsAtomic (empty .bak = empty before state)", () => {
-    const root = tempRoot();
-    const historyDir = join(root, "history");
-    const dbPath = join(root, "test.sqlite");
-    const result = appendHistoryRowsAtomic({ rows: [liveHistoryRow("live_1")], historyDir, backupDir: join(historyDir, ".backup", "run_new"), historyBefore: 0 });
-    expect(result.receipt.shards[0]!.before_size).toBe(0);
-    expect(readFileSync(join(historyDir, ".backup", "run_new", "zao_signals_2026_11.csv.bak")).length).toBe(0);
-    expect(result.backups_created).toBe(0); // reported count of content backups is unchanged
-    writeAppendReceipt(join(root, "r.json"), result.receipt);
-    const report = runFreshHistoryToDbSync({ runId: "new_shard", generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json.out"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, appendReceiptPath: join(root, "r.json"), sourceAutoRunner07bArtifact: join(root, "none.json") });
-    expect(report.decision).toBe("fresh_history_to_db_sync_success");
-    expect(report.mirror_exact_match).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TD 2026-10-20 P0-G2 final: receipt + backup are both caller-writable, so their
-// mutual consistency cannot prove that a real append happened. These pin the
-// counterexamples against e640bc6f. They are `it.fails` (known open hole, see
-// private #13): flip to `it` when the trusted in-process append+mirror lands.
-describe("P0-G2 OPEN: caller-forged backup + receipt without any append", () => {
-  const SHARD = "zao_signals_2026_06.csv";
-  const sha = (b: Buffer): string => createHash("sha256").update(b).digest("hex");
-  function forged(before: Buffer, claimed: Array<[string, string]>): { root: string; dbPath: string; receiptPath: string } {
-    const root = tempRoot();
-    const historyDir = join(root, ".data/history");
-    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2"), historyRow("new_3", "hash_n3")]); // no append is executed
-    const dbPath = join(root, ".data/zao-market-intelligence.sqlite");
-    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]); // DB-only 0
-    const current = readFileSync(join(historyDir, SHARD));
-    const header = Buffer.from(`${current.toString("utf8").split("\n", 1)[0]}\n`);
-    const bak = before.length === 0 ? before : Buffer.concat([header, before]);
-    mkdirSync(join(historyDir, ".backup", "forged_run"), { recursive: true });
-    writeFileSync(join(historyDir, ".backup", "forged_run", `${SHARD}.bak`), bak);
-    const receiptPath = join(root, "forged.json");
-    writeAppendReceipt(receiptPath, { version: 1, run_id: "forged_run", shards: [{ file: SHARD, before_sha256: sha(bak), before_size: bak.length, after_sha256: sha(current), after_size: current.length }], rows: claimed.map(([row_id, row_hash]) => ({ row_id, row_hash, shard_file: SHARD })) });
-    return { root, dbPath, receiptPath };
-  }
-  function expectRefusedUnchanged(root: string, dbPath: string, receiptPath: string): void {
-    const before = dbSnapshot(dbPath);
-    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-    expect(cli.parsed["inserted_rows"]).toBe("0");
-    expect(cli.status).toBe(2);
-    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 3)).toBe(false); // no AI context refresh / publish
-    expect(dbSnapshot(dbPath)).toBe(before); // rows, schema, sync_runs unchanged
-  }
-
-  it.fails("forged .bak = header + old_1 and receipt claiming old_2, new_3 must not authorize any INSERT", () => {
-    const { root, dbPath, receiptPath } = forged(Buffer.from(`${historyLine(historyRow("old_1", "hash_o1"))}\n`), [["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
-    expectRefusedUnchanged(root, dbPath, receiptPath);
-  }, 60_000);
-
-  it.fails("forged empty .bak for a shard never backed up must not promote the whole shard", () => {
-    const { root, dbPath, receiptPath } = forged(Buffer.alloc(0), [["old_1", "hash_o1"], ["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
-    expectRefusedUnchanged(root, dbPath, receiptPath);
-  }, 60_000);
-
-  function historyLine(row: Record<string, string>): string {
-    const headers = ["row_id", "row_hash", "shard_month", "collected_date_jst", "collected_at_jst", "normalized_at_jst", "source", "canonical_property_name", "source_property_id", "checkin", "checkout", "stay_scope", "availability_status", "basis_confidence", "debug_artifact_path", "schema_version", "source_url", "normalized_total_jpy", "price_basis", "dp_usage", "classification", "exclusion_reason"];
-    return headers.map((h) => csvCell(row[h] ?? "")).join(",");
-  }
-});

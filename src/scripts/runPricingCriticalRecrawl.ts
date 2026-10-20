@@ -44,6 +44,7 @@ import { toPreviewRow, type PreviewRow } from "../services/autoRunnerBookingPrev
 import { buildProposedHistoryRow } from "../services/bookingPreviewAppendProposal";
 import { groupRowsToSourceShards } from "../services/bookingPreviewHistoryAppendRealRun";
 import { runRealAppend } from "../services/localHistoryRealAppend";
+import { TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { HISTORY_CSV_HEADERS, type HistoryRow } from "../services/localHistorySchemaDesign";
 import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppendValidationPolicy";
 import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } from "../services/crawlThrottlePolicy";
@@ -53,6 +54,7 @@ import { buildRefreshPlan, roundRobinByGroup, rotateWithinGroup, todaysSelectedT
 import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 
 const HISTORY_DIR = ".data/history";
+const DB_PATH = ".data/zao-market-intelligence.sqlite";
 const REPORT_DIR = ".data/reports/source-discovery";
 const OUT_DIR = ".data/validation";
 const DEBUG_ROOT = ".data/debug/pricing-critical-recrawl";
@@ -169,7 +171,7 @@ function readExistingRowHashById(): Map<string, string> {
 // Own-property append: same primitives as the competitor path (buildProposedHistoryRow
 // + runRealAppend), own rows explicitly ALLOWED (that gate is specific to the
 // competitor-evidence script, not a general prohibition on recording our own price).
-function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; noUsableRoomPrice: number; appendResult: ReturnType<typeof runRealAppend> | null } {
+function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; noUsableRoomPrice: number; appendResult: ReturnType<typeof runRealAppend> | null; trusted: TrustedAppendResult | null } {
   const existing = readExistingRowHashById();
   const toAppend: HistoryRow[] = [];
   let dupSkipped = 0, dupConflicts = 0, implausiblePrice = 0, noUsableRoomPrice = 0;
@@ -195,10 +197,20 @@ function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: num
     }
     toAppend.push(hRow);
   }
-  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: null };
+  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: null, trusted: null };
   const runId = `pricing_critical_own_recrawl_${ts()}`;
-  const result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(toAppend) });
-  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: result };
+  // runRealAppend inside the shared history-writer lock; the DB mirror (default
+  // OFF) can only insert the rows this append wrote (P0-G2).
+  let result: ReturnType<typeof runRealAppend> | null = null;
+  const trusted = trustedAppendAndMirror({
+    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: toAppend, captureDir: resolve(DEBUG_ROOT, runId),
+    mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
+    write: (rs) => {
+      result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(rs) });
+      if (result.decision !== "local_history_real_append_success") throw new Error(result.decision);
+    }
+  });
+  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: result, trusted };
 }
 
 async function run(): Promise<void> {
@@ -335,6 +347,7 @@ async function run(): Promise<void> {
       console.log(`own_no_usable_room_price_excluded=${r.noUsableRoomPrice}`);
       console.log(`own_append_decision=${r.appendResult?.decision ?? "no_rows_to_append"}`);
       console.log(`own_rows_written=${r.appendResult?.rowsWritten ?? 0}`);
+      console.log(`own_trusted_append_status=${r.trusted?.status ?? "no_rows_to_append"}`);
     } else {
       console.log(`own_append_skipped=true`);
       console.log(`note=set ZMI_APPEND_OWN_PROPERTY_RECRAWL=1 to append own-property observations`);

@@ -19,7 +19,7 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
-import { isVerifiedSyncOutput, writeAppendReceipt } from "../services/freshHistoryToDbSync";
+import { isVerifiedTrustedMirror, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
@@ -289,6 +289,7 @@ async function run(): Promise<void> {
   let rowsAppended = 0;
   let appendPlan: AppendPlan | null = null;
   let dbSynced = false;
+  let trustedAppend: TrustedAppendResult | null = null;
   let aiContextRefreshed = false;
   let chatgptPublished = false;
   let releaseUrl = "";
@@ -345,14 +346,16 @@ async function run(): Promise<void> {
     sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
     if (appendPlan.append_allowed && appendPlan.new_row_count > 0) {
-      const r = appendHistoryRowsAtomic({ rows: appendPlan.approved_rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows });
-      rowsAppended = r.rows_written;
-      if (evidenceOn) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
-      const after = readState();
-      const receiptPath = resolve(debugPath, "history_append_receipt.json");
-      writeAppendReceipt(receiptPath, r.receipt);
-      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows), HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
-      dbSynced = isVerifiedSyncOutput(sync.status, sync.parsed, after.history_rows);
+      // Append and DB mirror in this process under the shared history-writer
+      // lock; only the rows this append wrote can reach the DB (P0-G2).
+      trustedAppend = trustedAppendAndMirror({
+        historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jst.iso, rows: appendPlan.approved_rows, captureDir: debugPath,
+        mirrorEnabled: env[TRUSTED_MIRROR_FLAG] === "1",
+        write: (rows) => { appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
+      });
+      rowsAppended = trustedAppend.rows_appended;
+      if (evidenceOn && rowsAppended > 0) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
+      dbSynced = isVerifiedTrustedMirror(trustedAppend);
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {
       // No-change run: nothing to write, but "synced" still needs a read-only
@@ -405,7 +408,7 @@ async function run(): Promise<void> {
     rejected_rows_by_reason: countRejected(appendPlan),
     price_sanity_excluded_count: appendPlan?.price_sanity_excluded_records.length ?? 0,
     price_sanity_excluded_records: appendPlan?.price_sanity_excluded_records ?? [],
-    db_synced: dbSynced, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
+    db_synced: dbSynced, trusted_append: trustedAppend, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
     history_rows: post.history_rows, db_rows: post.db_rows, ai_context_rows: post.ai_context_rows, duplicate_row_id_count: post.duplicate_row_id_count,
     selected_targets_by_source: plan.selected_by_source, selected_targets_by_bucket: plan.selected_by_bucket, selected_targets_by_tier: plan.selected_by_tier,
     selected_distinct_properties_by_source: plan.selected_distinct_properties_by_source,
