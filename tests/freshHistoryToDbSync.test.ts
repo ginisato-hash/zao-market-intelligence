@@ -829,3 +829,51 @@ describe("P0-G2 before-state proof: before_size=0 is never self-declared", () =>
     expect(report.mirror_exact_match).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TD 2026-10-20 P0-G2 final: receipt + backup are both caller-writable, so their
+// mutual consistency cannot prove that a real append happened. These pin the
+// counterexamples against e640bc6f. They are `it.fails` (known open hole, see
+// private #13): flip to `it` when the trusted in-process append+mirror lands.
+describe("P0-G2 OPEN: caller-forged backup + receipt without any append", () => {
+  const SHARD = "zao_signals_2026_06.csv";
+  const sha = (b: Buffer): string => createHash("sha256").update(b).digest("hex");
+  function forged(before: Buffer, claimed: Array<[string, string]>): { root: string; dbPath: string; receiptPath: string } {
+    const root = tempRoot();
+    const historyDir = join(root, ".data/history");
+    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2"), historyRow("new_3", "hash_n3")]); // no append is executed
+    const dbPath = join(root, ".data/zao-market-intelligence.sqlite");
+    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]); // DB-only 0
+    const current = readFileSync(join(historyDir, SHARD));
+    const header = Buffer.from(`${current.toString("utf8").split("\n", 1)[0]}\n`);
+    const bak = before.length === 0 ? before : Buffer.concat([header, before]);
+    mkdirSync(join(historyDir, ".backup", "forged_run"), { recursive: true });
+    writeFileSync(join(historyDir, ".backup", "forged_run", `${SHARD}.bak`), bak);
+    const receiptPath = join(root, "forged.json");
+    writeAppendReceipt(receiptPath, { version: 1, run_id: "forged_run", shards: [{ file: SHARD, before_sha256: sha(bak), before_size: bak.length, after_sha256: sha(current), after_size: current.length }], rows: claimed.map(([row_id, row_hash]) => ({ row_id, row_hash, shard_file: SHARD })) });
+    return { root, dbPath, receiptPath };
+  }
+  function expectRefusedUnchanged(root: string, dbPath: string, receiptPath: string): void {
+    const before = dbSnapshot(dbPath);
+    const cli = runCli(root, { HISTORY_TO_DB_SYNC: "1", HISTORY_TO_DB_SYNC_APPEND_RECEIPT_PATH: receiptPath });
+    expect(cli.parsed["inserted_rows"]).toBe("0");
+    expect(cli.status).toBe(2);
+    expect(isVerifiedSyncOutput(cli.status, cli.parsed, 3)).toBe(false); // no AI context refresh / publish
+    expect(dbSnapshot(dbPath)).toBe(before); // rows, schema, sync_runs unchanged
+  }
+
+  it.fails("forged .bak = header + old_1 and receipt claiming old_2, new_3 must not authorize any INSERT", () => {
+    const { root, dbPath, receiptPath } = forged(Buffer.from(`${historyLine(historyRow("old_1", "hash_o1"))}\n`), [["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
+    expectRefusedUnchanged(root, dbPath, receiptPath);
+  }, 60_000);
+
+  it.fails("forged empty .bak for a shard never backed up must not promote the whole shard", () => {
+    const { root, dbPath, receiptPath } = forged(Buffer.alloc(0), [["old_1", "hash_o1"], ["old_2", "hash_o2"], ["new_3", "hash_n3"]]);
+    expectRefusedUnchanged(root, dbPath, receiptPath);
+  }, 60_000);
+
+  function historyLine(row: Record<string, string>): string {
+    const headers = ["row_id", "row_hash", "shard_month", "collected_date_jst", "collected_at_jst", "normalized_at_jst", "source", "canonical_property_name", "source_property_id", "checkin", "checkout", "stay_scope", "availability_status", "basis_confidence", "debug_artifact_path", "schema_version", "source_url", "normalized_total_jpy", "price_basis", "dp_usage", "classification", "exclusion_reason"];
+    return headers.map((h) => csvCell(row[h] ?? "")).join(",");
+  }
+});
