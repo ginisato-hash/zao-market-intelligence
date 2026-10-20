@@ -19,7 +19,7 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
-import { isVerifiedTrustedMirror, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
+import { isVerifiedTrustedMirror, rowsActuallyAppended, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
@@ -350,11 +350,12 @@ async function run(): Promise<void> {
       // lock; only the rows this append wrote can reach the DB (P0-G2).
       trustedAppend = trustedAppendAndMirror({
         historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jst.iso, rows: appendPlan.approved_rows, captureDir: debugPath,
-        mirrorEnabled: env[TRUSTED_MIRROR_FLAG] === "1",
+        mirrorEnabled: env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold",
         write: (rows) => { appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
       });
       rowsAppended = trustedAppend.rows_appended;
-      if (evidenceOn && rowsAppended > 0) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
+      // Evidence only for W: rows this run actually appended (not ones another job added first).
+      if (evidenceOn && rowsAppended > 0) evidenceSidecar = exportEvidenceSidecar(rowsActuallyAppended(appendPlan.approved_rows, trustedAppend), bookingEvidence, runId);
       dbSynced = isVerifiedTrustedMirror(trustedAppend);
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {

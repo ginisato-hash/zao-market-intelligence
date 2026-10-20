@@ -52,7 +52,6 @@ function main(): void {
     jsonPath: resolve(REPORT_DIR, `${runId}.json`),
     csvPath: resolve(REPORT_DIR, `${runId}.csv`),
     debugPath,
-    historyToDbSyncGate: undefined, // the CLI never opens the write path
     expectedHistoryRowCount: process.env["EXPECTED_HISTORY_ROW_COUNT"],
     sourceAutoRunner07bArtifact: SOURCE_AUTO_RUNNER07B_ARTIFACT
   });

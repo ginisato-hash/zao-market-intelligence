@@ -16,7 +16,7 @@ import { join, resolve } from "node:path";
 import { buildProposedHistoryRow } from "../services/bookingPreviewAppendProposal";
 import { groupRowsToSourceShards } from "../services/bookingPreviewHistoryAppendRealRun";
 import { runRealAppend, validatePostWriteShards } from "../services/localHistoryRealAppend";
-import { TRUSTED_MIRROR_FLAG, trustedAppendAndMirror } from "../services/freshHistoryToDbSync";
+import { TRUSTED_APPEND_COLLECTED_STATUSES, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror } from "../services/freshHistoryToDbSync";
 import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 import { HISTORY_CSV_HEADERS, type HistoryRow } from "../services/localHistorySchemaDesign";
 import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppendValidationPolicy";
@@ -299,7 +299,7 @@ function run(): void {
   console.log(`trusted_append_status=${trusted.status}`);
   console.log(`trusted_append_reasons=${trusted.reasons.join(";")}`);
   console.log(`plan_json=${planJson}`);
-  if (result.rollbackPerformed || result.rowsConflict > 0 || !["MIRRORED", "NOTHING_TO_APPEND", "HISTORY_APPENDED_MIRROR_DISABLED", "HISTORY_APPENDED_MIRROR_BLOCKED"].includes(trusted.status)) process.exitCode = 1;
+  if (result.rollbackPerformed || result.rowsConflict > 0 || !TRUSTED_APPEND_COLLECTED_STATUSES.includes(trusted.status)) process.exitCode = 1;
 }
 
 run();

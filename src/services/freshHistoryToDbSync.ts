@@ -1,11 +1,14 @@
 // Phase AUTO-RUNNER07C - fresh history-to-DB sync helper.
 //
 // This service builds a fresh mapping from the current history shards on every
-// run. It writes the DB only when HISTORY_TO_DB_SYNC=1 is supplied by the caller.
+// run and reports it against the DB. runFreshHistoryToDbSync is permanently
+// read-only (TD private #13 P0): the only DB writer is trustedAppendAndMirror,
+// which mirrors exactly the rows its own process appended.
 
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { closeDatabase, openLocalDatabase } from "../db/client";
 import {
@@ -29,7 +32,8 @@ import {
   type RealSyncResult
 } from "./historyToDbSyncRealRun";
 import { MAX_TOTAL_LIVE_PAGES } from "./autoRunnerMarketRefresh";
-import type { HistoryRow } from "./localHistorySchemaDesign";
+import { renderHistoryCsv, type HistoryRow } from "./localHistorySchemaDesign";
+import { APPEND_LOCK_FILENAME } from "./localHistoryRealAppend";
 import { MAX_MULTIPLIER, scaleCap } from "./crawlVolumeConfig";
 import { ROTATING_CAPS } from "./rotatingCollectionScopePlanner";
 
@@ -60,17 +64,8 @@ export interface FreshHistoryToDbSyncOptions {
   jsonPath: string;
   csvPath: string;
   debugPath: string;
-  historyToDbSyncGate: string | undefined;
   expectedHistoryRowCount: string | undefined;
-  // In-memory only: row_ids an in-process trusted caller just appended. Never
-  // read from a file, env var or CLI argument (the CLI cannot set it), so no
-  // external input can authorize an INSERT. Production writers use
-  // trustedAppendAndMirror instead; this path is kept for its accepted G1 tests.
-  trustedRowIds?: ReadonlySet<string> | undefined;
   sourceAutoRunner07bArtifact: string;
-  // Fault-injection seam for tests only: runs after the gate is evaluated and
-  // before the writer connection is opened.
-  testHooks?: { afterGateEvaluated?: () => void; afterShardParsed?: (file: string) => void } | undefined;
 }
 
 export interface HistorySummary {
@@ -178,7 +173,7 @@ interface LoadedHistory {
 export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): FreshHistoryToDbSyncReport {
   mkdirSync(dirname(options.reportPath), { recursive: true });
   mkdirSync(options.debugPath, { recursive: true });
-  const history = loadHistoryRows(options.historyDir, options.testHooks?.afterShardParsed);
+  const history = loadHistoryRows(options.historyDir);
   const requiredColumnCheck = validateRequiredColumns(history.headersByFile);
   const mappedRows = history.loadedRows.map((entry) => mapHistoryRowToMarketSignalHistoryRow(entry.row, options.generatedAtJst));
   const sourceDuplicateConflicts = findDuplicateRowIdConflicts(mappedRows);
@@ -201,9 +196,10 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     preflightConflicts: preflight.conflicts.length,
     sourceDuplicateConflictCount: sourceDuplicateConflicts.length
   });
-  const permit: SyncPermit = options.trustedRowIds === undefined ? { rowIds: null, error: null } : { rowIds: new Set(options.trustedRowIds), error: null };
+  // Read-only: no write flag and no permitted row set can be supplied.
+  const permit: SyncPermit = { rowIds: null, error: null };
   const gateInput = {
-    envFlag: options.historyToDbSyncGate,
+    envFlag: undefined,
     expectedHistoryRowCount: options.expectedHistoryRowCount,
     permit,
     duplicateRowIdCount: sourceDuplicateConflicts.length,
@@ -217,103 +213,30 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
   });
 
   let decision: FreshHistoryToDbSyncDecision = "fresh_history_to_db_sync_ready_not_run";
-  let syncResult: RealSyncResult | null = null;
-  let schemaPreflight: DbSchemaPreflight | null = null;
-  let postSyncValidation: PostSyncValidation | null = null;
-  let collectorBaselineBefore = dbBefore.collector_baseline;
-  let syncActions = preflight.actions;
+  const syncActions = preflight.actions;
 
   if (!freshMappingSummary.validation_passed || history.loadedRows.length === 0 || sourceDuplicateConflicts.length > 0) {
     decision = "fresh_history_to_db_sync_not_ready";
   } else if (freshMappingSummary.would_conflict_rows > 0) {
     decision = "fresh_history_to_db_sync_conflict";
-  } else if (!gate.passed) {
-    decision = "fresh_history_to_db_sync_ready_not_run";
-  } else {
-    options.testHooks?.afterGateEvaluated?.();
-    const db = openLocalDatabase(options.dbPath);
-    try {
-      // Shared writer protocol: both natural callers (rotating, 09:00 live) go
-      // through this helper. BEGIN IMMEDIATE takes SQLite's cross-process write
-      // lock (released on crash); busy_timeout 0 makes a held lock a refusal.
-      // Under the lock the gate is re-evaluated on fresh history bytes and a
-      // fresh DB read BEFORE any DDL, sync_run record or INSERT.
-      db.pragma("busy_timeout = 0");
-      const write = db.transaction(() => {
-        const freshReasons: string[] = [];
-        // history.contentDigest was computed from the exact bytes that were
-        // parsed into mappedRows; a re-read that differs means mappedRows is stale.
-        if (historyContentDigest(options.historyDir) !== history.contentDigest) freshReasons.push("history changed between gate evaluation and write");
-        const freshPermit = permit;
-        const fresh = evaluateFreshSyncGate({ ...gateInput, permit: freshPermit, invariants: evaluateMirrorInvariants(mappedRows, readDbHashes(db), freshPermit), historyCount: history.loadedRows.length, mapping: freshMappingSummary });
-        freshReasons.push(...fresh.reasons);
-        if (fresh.would_insert_rows !== gate.would_insert_rows) freshReasons.push(`insert set changed since gate (${gate.would_insert_rows} -> ${fresh.would_insert_rows})`);
-        if (freshReasons.length > 0) throw new SyncRefusedAtPointOfUse(freshReasons);
-        collectorBaselineBefore = readCollectorBaseline(db);
-        const schema = ensureMirrorSchema(db);
-        const result = applyRealSync({
-          db,
-          runId: options.runId,
-          generatedAtJst: options.generatedAtJst,
-          reportPath: options.reportPath,
-          sourceHistoryFiles: history.files,
-          rows: mappedRows
-        });
-        const validation = validatePostSync({
-          db,
-          sourceRows: mappedRows,
-          syncRunId: result.sync_run_record.sync_run_id,
-          collectorBaselineBefore,
-          historyMtimesUnchanged: historyContentDigest(options.historyDir) === history.contentDigest
-        });
-        // Roll the whole write back unless the mirror is exact afterwards.
-        if (result.conflict_rows > 0 || !validation.passed || !mirrorExactMatch(mappedRows, readDbHashes(db))) throw new PostSyncValidationFailed(validation, result, schema);
-        return { schema, result, validation };
-      });
-      try {
-        const done = write.immediate();
-        schemaPreflight = done.schema;
-        syncResult = done.result;
-        syncActions = done.result.actions;
-        postSyncValidation = done.validation;
-        decision = done.result.inserted_rows === 0 && done.result.skipped_identical_rows === mappedRows.length ? "fresh_history_to_db_sync_noop" : "fresh_history_to_db_sync_success";
-      } catch (error) {
-        if (error instanceof SyncRefusedAtPointOfUse) {
-          gate.passed = false;
-          gate.point_of_use_reasons = error.reasons;
-          decision = "fresh_history_to_db_sync_ready_not_run";
-        } else if (error instanceof PostSyncValidationFailed) {
-          postSyncValidation = error.validation;
-          decision = error.result.conflict_rows > 0 ? "fresh_history_to_db_sync_conflict" : "fresh_history_to_db_sync_failed";
-        } else if ((error as { code?: string }).code === "SQLITE_BUSY") {
-          gate.passed = false;
-          gate.point_of_use_reasons = ["DB write lock held by another writer"];
-          decision = "fresh_history_to_db_sync_ready_not_run";
-        } else {
-          throw error;
-        }
-      }
-    } finally {
-      closeDatabase(db);
-    }
   }
 
   const dbAfter = summarizeDb(options.dbPath);
   const historySummary = buildHistorySummary(options.historyDir, history, sourceDuplicateConflicts.length, requiredColumnCheck.missing_columns_by_file, history.mtimesBefore);
   const idempotencySummary = buildIdempotencySummary({
     mappedCount: mappedRows.length,
-    syncResult,
+    syncResult: null,
     preflightSkipped: preflight.skipped.length,
     preflightConflicts: preflight.conflicts.length
   });
   const syncSummary: SyncResultSummary = {
-    db_write_executed: syncResult !== null,
-    inserted_rows: syncResult?.inserted_rows ?? 0,
-    skipped_identical_rows: syncResult?.skipped_identical_rows ?? 0,
-    conflict_rows: syncResult?.conflict_rows ?? preflight.conflicts.length,
-    sync_run_record_status: syncResult?.sync_run_record.status ?? "not_run",
-    sync_run_id: syncResult?.sync_run_record.sync_run_id ?? "",
-    db_schema_preflight: schemaPreflight
+    db_write_executed: false,
+    inserted_rows: 0,
+    skipped_identical_rows: 0,
+    conflict_rows: preflight.conflicts.length,
+    sync_run_record_status: "not_run",
+    sync_run_id: "",
+    db_schema_preflight: null
   };
 
   const report: FreshHistoryToDbSyncReport = {
@@ -328,12 +251,12 @@ export function runFreshHistoryToDbSync(options: FreshHistoryToDbSyncOptions): F
     mirror_exact_match: mirrorExactMatch(mappedRows, readDbHashesReadOnly(options.dbPath)),
     sync_result: syncSummary,
     db_after_summary: dbAfter,
-    post_sync_validation: postSyncValidation,
+    post_sync_validation: null,
     idempotency_summary: idempotencySummary,
     safety_confirmation: buildSafetyConfirmation({
-      dbWriteExecuted: syncResult !== null,
+      dbWriteExecuted: false,
       dbSyncUsedFreshMapping: true,
-      collectorTablesChanged: postSyncValidation === null ? false : !postSyncValidation.collector_baseline_unchanged,
+      collectorTablesChanged: false,
       historyModified: historySummary.history_modified
     }),
     next_phase: "AUTO-RUNNER07D — Integrate fresh DB sync helper into disabled DB update runner plan",
@@ -553,13 +476,6 @@ function readDbHashesReadOnly(dbPath: string): Map<string, string> {
 
 function mirrorExactMatch(mappedRows: readonly { row_id: string; row_hash: string }[], dbHashes: ReadonlyMap<string, string>): boolean {
   return dbHashes.size === mappedRows.length && mappedRows.every((row) => dbHashes.get(row.row_id) === row.row_hash);
-}
-
-class SyncRefusedAtPointOfUse extends Error {
-  constructor(readonly reasons: string[]) { super(reasons.join("; ")); }
-}
-class PostSyncValidationFailed extends Error {
-  constructor(readonly validation: PostSyncValidation, readonly result: RealSyncResult, readonly schema: DbSchemaPreflight) { super("post-sync validation failed"); }
 }
 
 function buildHistorySummary(
@@ -847,6 +763,25 @@ export interface TrustedAppendResult {
   lock_wait_ms: number;
   capture_path: string | null;
   reasons: string[];
+  // W: the row_ids this call actually appended and verified (empty otherwise).
+  appended_row_ids: string[];
+}
+
+// Outcomes in which this run's collected rows are now in canonical history
+// (mirrored, already present, or appended with the DB mirror off/blocked).
+export const TRUSTED_APPEND_COLLECTED_STATUSES: readonly TrustedAppendStatus[] = ["MIRRORED", "NOTHING_TO_APPEND", "HISTORY_APPENDED_MIRROR_DISABLED", "HISTORY_APPENDED_MIRROR_BLOCKED"];
+
+// Only the rows of this run that were actually appended (e.g. for evidence).
+export function rowsActuallyAppended<T extends { rowId: string }>(rows: readonly T[], result: TrustedAppendResult): T[] {
+  const w = new Set(result.appended_row_ids);
+  return rows.filter((row) => w.has(row.rowId));
+}
+
+// A job with several append parts (pricing-critical: competitor child process +
+// own-property in-process) is a success only if every attempted part collected.
+export function combineAppendOutcomes(parts: ReadonlyArray<{ name: string; attempted: boolean; exitCode?: number | null; status?: string | null }>): { ok: boolean; failed: string[] } {
+  const failed = parts.filter((p) => p.attempted && (p.exitCode !== undefined && p.exitCode !== 0 || !(TRUSTED_APPEND_COLLECTED_STATUSES as readonly string[]).includes(String(p.status ?? "")))).map((p) => `${p.name}:${p.status ?? "unknown"}${p.exitCode === undefined ? "" : `(exit ${p.exitCode})`}`);
+  return { ok: failed.length === 0, failed };
 }
 
 // Measured on the 70,051-row production snapshot (scratch copies, 2026-10-20):
@@ -888,17 +823,19 @@ export function trustedAppendAndMirror(input: {
   mirrorEnabled: boolean; // default OFF: callers pass env[TRUSTED_MIRROR_FLAG] === "1"
   captureDir: string; // where unappended rows are preserved
   lockWaitMs?: number;
-  hooks?: { afterLock?: () => void; afterAppend?: () => void; beforeCommit?: () => void; afterCommit?: () => void } | undefined;
+  // "hold": take runRealAppend's legacy .append.lock around write() (callers
+  // whose primitive has no lock of its own, so manual runRealAppend backs off);
+  // "primitive": the write itself (runRealAppend) takes it.
+  legacyAppendLock?: "hold" | "primitive";
+  hooks?: { afterLock?: () => void; afterClassify?: () => void; afterShardParsed?: (file: string) => void; afterAppend?: () => void; beforeCommit?: () => void; afterCommit?: () => void } | undefined;
 }): TrustedAppendResult {
   const waitMs = input.lockWaitMs ?? HISTORY_WRITER_LOCK_WAIT_MS;
   const result: TrustedAppendResult = {
     status: "NOTHING_TO_APPEND", state: "not_evaluated", mirror_enabled: input.mirrorEnabled, rows_requested: input.rows.length,
     rows_skipped_identical: 0, rows_appended: 0, inserted_rows: 0, history_rows_before: null, history_rows_after: null,
-    db_rows_before: null, db_rows_after: null, mirror_exact_match: false, lock_wait_ms: 0, capture_path: null, reasons: []
+    db_rows_before: null, db_rows_after: null, mirror_exact_match: false, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: []
   };
-  const preserve = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): TrustedAppendResult => {
-    result.status = status;
-    result.reasons.push(reason);
+  const capture = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): void => {
     try {
       mkdirSync(resolve(input.captureDir), { recursive: true });
       const path = resolve(input.captureDir, `trusted_append_unappended_${input.runId}.json`);
@@ -907,6 +844,11 @@ export function trustedAppendAndMirror(input: {
     } catch (error) {
       result.reasons.push(`capture not written: ${(error as Error).message}`);
     }
+  };
+  const preserve = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): TrustedAppendResult => {
+    result.status = status;
+    result.reasons.push(reason);
+    capture(status, reason, rows);
     return result;
   };
   if (input.rows.length === 0) return result;
@@ -933,7 +875,7 @@ export function trustedAppendAndMirror(input: {
     let before: LoadedHistory;
     let dbHashes: Map<string, string>;
     try {
-      before = loadHistoryRows(input.historyDir);
+      before = loadHistoryRows(input.historyDir, input.hooks?.afterShardParsed);
       dbHashes = readDbHashesReadOnly(input.dbPath);
     } catch (error) {
       result.state = "unknown";
@@ -963,6 +905,15 @@ export function trustedAppendAndMirror(input: {
       return result; // NOTHING_TO_APPEND
     }
 
+    input.hooks?.afterClassify?.();
+    // Legacy .append.lock (manual / runRealAppend writers outside this lock): an
+    // existing one is a busy writer whatever its age; it is cleared only when it
+    // names a dead pid on this host (a crashed writer), never by mtime.
+    const appendLockPath = join(resolve(input.historyDir), APPEND_LOCK_FILENAME);
+    const legacy = legacyAppendLockState(appendLockPath);
+    if (legacy === "busy") return preserve("LOCK_BUSY_CAPTURE_PRESERVED", `${APPEND_LOCK_FILENAME} held by another writer`, input.rows);
+    if (legacy === "cleared_dead_pid") result.reasons.push(`${APPEND_LOCK_FILENAME} of a dead process removed`);
+
     // 4. Normal mode takes the DB writer lock BEFORE appending: if it cannot be
     //    had, canonical history is not touched.
     const normal = result.state === "consistent" && input.mirrorEnabled;
@@ -983,10 +934,20 @@ export function trustedAppendAndMirror(input: {
 
     // 5. The real append, in this process.
     let appendError: Error | null = null;
+    const holdLegacy = (input.legacyAppendLock ?? "primitive") === "hold";
+    if (holdLegacy) {
+      try {
+        writeFileSync(appendLockPath, `${input.runId}\n${new Date().toISOString()}\npid=${process.pid}\nhost=${hostname()}\n`, { encoding: "utf8", flag: "wx" });
+      } catch {
+        return preserve("LOCK_BUSY_CAPTURE_PRESERVED", `${APPEND_LOCK_FILENAME} taken by another writer`, input.rows);
+      }
+    }
     try {
       input.write(toWrite);
     } catch (error) {
       appendError = error as Error;
+    } finally {
+      if (holdLegacy) rmSync(appendLockPath, { force: true });
     }
     input.hooks?.afterAppend?.();
 
@@ -1007,9 +968,11 @@ export function trustedAppendAndMirror(input: {
       else if (rowWithoutSource(now) !== rowWithoutSource(row)) problems.push(`existing row changed: ${id}`);
     }
     const appended: string[] = [];
+    const intendedRecord = new Map(toWrite.map((r) => [r.rowId, r]));
     for (const [id, row] of afterById) {
       if (beforeById.has(id)) continue;
       if (intended.get(id) !== row["row_hash"]) problems.push(`unexpected row appended: ${id}`);
+      else if (rowWithoutSource(row) !== rowWithoutSource(parsedHistoryRecord(intendedRecord.get(id)!))) problems.push(`appended row differs from the intended 45 columns: ${id}`);
       else appended.push(id);
     }
     result.rows_appended = appended.length;
@@ -1017,6 +980,9 @@ export function trustedAppendAndMirror(input: {
     if (appendError !== null) {
       result.reasons.push(`append failed: ${appendError.message}`, ...problems.slice(0, 5));
       result.status = "HISTORY_APPEND_FAILED_MIRROR_BLOCKED";
+      result.appended_row_ids = appended;
+      const landed = new Set(appended);
+      capture(result.status, `append failed: ${appendError.message}`, toWrite.filter((r) => !landed.has(r.rowId))); // rows that did not reach history
       return result;
     }
     if (problems.length > 0) {
@@ -1024,6 +990,7 @@ export function trustedAppendAndMirror(input: {
       result.status = "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED";
       return result;
     }
+    result.appended_row_ids = appended; // verified W (history side)
     if (!normal) {
       result.status = result.state === "consistent" ? "HISTORY_APPENDED_MIRROR_DISABLED" : "HISTORY_APPENDED_MIRROR_BLOCKED";
       if (result.state === "consistent") result.reasons.push(`${TRUSTED_MIRROR_FLAG} is not 1 (default OFF)`);
@@ -1034,11 +1001,19 @@ export function trustedAppendAndMirror(input: {
     const d = db!;
     const mappedAfter = after.loadedRows.map((e) => mapHistoryRowToMarketSignalHistoryRow(e.row, input.generatedAtJst));
     const appendedSet = new Set(appended);
-    const collectorBaselineBefore = readCollectorBaseline(d);
-    ensureMirrorSchema(d);
-    const sync = applyRealSync({ db: d, runId: input.runId, generatedAtJst: input.generatedAtJst, reportPath: "", sourceHistoryFiles: after.files, rows: mappedAfter.filter((r) => appendedSet.has(r.row_id)) });
-    const validation = validatePostSync({ db: d, sourceRows: mappedAfter, syncRunId: sync.sync_run_record.sync_run_id, collectorBaselineBefore, historyMtimesUnchanged: historyContentDigest(input.historyDir) === after.contentDigest });
-    const exact = mirrorExactMatch(mappedAfter, readDbHashes(d));
+    let sync: RealSyncResult; let validation: PostSyncValidation; let exact: boolean;
+    try {
+      const collectorBaselineBefore = readCollectorBaseline(d);
+      ensureMirrorSchema(d);
+      sync = applyRealSync({ db: d, runId: input.runId, generatedAtJst: input.generatedAtJst, reportPath: "", sourceHistoryFiles: after.files, rows: mappedAfter.filter((r) => appendedSet.has(r.row_id)) });
+      validation = validatePostSync({ db: d, sourceRows: mappedAfter, syncRunId: sync.sync_run_record.sync_run_id, collectorBaselineBefore, historyMtimesUnchanged: historyContentDigest(input.historyDir) === after.contentDigest });
+      exact = mirrorExactMatch(mappedAfter, readDbHashes(d));
+    } catch (error) {
+      d.exec("ROLLBACK");
+      result.reasons.push(`mirror failed inside the transaction: ${(error as Error).message}`);
+      result.status = "MIRROR_FAILED_ROLLED_BACK";
+      return result;
+    }
     if (sync.conflict_rows > 0 || sync.inserted_rows !== appended.length || !validation.passed || !exact) {
       d.exec("ROLLBACK");
       result.reasons.push(...validation.errors, ...(exact ? [] : ["DB is not an exact mirror after insert"]));
@@ -1065,4 +1040,27 @@ export function trustedAppendAndMirror(input: {
     try { lock.exec("ROLLBACK"); } catch { /* already released */ }
     lock.close();
   }
+}
+
+// The intended row as the canonical CSV renderer writes it, parsed back: a
+// value-level (not byte/quoting-level) view of all 45 columns.
+function parsedHistoryRecord(row: HistoryRow): Record<string, string> {
+  return parseCsvTable(renderHistoryCsv([row])).rows[0] ?? {};
+}
+
+function legacyAppendLockState(path: string): "free" | "busy" | "cleared_dead_pid" {
+  if (!existsSync(path)) return "free";
+  let text = "";
+  try { text = readFileSync(path, "utf8"); } catch { return "busy"; }
+  const pid = Number(/^pid=(\d+)$/mu.exec(text)?.[1] ?? NaN);
+  const host = /^host=(.+)$/mu.exec(text)?.[1];
+  if (!Number.isInteger(pid) || host !== hostname()) return "busy"; // unknown owner: never removed by age
+  try {
+    process.kill(pid, 0);
+    return "busy"; // alive (or pid reused): fail-safe
+  } catch (error) {
+    if ((error as { code?: string }).code !== "ESRCH") return "busy";
+  }
+  rmSync(path, { force: true });
+  return "cleared_dead_pid";
 }

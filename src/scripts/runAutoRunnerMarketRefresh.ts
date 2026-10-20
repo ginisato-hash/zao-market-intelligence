@@ -468,7 +468,7 @@ async function run(): Promise<RunnerOutput> {
     // append nothing is synced: there is no other DB write path.
     trustedAppend = trustedAppendAndMirror({
       historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: appendPlan.approved_rows, captureDir: debugPath,
-      mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
+      mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold",
       write: (rows) => { appendResult = appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
     });
   }

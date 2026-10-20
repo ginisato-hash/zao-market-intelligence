@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,6 +17,9 @@ import {
   SYNC_PERMIT_MAX_ROWS,
   historyWriterLockPath,
   isVerifiedTrustedMirror,
+  combineAppendOutcomes,
+  rowsActuallyAppended,
+  TRUSTED_APPEND_COLLECTED_STATUSES,
   TRUSTED_MIRROR_FLAG,
   trustedAppendAndMirror,
   type TrustedAppendResult,
@@ -82,11 +86,8 @@ function runHelper(root: string, options: { rows?: Array<Record<string, string>>
     jsonPath: join(root, "fresh.json"),
     csvPath: join(root, "fresh.csv"),
     debugPath: join(root, "debug"),
-    historyToDbSyncGate: options.gate,
     expectedHistoryRowCount: options.expected,
-    trustedRowIds: options.permit === null ? undefined : appendIds,
-    sourceAutoRunner07bArtifact: join(root, "auto07b.json"),
-    testHooks: options.hooks
+    sourceAutoRunner07bArtifact: join(root, "auto07b.json")
   });
 }
 
@@ -238,83 +239,53 @@ describe("fresh history-to-DB sync helper", () => {
     expect(report.sync_result.db_write_executed).toBe(false);
   });
 
-  it("gated run can execute sync against temp DB", () => {
-    const report = runHelper(tempRoot(), { gate: "1" });
-    expect(report.sync_result.db_write_executed).toBe(true);
-    expect(report.sync_result.inserted_rows).toBe(2);
-    expect(report.db_after_summary.market_signal_history_count).toBe(2);
-  });
-
-  it("idempotent DB-up-to-date case gives inserted=0 and skipped=history_count", () => {
+  it("P0: the legacy API is permanently read-only, even when a caller asks to write with chosen row_ids", () => {
+    // TD #6280874842 counterexample: history old_1, old_2, new_3; DB old_1; no append.
     const root = tempRoot();
+    const historyDir = join(root, "history");
+    writeHistory(historyDir, [historyRow("old_1", "hash_o1"), historyRow("old_2", "hash_o2"), historyRow("new_3", "hash_n3")]);
     const dbPath = join(root, "test.sqlite");
-    runHelper(root, { dbPath, gate: "1" });
-    const second = runHelper(root, { dbPath, gate: "1" });
-    expect(second.sync_result.inserted_rows).toBe(0);
-    expect(second.sync_result.skipped_identical_rows).toBe(2);
-    expect(second.idempotency_summary.already_synced_noop).toBe(true);
-  });
-
-  it("DB-behind case inserts missing and skips identical", () => {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
-    const report = runHelper(root, { dbPath, gate: "1" });
-    expect(report.sync_result.inserted_rows).toBe(1);
-    expect(report.sync_result.skipped_identical_rows).toBe(1);
-  });
-
-  it("write gate fails closed without an append receipt", () => {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    const report = runHelper(root, { dbPath, gate: "1", permit: null });
+    seedDb(dbPath, [mappedRow("old_1", "hash_o1")]);
+    const before = dbSnapshot(dbPath);
+    const legacyAsk = { historyToDbSyncGate: "1", trustedRowIds: new Set(["old_2", "new_3"]), testHooks: {} } as unknown as Record<string, never>;
+    const report = runFreshHistoryToDbSync({ runId: "p0_direct", generatedAtJst: "2026-10-20T13:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "d"), expectedHistoryRowCount: undefined, sourceAutoRunner07bArtifact: join(root, "n.json"), ...legacyAsk });
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(report.sync_result.inserted_rows).toBe(0);
     expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.reasons).toContain("no in-process trusted row set; DB writes only happen inside trustedAppendAndMirror");
-    expect(report.sync_result.db_write_executed).toBe(false);
-    expect(report.db_after_summary.market_signal_history_count).toBe(0);
+    expect(report.mirror_exact_match).toBe(false);
+    expect(dbSnapshot(dbPath)).toBe(before); // rows, schema, sync_runs unchanged
   });
 
-  it("stops before writing rows the run did not append", () => {
-    // DB behind history by 2 rows, the run appended only row_2: row_1 is a hidden backfill.
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2"] });
-    expect(report.gate_result.would_insert_rows).toBe(2);
-    expect(report.gate_result.unpermitted_insert_rows).toBe(1);
-    expect(report.gate_result.reasons).toContain("would insert 1 rows not appended by this run; backfill requires a separately approved recovery");
-    expect(report.sync_result.db_write_executed).toBe(false);
-    expect(report.db_after_summary.market_signal_history_count).toBe(0);
+  it("P0: the only DB-writing calls in the sync service are inside trustedAppendAndMirror", () => {
+    const trusted = SERVICE_SOURCE.indexOf("export function trustedAppendAndMirror(");
+    for (const call of ["openLocalDatabase(", "applyRealSync(", "ensureMirrorSchema(", 'exec("BEGIN IMMEDIATE")', 'exec("COMMIT")']) {
+      const at: number[] = [];
+      for (let i = SERVICE_SOURCE.indexOf(call); i >= 0; i = SERVICE_SOURCE.indexOf(call, i + 1)) at.push(i);
+      expect(at.length).toBeGreaterThan(0);
+      for (const i of at) expect(i).toBeGreaterThan(trusted);
+    }
+    expect(SERVICE_SOURCE).not.toMatch(/trustedRowIds|historyToDbSyncGate/u);
   });
 
-  it("allows exactly the rows this run appended", () => {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
-    const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2"] });
-    expect(report.decision).toBe("fresh_history_to_db_sync_success");
-    expect(report.sync_result.inserted_rows).toBe(1);
-    expect(report.mirror_exact_match).toBe(true);
-  });
-
-  it("stops before writing when the DB holds row_ids absent from history", () => {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1"), mappedRow("rolled_back_row", "hash_x")]);
-    const report = runHelper(root, { dbPath, gate: "1" });
-    expect(report.gate_result.db_only_row_count).toBe(1);
-    expect(report.gate_result.reasons).toContain("DB has 1 row_ids absent from history; approved mirror reconciliation required");
-    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.sync_result.db_write_executed).toBe(false);
-    expect(report.db_after_summary.market_signal_history_count).toBe(2);
-  });
-
-  it("hash conflict stops and does not overwrite", () => {
+  it("hash conflict is reported and never written", () => {
     const root = tempRoot();
     const dbPath = join(root, "test.sqlite");
     seedDb(dbPath, [mappedRow("row_1", "hash_old")]);
-    const report = runHelper(root, { dbPath, gate: "1", rows: [historyRow("row_1", "hash_new")] });
+    const before = dbSnapshot(dbPath);
+    const report = runHelper(root, { dbPath, rows: [historyRow("row_1", "hash_new")] });
     expect(report.decision).toBe("fresh_history_to_db_sync_conflict");
-    expect(report.db_after_summary.market_signal_history_count).toBe(1);
+    expect(report.sync_result.db_write_executed).toBe(false);
+    expect(dbSnapshot(dbPath)).toBe(before);
+  });
+
+  it("DB-only rows are reported read-only", () => {
+    const root = tempRoot();
+    const dbPath = join(root, "test.sqlite");
+    seedDb(dbPath, [mappedRow("row_1", "hash_1"), mappedRow("rolled_back_row", "hash_x")]);
+    const report = runHelper(root, { dbPath });
+    expect(report.gate_result.db_only_row_count).toBe(1);
+    expect(report.gate_result.reasons).toContain("DB has 1 row_ids absent from history; approved mirror reconciliation required");
+    expect(report.sync_result.db_write_executed).toBe(false);
   });
 
   it("does not use hardcoded dry-run artifact pointer", () => {
@@ -445,61 +416,6 @@ function cliRoot(rows: Array<Record<string, string>>, dbRows: MarketSignalHistor
   seedDb(dbPath, dbRows);
   return { root, dbPath, historyDir: join(root, ".data/history") };
 }
-
-describe("P0-G1 write-time consistency under a shared write lock", () => {
-  function setup(): { root: string; dbPath: string } {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
-    return { root, dbPath };
-  }
-
-  it.each([
-    ["DB-only row created by another process", "UPDATE market_signal_history SET row_id = 'injected_db_only' WHERE row_id = 'row_1'", "DB has 1 row_ids absent from history; approved mirror reconciliation required"],
-    ["row_hash changed by another process", "UPDATE market_signal_history SET row_hash = 'tampered' WHERE row_id = 'row_1'", "fresh mapping has DB row_hash conflicts"]
-  ])("refuses with zero writes when %s after the gate", (_label, sql, reason) => {
-    const { root, dbPath } = setup();
-    let afterInjection = "";
-    const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2"], hooks: { afterGateEvaluated: () => { mutateInChildProcess(dbPath, sql); afterInjection = dbSnapshot(dbPath); } } });
-    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.passed).toBe(false);
-    expect(report.gate_result.point_of_use_reasons).toContain(reason);
-    expect(report.sync_result.db_write_executed).toBe(false);
-    expect(dbSnapshot(dbPath)).toBe(afterInjection); // no table data, schema, index or sync_run change by the sync
-  });
-
-  it("refuses when history changes between gate and write", () => {
-    const { root, dbPath } = setup();
-    const before = dbSnapshot(dbPath);
-    const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2"], hooks: { afterGateEvaluated: () => appendFileSync(join(root, "history", "zao_signals_2026_06.csv"), `${["row_3", "hash_3"].map(csvCell).join(",")}\n`) } });
-    expect(report.gate_result.point_of_use_reasons).toContain("history changed between gate evaluation and write");
-    expect(dbSnapshot(dbPath)).toBe(before);
-  });
-
-  it("refuses when another writer holds the DB write lock", () => {
-    const { root, dbPath } = setup();
-    const before = dbSnapshot(dbPath);
-    const other = new Database(dbPath);
-    try {
-      const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2"], hooks: { afterGateEvaluated: () => { other.exec("BEGIN IMMEDIATE"); } } });
-      expect(report.gate_result.point_of_use_reasons).toEqual(["DB write lock held by another writer"]);
-      expect(report.sync_result.db_write_executed).toBe(false);
-    } finally {
-      other.exec("ROLLBACK");
-      other.close();
-    }
-    expect(dbSnapshot(dbPath)).toBe(before);
-  });
-
-  it("refuses when the other runner already inserted the rows (insert set changed)", () => {
-    const { root, dbPath } = setup();
-    let afterInjection = "";
-    const report = runHelper(root, { dbPath, gate: "1", permit: ["row_2"], hooks: { afterGateEvaluated: () => { seedDb(dbPath, [mappedRow("row_1", "hash_1"), { ...mappedRow("row_2", "hash_2"), source: "booking" }], "other_runner_sync"); afterInjection = dbSnapshot(dbPath); } } });
-    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.point_of_use_reasons).toContain("insert set changed since gate (1 -> 0)");
-    expect(dbSnapshot(dbPath)).toBe(afterInjection);
-  });
-});
 
 describe("P0-G2 insert bound is this run's appended row_ids, not a caller-chosen number", () => {
   const BACKLOG = 68_000;
@@ -809,6 +725,7 @@ describe("P0-G2 final: trusted in-process append + mirror", () => {
     } });
     expect(r.status).toBe("HISTORY_APPEND_FAILED_MIRROR_BLOCKED");
     expect(r.rows_appended).toBe(1);
+    expect((JSON.parse(readFileSync(r.capture_path!, "utf8")) as { rows: HistoryRow[] }).rows.map((x) => x.rowId)).toEqual(["dec_fail"]); // the unappended row is preserved
     expect(dbSnapshot(fx.dbPath)).toBe(before);
     expect(shardText(fx)).toContain("nov_ok"); // the partial row stays: nothing is deleted or restored
     const next = run(fx, "after_partial", [liveHistoryRow("live_10")]);
@@ -895,7 +812,7 @@ console.log("RESULT=" + JSON.stringify(r));
   }
 
   it("isVerifiedTrustedMirror is false for every non-mirrored outcome", () => {
-    const base: TrustedAppendResult = { status: "MIRRORED", state: "consistent", mirror_enabled: true, rows_requested: 1, rows_skipped_identical: 0, rows_appended: 1, inserted_rows: 1, history_rows_before: 1, history_rows_after: 2, db_rows_before: 1, db_rows_after: 2, mirror_exact_match: true, lock_wait_ms: 0, capture_path: null, reasons: [] };
+    const base: TrustedAppendResult = { status: "MIRRORED", state: "consistent", mirror_enabled: true, rows_requested: 1, rows_skipped_identical: 0, rows_appended: 1, inserted_rows: 1, history_rows_before: 1, history_rows_after: 2, db_rows_before: 1, db_rows_after: 2, mirror_exact_match: true, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: ["x"] };
     expect(isVerifiedTrustedMirror(base)).toBe(true);
     for (const status of ["HISTORY_APPENDED_MIRROR_DISABLED", "HISTORY_APPENDED_MIRROR_BLOCKED", "HISTORY_APPEND_FAILED_MIRROR_BLOCKED", "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED", "MIRROR_FAILED_ROLLED_BACK", "LOCK_BUSY_CAPTURE_PRESERVED", "STATE_UNKNOWN_CAPTURE_PRESERVED", "APPEND_CONFLICT_CAPTURE_PRESERVED"] as const) {
       expect(isVerifiedTrustedMirror({ ...base, status })).toBe(false);
@@ -909,44 +826,166 @@ console.log("RESULT=" + JSON.stringify(r));
 // ---------------------------------------------------------------------------
 // TD 2026-10-20: P0-G1 parsed-bytes digest (accepted) on the in-process write path.
 
-describe("P0-G1 source digest is bound to the parsed bytes", () => {
-  it("stops before any write when another process appends between the first shard read and digest finalisation", () => {
+describe("P0-G1 on the trusted path: point-of-use re-checks, parsed-bytes digest, rollback", () => {
+  const AT = "2026-10-20T13:00:00+09:00";
+  function setup(): { root: string; historyDir: string; dbPath: string } {
     const root = tempRoot();
-    const historyDir = join(root, "history");
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
-    writeHistory(historyDir, [historyRow("row_1", "hash_1")]);
-    genuineAppend(historyDir, "natural_run", [historyRow("row_2", "hash_2")], join(root, "artifact.json"));
-    // A second shard that is read AFTER the first one.
-    writeFileSync(join(historyDir, "zao_signals_2026_07.csv"), readFileSync(join(historyDir, "zao_signals_2026_06.csv"), "utf8").split("\n", 1)[0] + "\n");
-    const before = dbSnapshot(dbPath);
-    let injected = false;
-    const report = runFreshHistoryToDbSync({ runId: "g1_race", generatedAtJst: "2026-10-20T09:00:00+09:00", historyDir, dbPath, reportPath: join(root, "r.md"), jsonPath: join(root, "r.json"), csvPath: join(root, "r.csv"), debugPath: join(root, "debug"), historyToDbSyncGate: "1", expectedHistoryRowCount: undefined, trustedRowIds: new Set(["row_2"]), sourceAutoRunner07bArtifact: join(root, "none.json"),
-      testHooks: { afterShardParsed: (file) => {
-        if (injected || !file.endsWith("zao_signals_2026_06.csv")) return;
-        injected = true; // another OS process appends to the shard that was just parsed
-        const line = `${["row_late", "hash_late"].map(csvCell).join(",")}\n`;
-        const r = spawnSync(process.execPath, ["-e", `require("node:fs").appendFileSync(${JSON.stringify(join(historyDir, "zao_signals_2026_06.csv"))}, ${JSON.stringify(line)})`], { encoding: "utf8" });
-        if (r.status !== 0) throw new Error(r.stderr);
-      } } });
-    expect(injected).toBe(true);
-    expect(report.history_summary.row_count).toBe(2); // mappedRows = the bytes parsed before the append
-    expect(report.decision).toBe("fresh_history_to_db_sync_ready_not_run");
-    expect(report.gate_result.point_of_use_reasons).toContain("history changed between gate evaluation and write");
-    expect(report.sync_result.db_write_executed).toBe(false);
-    expect(dbSnapshot(dbPath)).toBe(before);
+    const fx = { root, historyDir: join(root, ".data/history"), dbPath: join(root, ".data/zao-market-intelligence.sqlite") };
+    mkdirSync(fx.historyDir, { recursive: true });
+    const seed = trustedAppendAndMirror({ ...base(fx, "seed"), rows: [liveHistoryRow("g1_1"), liveHistoryRow("g1_2")] });
+    expect(seed.status).toBe("MIRRORED");
+    return fx;
+  }
+  function base(fx: { root: string; historyDir: string; dbPath: string }, runId: string) {
+    return { historyDir: fx.historyDir, dbPath: fx.dbPath, runId, generatedAtJst: AT, captureDir: join(fx.root, "capture"), mirrorEnabled: true, lockWaitMs: 2_000,
+      write: (rows: HistoryRow[]) => { appendHistoryRowsAtomic({ rows, historyDir: fx.historyDir, backupDir: join(fx.historyDir, ".backup", runId), historyBefore: 0 }); } };
+  }
+  it.each([
+    ["DB row_hash changed by another process", "UPDATE market_signal_history SET row_hash = 'tampered' WHERE row_id = 'g1_1'"],
+    ["DB-only row created by another process", "UPDATE market_signal_history SET row_id = 'injected_db_only' WHERE row_id = 'g1_1'"]
+  ])("refuses before appending when %s after classification", (_label, sql) => {
+    const fx = setup();
+    const historyBefore = readFileSync(join(fx.historyDir, "zao_signals_2026_11.csv"), "utf8");
+    let afterInjection = "";
+    const r = trustedAppendAndMirror({ ...base(fx, "g1_poi"), rows: [liveHistoryRow("g1_3")], hooks: { afterClassify: () => { mutateInChildProcess(fx.dbPath, sql); afterInjection = dbSnapshot(fx.dbPath); } } });
+    expect(r.status).toBe("STATE_UNKNOWN_CAPTURE_PRESERVED");
+    expect(r.reasons).toContain("DB changed between classification and write lock");
+    expect(readFileSync(join(fx.historyDir, "zao_signals_2026_11.csv"), "utf8")).toBe(historyBefore); // no append
+    expect(dbSnapshot(fx.dbPath)).toBe(afterInjection); // the trusted path wrote nothing
   });
 
-  it("rolls the whole write back when an insert fails inside the locked transaction", () => {
-    const root = tempRoot();
-    const dbPath = join(root, "test.sqlite");
-    seedDb(dbPath, [mappedRow("row_1", "hash_1")]);
-    const db = new Database(dbPath);
-    db.exec("CREATE TRIGGER inject_fail AFTER INSERT ON market_signal_history WHEN NEW.row_id = 'row_2' BEGIN SELECT RAISE(ABORT, 'injected_failure'); END;");
+  it("an unlocked writer appending to a shard right after it was parsed blocks the mirror (parsed-bytes digest)", () => {
+    const fx = setup();
+    const before = dbSnapshot(fx.dbPath);
+    let injected = false;
+    const r = trustedAppendAndMirror({ ...base(fx, "g1_race"), rows: [liveHistoryRow("g1_4")], hooks: { afterShardParsed: (file) => {
+      if (injected) return;
+      injected = true; // another OS process appends a row to the shard that was just parsed
+      const line = readFileSync(join(fx.historyDir, "zao_signals_2026_11.csv"), "utf8").trimEnd().split("\n").pop()!.replace(/^g1_2,hash_g1_2/u, "late_row,hash_late");
+      const c = spawnSync(process.execPath, ["-e", `require("node:fs").appendFileSync(${JSON.stringify(join(fx.historyDir, "zao_signals_2026_11.csv"))}, ${JSON.stringify(`${line}\n`)})`], { encoding: "utf8" });
+      if (c.status !== 0) throw new Error(c.stderr);
+    } } });
+    expect(injected).toBe(true);
+    expect(r.status).toBe("HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED");
+    expect(r.reasons.join("|")).toContain("unexpected row appended: late_row");
+    expect(dbSnapshot(fx.dbPath)).toBe(before);
+  });
+
+  it("an INSERT failing inside the locked transaction rolls the whole mirror back", () => {
+    const fx = setup();
+    const db = new Database(fx.dbPath);
+    db.exec("CREATE TRIGGER inject_fail AFTER INSERT ON market_signal_history WHEN NEW.row_id = 'g1_5' BEGIN SELECT RAISE(ABORT, 'injected_failure'); END;");
     db.close();
-    const before = dbSnapshot(dbPath);
-    expect(() => runHelper(root, { dbPath, gate: "1", permit: ["row_2"] })).toThrow(/injected_failure/u);
-    expect(dbSnapshot(dbPath)).toBe(before); // no row, no sync_run, no schema change
+    const before = dbSnapshot(fx.dbPath);
+    const r = trustedAppendAndMirror({ ...base(fx, "g1_rb"), rows: [liveHistoryRow("g1_5")] });
+    expect(r.status).toBe("MIRROR_FAILED_ROLLED_BACK");
+    expect(r.reasons.join("|")).toContain("injected_failure");
+    expect(isVerifiedTrustedMirror(r)).toBe(false);
+    expect(dbSnapshot(fx.dbPath)).toBe(before); // no row, no sync_run, no schema change
+  });
+});
+
+describe("TD #6280874842 P1/release gate", () => {
+  const AT = "2026-10-20T13:00:00+09:00";
+  function fx(): { root: string; historyDir: string; dbPath: string } {
+    const root = tempRoot();
+    const f = { root, historyDir: join(root, ".data/history"), dbPath: join(root, ".data/zao-market-intelligence.sqlite") };
+    mkdirSync(f.historyDir, { recursive: true });
+    return f;
+  }
+  function call(f: { root: string; historyDir: string; dbPath: string }, runId: string, rows: HistoryRow[], extra: Partial<Parameters<typeof trustedAppendAndMirror>[0]> = {}): TrustedAppendResult {
+    return trustedAppendAndMirror({ historyDir: f.historyDir, dbPath: f.dbPath, runId, generatedAtJst: AT, rows, captureDir: join(f.root, "capture"), mirrorEnabled: true, lockWaitMs: 1_000,
+      write: (rs) => { appendHistoryRowsAtomic({ rows: rs, historyDir: f.historyDir, backupDir: join(f.historyDir, ".backup", runId), historyBefore: 0 }); }, ...extra });
+  }
+
+  it("evidence covers only W: 10 approved rows of which another job already appended 7 -> 3", () => {
+    const f = fx();
+    const approved = Array.from({ length: 10 }, (_, i) => liveHistoryRow(`ev_${i}`));
+    expect(call(f, "other_job", approved.slice(0, 7)).status).toBe("MIRRORED"); // the parallel job got there first
+    const r = call(f, "this_run", approved);
+    expect(r).toMatchObject({ status: "MIRRORED", rows_appended: 3, rows_skipped_identical: 7 });
+    expect(rowsActuallyAppended(approved, r).map((x) => x.rowId)).toEqual(["ev_7", "ev_8", "ev_9"]);
+    const rotating = readFileSync(resolve(__dirname, "../src/scripts/runAutoRunnerMarketRefreshRotating.ts"), "utf8");
+    expect(rotating).toContain("exportEvidenceSidecar(rowsActuallyAppended(appendPlan.approved_rows, trustedAppend), bookingEvidence, runId)");
+    expect(rotating).not.toMatch(/exportEvidenceSidecar\(appendPlan\.approved_rows/u);
+  });
+
+  it("a new row whose 45 columns differ from the intended HistoryRow is not mirrored (same row_id and row_hash)", () => {
+    const f = fx();
+    expect(call(f, "seed", [liveHistoryRow("c45_1")]).status).toBe("MIRRORED");
+    const before = dbSnapshot(f.dbPath);
+    const intended = liveHistoryRow("c45_2");
+    const r = call(f, "tamper", [intended], { write: (rs) => { appendHistoryRowsAtomic({ rows: rs.map((x) => ({ ...x, normalizedTotalPrice: 99_999 })), historyDir: f.historyDir, backupDir: join(f.historyDir, ".backup", "tamper"), historyBefore: 0 }); } });
+    expect(r.status).toBe("HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED");
+    expect(r.reasons.join("|")).toContain("appended row differs from the intended 45 columns: c45_2");
+    expect(dbSnapshot(f.dbPath)).toBe(before);
+  });
+
+  it("pricing-critical: a failed or unappended part is a partial failure, never append_ready", () => {
+    expect(combineAppendOutcomes([{ name: "competitor", attempted: true, exitCode: 0, status: "MIRRORED" }, { name: "own", attempted: true, status: "HISTORY_APPENDED_MIRROR_BLOCKED" }]).ok).toBe(true);
+    expect(combineAppendOutcomes([{ name: "competitor", attempted: true, exitCode: 1, status: "LOCK_BUSY_CAPTURE_PRESERVED" }, { name: "own", attempted: true, status: "MIRRORED" }])).toEqual({ ok: false, failed: ["competitor:LOCK_BUSY_CAPTURE_PRESERVED(exit 1)"] });
+    expect(combineAppendOutcomes([{ name: "competitor", attempted: true, exitCode: 0, status: null }]).ok).toBe(false); // exit 0 without a collected status
+    expect(combineAppendOutcomes([{ name: "own", attempted: true, status: "STATE_UNKNOWN_CAPTURE_PRESERVED" }]).ok).toBe(false);
+    expect(combineAppendOutcomes([]).ok).toBe(true);
+    for (const st of TRUSTED_APPEND_COLLECTED_STATUSES) expect(combineAppendOutcomes([{ name: "x", attempted: true, exitCode: 0, status: st }]).ok).toBe(true);
+    const src = readFileSync(resolve(__dirname, "../src/scripts/runPricingCriticalRecrawl.ts"), "utf8");
+    expect(src).toContain('appendParts.push({ name: "competitor", attempted: true, exitCode: spawnResult.status, status: childStatus });');
+    expect(src).toContain("const outcome = combineAppendOutcomes(appendParts);");
+    expect(src).toMatch(/decision=pricing_critical_recrawl_append_partial_failure`\);\n\s+process\.exitCode = 1;/u);
+    expect(src.match(/decision=pricing_critical_recrawl_append_ready/gu)?.length).toBe(1);
+    expect(src).toMatch(/if \(outcome\.ok\) \{\n\s+console\.log\(`decision=pricing_critical_recrawl_append_ready`\);/u);
+  });
+
+  it("legacy .append.lock without a live owner record is a busy writer at any age (never removed by mtime)", () => {
+    const f = fx();
+    expect(call(f, "seed", [liveHistoryRow("lk_1")]).status).toBe("MIRRORED");
+    const lock = join(f.historyDir, ".append.lock");
+    writeFileSync(lock, "manual_run\n2026-10-20T00:00:00.000Z\n"); // old format, no pid
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(lock, old, old); // 2 h old: runRealAppend's age rule would delete it
+    const shard = readFileSync(join(f.historyDir, "zao_signals_2026_11.csv"), "utf8");
+    const r = call(f, "blocked_by_manual", [liveHistoryRow("lk_2")]);
+    expect(r.status).toBe("LOCK_BUSY_CAPTURE_PRESERVED");
+    expect(r.reasons).toContain(".append.lock held by another writer");
+    expect(existsSync(lock)).toBe(true);
+    expect(readFileSync(join(f.historyDir, "zao_signals_2026_11.csv"), "utf8")).toBe(shard);
+  });
+
+  it("legacy .append.lock naming a live pid is busy; one naming a dead pid on this host is cleared", () => {
+    const f = fx();
+    expect(call(f, "seed", [liveHistoryRow("lk_3")]).status).toBe("MIRRORED");
+    const lock = join(f.historyDir, ".append.lock");
+    writeFileSync(lock, `live\nx\npid=${process.pid}\nhost=${hostname()}\n`);
+    expect(call(f, "live_owner", [liveHistoryRow("lk_4")]).status).toBe("LOCK_BUSY_CAPTURE_PRESERVED");
+    const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" });
+    writeFileSync(lock, `crashed\nx\npid=${dead.stdout}\nhost=${hostname()}\n`);
+    const r = call(f, "after_crash", [liveHistoryRow("lk_5")]);
+    expect(r.status).toBe("MIRRORED");
+    expect(r.reasons).toContain(".append.lock of a dead process removed");
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("while a scheduled atomic append holds .append.lock, a manual runRealAppend backs off (no CSV damage)", () => {
+    const f = fx();
+    expect(call(f, "seed", [liveHistoryRow("mx_1")]).status).toBe("MIRRORED");
+    let manual: ReturnType<typeof runRealAppend> | null = null;
+    const r = call(f, "scheduled", [liveHistoryRow("mx_2")], { legacyAppendLock: "hold", write: (rs) => {
+      manual = runRealAppend({ historyDir: f.historyDir, runId: "manual", backupTimestamp: "20261020_130000", sourceShards: groupRowsToSourceShards([liveHistoryRow("mx_manual")]) });
+      appendHistoryRowsAtomic({ rows: rs, historyDir: f.historyDir, backupDir: join(f.historyDir, ".backup", "scheduled"), historyBefore: 0 });
+    } });
+    expect(manual!.decision).toBe("local_history_real_append_failed_preflight"); // saw a fresh lock and aborted
+    expect(r).toMatchObject({ status: "MIRRORED", rows_appended: 1, mirror_exact_match: true });
+    const shard = readFileSync(join(f.historyDir, "zao_signals_2026_11.csv"), "utf8");
+    expect(shard).toContain("mx_2");
+    expect(shard).not.toContain("mx_manual");
+    expect(existsSync(join(f.historyDir, ".append.lock"))).toBe(false);
+  });
+
+  it("runRealAppend records pid and host in its lock so a crashed one can be cleared by liveness", () => {
+    expect(readFileSync(resolve(__dirname, "../src/services/localHistoryRealAppend.ts"), "utf8")).toContain("pid=${process.pid}\\nhost=${hostname()}");
+    for (const script of ["runAutoRunnerMarketRefreshRotating.ts", "runAutoRunnerMarketRefresh.ts"]) {
+      expect(readFileSync(resolve(__dirname, "../src/scripts", script), "utf8")).toContain('legacyAppendLock: "hold"');
+    }
   });
 });
 

@@ -44,7 +44,7 @@ import { toPreviewRow, type PreviewRow } from "../services/autoRunnerBookingPrev
 import { buildProposedHistoryRow } from "../services/bookingPreviewAppendProposal";
 import { groupRowsToSourceShards } from "../services/bookingPreviewHistoryAppendRealRun";
 import { runRealAppend } from "../services/localHistoryRealAppend";
-import { TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
+import { combineAppendOutcomes, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { HISTORY_CSV_HEADERS, type HistoryRow } from "../services/localHistorySchemaDesign";
 import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppendValidationPolicy";
 import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } from "../services/crawlThrottlePolicy";
@@ -325,6 +325,9 @@ async function run(): Promise<void> {
 
   if (!appendMode) { console.log(`decision=pricing_critical_recrawl_preview_ready`); return; }
 
+  // Both append parts feed the final result: a failed or unappended part is a
+  // partial failure, never "append_ready" (TD private #13 P1).
+  const appendParts: Array<{ name: string; attempted: boolean; exitCode?: number | null; status?: string | null }> = [];
   // Competitor append: reuse the EXISTING, unmodified append-plan script.
   if (competitorRows.length > 0 && competitorArtifactPath !== "") {
     const spawnResult = spawnSync("npm", ["run", "plan:booking-market-recrawl-append"], {
@@ -334,6 +337,10 @@ async function run(): Promise<void> {
     console.log(`competitor_append_exit_code=${spawnResult.status}`);
     console.log(spawnResult.stdout ?? "");
     if (spawnResult.stderr) console.error(spawnResult.stderr);
+    const childKv = Object.fromEntries((spawnResult.stdout ?? "").split(/\r?\n/u).map((l) => l.trim()).filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+    // "noop_all_duplicates": nothing new to append is a collected outcome.
+    const childStatus = childKv["trusted_append_status"] ?? (childKv["decision"] === "booking_market_recrawl_append_noop_all_duplicates" ? "NOTHING_TO_APPEND" : childKv["decision"] ?? null);
+    appendParts.push({ name: "competitor", attempted: true, exitCode: spawnResult.status, status: childStatus });
   }
 
   // Own-property append: same underlying primitives, gated separately.
@@ -348,13 +355,21 @@ async function run(): Promise<void> {
       console.log(`own_append_decision=${r.appendResult?.decision ?? "no_rows_to_append"}`);
       console.log(`own_rows_written=${r.appendResult?.rowsWritten ?? 0}`);
       console.log(`own_trusted_append_status=${r.trusted?.status ?? "no_rows_to_append"}`);
+      if (r.trusted !== null) appendParts.push({ name: "own", attempted: true, status: r.trusted.status });
     } else {
       console.log(`own_append_skipped=true`);
       console.log(`note=set ZMI_APPEND_OWN_PROPERTY_RECRAWL=1 to append own-property observations`);
     }
   }
 
-  console.log(`decision=pricing_critical_recrawl_append_ready`);
+  const outcome = combineAppendOutcomes(appendParts);
+  if (outcome.ok) {
+    console.log(`decision=pricing_critical_recrawl_append_ready`);
+  } else {
+    console.log(`append_failed_parts=${outcome.failed.join(";")}`);
+    console.log(`decision=pricing_critical_recrawl_append_partial_failure`);
+    process.exitCode = 1;
+  }
 }
 
 run().catch((e) => { console.error(e); process.exitCode = 1; });
