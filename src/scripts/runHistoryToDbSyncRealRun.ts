@@ -1,26 +1,22 @@
-// Phase AUTO04X — guarded real DB mirror sync from history.
+// Phase AUTO04X — legacy real DB mirror sync from a pinned dry-run artifact.
 //
-// Requires explicit user approval plus HISTORY_TO_DB_SYNC=1. Without the env
-// flag, this script fails closed and does not open/write the DB.
+// PERMANENTLY DISABLED (TD private #13, P0): it would mirror a fixed historic
+// row set with no proof that those rows were just appended. It now only writes a
+// read-only diagnostic report (gate status of the old artifact) and never opens
+// the DB. A write request (HISTORY_TO_DB_SYNC=1) exits 2. The only DB writer for
+// the history mirror is trustedAppendAndMirror.
 
-import { closeDatabase, openLocalDatabase } from "../db/client";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   APPROVED_TARGET_TABLES,
-  applyRealSync,
   buildReadyNotRunReport,
-  buildSuccessReport,
-  ensureMirrorSchema,
   evaluateApprovalGate,
-  readCollectorBaseline,
   renderHistoryToDbSyncRealRunCsv,
   renderHistoryToDbSyncRealRunReport,
-  validatePostSync,
   type DryRunSourceSummary,
   type HistoryToDbSyncRealRunReport
 } from "../services/historyToDbSyncRealRun";
-import type { MarketSignalHistoryDryRunRow } from "../services/historyToDbSyncDryRun";
 
 const REPORT_DIR = ".data/reports/automation";
 const DEBUG_ROOT = ".data/debug/history-to-db-sync-real-run";
@@ -32,13 +28,7 @@ const HISTORY_DIR = ".data/history";
 // This pointer + APPROVED_MAPPED_ROW_COUNT=210 keep the gate aligned with the
 // on-disk history.
 const AUTO03X_JSON = ".data/reports/automation/history_to_db_sync_dry_run_20260605_104149.json";
-const AUTO03X_MAPPED_ROWS = ".data/debug/history-to-db-sync-dry-run/20260605_104149/mapped_market_signal_history_rows.json";
-
-const EXPLICIT_USER_APPROVED = true;
-
-interface MappedRowsArtifact {
-  rows: MarketSignalHistoryDryRunRow[];
-}
+const LEGACY_REAL_RUN_DISABLED_REASON = "legacy real-run DB sync is permanently disabled (TD private #13); the history mirror is written only by trustedAppendAndMirror";
 
 function timestamp(): string {
   const d = new Date();
@@ -70,14 +60,6 @@ function historyFiles(): string[] {
     .filter((name) => /^zao_signals_\d{4}_\d{2}\.csv$/.test(name))
     .sort()
     .map((name) => `${HISTORY_DIR}/${name}`);
-}
-
-function historyMtimes(files: string[]): Record<string, number> {
-  return Object.fromEntries(files.map((file) => [file, statSync(resolve(file)).mtimeMs]));
-}
-
-function mtimesUnchanged(before: Record<string, number>): boolean {
-  return Object.entries(before).every(([file, mtime]) => existsSync(resolve(file)) && statSync(resolve(file)).mtimeMs === mtime);
 }
 
 function writeArtifacts(report: HistoryToDbSyncRealRunReport, debugPath: string): void {
@@ -118,72 +100,35 @@ function main(): void {
   const jsonPath = resolve(reportDir, `${runId}.json`);
   const csvPath = resolve(reportDir, `${runId}.csv`);
 
+  // Diagnostic only: the old artifact's gate is evaluated without approval and
+  // without the env flag, so it can never pass; nothing below opens the DB.
   const dryRun = existsSync(resolve(AUTO03X_JSON)) ? readJson<DryRunSourceSummary>(AUTO03X_JSON) : null;
   const gate = evaluateApprovalGate({
-    explicitUserApproved: EXPLICIT_USER_APPROVED,
-    envFlag: process.env["HISTORY_TO_DB_SYNC"],
+    explicitUserApproved: false,
+    envFlag: undefined,
     dryRun,
     targetTables: [...APPROVED_TARGET_TABLES],
     collectorTableWriteMode: false,
     liveCollectorMode: false,
     githubActionsMode: false
   });
-
-  if (!gate.passed) {
-    const report = buildReadyNotRunReport({
-      runId,
-      generatedAtJst,
-      gate,
-      sourceArtifact: AUTO03X_JSON,
-      reportPath,
-      jsonPath,
-      csvPath,
-      debugPath
-    });
-    writeArtifacts(report, debugPath);
-    printReportSummary(report);
-    return;
-  }
-
-  const sourceRows = readJson<MappedRowsArtifact>(AUTO03X_MAPPED_ROWS).rows;
-  const sourceHistoryFiles = historyFiles();
-  const historyMtimesBefore = historyMtimes(sourceHistoryFiles);
-  const db = openLocalDatabase();
-  try {
-    const collectorBaselineBefore = readCollectorBaseline(db);
-    const schemaPreflight = ensureMirrorSchema(db);
-    const syncResult = applyRealSync({
-      db,
-      runId,
-      generatedAtJst,
-      reportPath,
-      sourceHistoryFiles,
-      rows: sourceRows
-    });
-    const validation = validatePostSync({
-      db,
-      sourceRows,
-      syncRunId: syncResult.sync_run_record.sync_run_id,
-      collectorBaselineBefore,
-      historyMtimesUnchanged: mtimesUnchanged(historyMtimesBefore)
-    });
-    const report = buildSuccessReport({
-      runId,
-      generatedAtJst,
-      gate,
-      sourceArtifact: AUTO03X_JSON,
-      schemaPreflight,
-      syncResult,
-      postSyncValidation: validation,
-      reportPath,
-      jsonPath,
-      csvPath,
-      debugPath
-    });
-    writeArtifacts(report, debugPath);
-    printReportSummary(report);
-  } finally {
-    closeDatabase(db);
+  gate.reasons.unshift(LEGACY_REAL_RUN_DISABLED_REASON);
+  const report = buildReadyNotRunReport({
+    runId,
+    generatedAtJst,
+    gate,
+    sourceArtifact: AUTO03X_JSON,
+    reportPath,
+    jsonPath,
+    csvPath,
+    debugPath
+  });
+  writeArtifacts(report, debugPath);
+  printReportSummary(report);
+  if (process.env["HISTORY_TO_DB_SYNC"] === "1") {
+    console.log("legacy_db_sync_disabled=true");
+    console.log(`legacy_db_sync_disabled_reason=${LEGACY_REAL_RUN_DISABLED_REASON}`);
+    process.exitCode = 2;
   }
 }
 

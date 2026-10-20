@@ -203,7 +203,7 @@ function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: num
   // OFF) can only insert the rows this append wrote (P0-G2).
   let result: ReturnType<typeof runRealAppend> | null = null;
   const trusted = trustedAppendAndMirror({
-    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: toAppend, captureDir: resolve(DEBUG_ROOT, runId),
+    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: toAppend, captureDir: resolve(DEBUG_ROOT, runId), maxRows: MAX_PAGES_PER_BATCH,
     mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
     write: (rs) => {
       result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(rs) });

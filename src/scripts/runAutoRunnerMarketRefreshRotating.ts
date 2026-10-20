@@ -350,7 +350,7 @@ async function run(): Promise<void> {
       // lock; only the rows this append wrote can reach the DB (P0-G2).
       trustedAppend = trustedAppendAndMirror({
         historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jst.iso, rows: appendPlan.approved_rows, captureDir: debugPath,
-        mirrorEnabled: env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold",
+        mirrorEnabled: env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold", maxRows: caps.total_pages_per_run,
         write: (rows) => { appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
       });
       rowsAppended = trustedAppend.rows_appended;

@@ -10,6 +10,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isVerifiedTrustedMirror, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
+import { MAX_TOTAL_LIVE_PAGES } from "../services/autoRunnerMarketRefresh";
+import { scaleCap } from "../services/crawlVolumeConfig";
+
+// The 09:00 runner's legal per-run page cap (one history row per page).
+const liveMaxTotalPages = (multiplier: number): number => scaleCap(MAX_TOTAL_LIVE_PAGES, multiplier);
 import { splitCsvRecords } from "../services/historyCsvRecords";
 import { chromium } from "playwright";
 import {
@@ -468,7 +473,7 @@ async function run(): Promise<RunnerOutput> {
     // append nothing is synced: there is no other DB write path.
     trustedAppend = trustedAppendAndMirror({
       historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: appendPlan.approved_rows, captureDir: debugPath,
-      mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold",
+      mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold", maxRows: liveMaxTotalPages(multiplier),
       write: (rows) => { appendResult = appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
     });
   }

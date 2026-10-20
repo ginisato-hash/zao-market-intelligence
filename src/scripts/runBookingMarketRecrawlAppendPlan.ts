@@ -26,6 +26,10 @@ import { canonicalizeName, isOwnProperty } from "../services/biWebDataExport";
 
 const HISTORY_DIR = ".data/history";
 const DB_PATH = ".data/zao-market-intelligence.sqlite";
+// Legal per-run row caps of the two jobs that feed this script (one row per
+// page): recrawl batch (preview default 6) and pricing-critical competitor batch
+// (default 8), read from the same env vars with the same defaults.
+const APPEND_MAX_ROWS = Math.max(Number(process.env["ZMI_RECRAWL_MAX_PAGES_PER_BATCH"] ?? "6") || 6, Number(process.env["ZMI_PRICING_CRITICAL_MAX_PAGES_PER_BATCH"] ?? "8") || 8);
 const REPORT_GLOB_DIR = ".data/reports/source-discovery";
 const CRAWL_DIR = ".data/crawl-priority";
 const OUT_DIR = ".data/validation";
@@ -273,7 +277,7 @@ function run(): void {
   const runId = `booking_market_recrawl_append_${backupTs}`;
   let written: ReturnType<typeof runRealAppend> | null = null;
   const trusted = trustedAppendAndMirror({
-    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstNow(), rows: toAppend, captureDir: resolve(".data/debug/booking-market-recrawl-append", runId),
+    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstNow(), rows: toAppend, captureDir: resolve(".data/debug/booking-market-recrawl-append", runId), maxRows: APPEND_MAX_ROWS,
     mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
     write: (rows) => {
       written = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: backupTs, sourceShards: groupRowsToSourceShards(rows) });

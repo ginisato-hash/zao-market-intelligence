@@ -745,7 +745,8 @@ export type TrustedAppendStatus =
   | "MIRROR_FAILED_ROLLED_BACK" // post-sync validation/exact mirror failed; DB rolled back
   | "LOCK_BUSY_CAPTURE_PRESERVED" // history or DB writer lock not obtained: no append
   | "STATE_UNKNOWN_CAPTURE_PRESERVED" // history/DB could not be read: no append
-  | "APPEND_CONFLICT_CAPTURE_PRESERVED"; // a row_id already exists with another row_hash: no append
+  | "APPEND_CONFLICT_CAPTURE_PRESERVED" // a row_id already exists with another row_hash: no append
+  | "APPEND_CAP_EXCEEDED_CAPTURE_PRESERVED"; // more rows than the job's legal per-run cap: no append
 
 export interface TrustedAppendResult {
   status: TrustedAppendStatus;
@@ -823,6 +824,9 @@ export function trustedAppendAndMirror(input: {
   mirrorEnabled: boolean; // default OFF: callers pass env[TRUSTED_MIRROR_FLAG] === "1"
   captureDir: string; // where unappended rows are preserved
   lockWaitMs?: number;
+  // The calling job's legal per-run maximum (pages per run, one row per page),
+  // clamped to SYNC_PERMIT_MAX_ROWS. More rows than this is refused unappended.
+  maxRows: number;
   // "hold": take runRealAppend's legacy .append.lock around write() (callers
   // whose primitive has no lock of its own, so manual runRealAppend backs off);
   // "primitive": the write itself (runRealAppend) takes it.
@@ -852,6 +856,8 @@ export function trustedAppendAndMirror(input: {
     return result;
   };
   if (input.rows.length === 0) return result;
+  const cap = Math.min(Number.isInteger(input.maxRows) && input.maxRows > 0 ? input.maxRows : 0, SYNC_PERMIT_MAX_ROWS);
+  if (input.rows.length > cap) return preserve("APPEND_CAP_EXCEEDED_CAPTURE_PRESERVED", `${input.rows.length} rows > per-run cap ${cap}`, input.rows);
 
   // 1. History-writer lock (after collection, before reading canonical state).
   const lockPath = historyWriterLockPath(input.historyDir);
@@ -906,13 +912,12 @@ export function trustedAppendAndMirror(input: {
     }
 
     input.hooks?.afterClassify?.();
-    // Legacy .append.lock (manual / runRealAppend writers outside this lock): an
-    // existing one is a busy writer whatever its age; it is cleared only when it
-    // names a dead pid on this host (a crashed writer), never by mtime.
+    // Legacy .append.lock (manual / runRealAppend writers outside this lock): any
+    // existing one is a busy writer, whatever its age or recorded pid. It is
+    // never removed automatically (a check-then-delete could remove a lock that
+    // another process replaced in between); an operator inspects and removes it.
     const appendLockPath = join(resolve(input.historyDir), APPEND_LOCK_FILENAME);
-    const legacy = legacyAppendLockState(appendLockPath);
-    if (legacy === "busy") return preserve("LOCK_BUSY_CAPTURE_PRESERVED", `${APPEND_LOCK_FILENAME} held by another writer`, input.rows);
-    if (legacy === "cleared_dead_pid") result.reasons.push(`${APPEND_LOCK_FILENAME} of a dead process removed`);
+    if (existsSync(appendLockPath)) return preserve("LOCK_BUSY_CAPTURE_PRESERVED", `${APPEND_LOCK_FILENAME} present (${describeLegacyLock(appendLockPath)}); operator must inspect and remove`, input.rows);
 
     // 4. Normal mode takes the DB writer lock BEFORE appending: if it cannot be
     //    had, canonical history is not touched.
@@ -935,9 +940,10 @@ export function trustedAppendAndMirror(input: {
     // 5. The real append, in this process.
     let appendError: Error | null = null;
     const holdLegacy = (input.legacyAppendLock ?? "primitive") === "hold";
+    const ownLock = `${input.runId}\n${new Date().toISOString()}\npid=${process.pid}\nhost=${hostname()}\n`;
     if (holdLegacy) {
       try {
-        writeFileSync(appendLockPath, `${input.runId}\n${new Date().toISOString()}\npid=${process.pid}\nhost=${hostname()}\n`, { encoding: "utf8", flag: "wx" });
+        writeFileSync(appendLockPath, ownLock, { encoding: "utf8", flag: "wx" });
       } catch {
         return preserve("LOCK_BUSY_CAPTURE_PRESERVED", `${APPEND_LOCK_FILENAME} taken by another writer`, input.rows);
       }
@@ -947,7 +953,8 @@ export function trustedAppendAndMirror(input: {
     } catch (error) {
       appendError = error as Error;
     } finally {
-      if (holdLegacy) rmSync(appendLockPath, { force: true });
+      // Remove only our own lock (byte-identical content).
+      if (holdLegacy && existsSync(appendLockPath) && readFileSync(appendLockPath, "utf8") === ownLock) rmSync(appendLockPath, { force: true });
     }
     input.hooks?.afterAppend?.();
 
@@ -988,6 +995,11 @@ export function trustedAppendAndMirror(input: {
     if (problems.length > 0) {
       result.reasons.push(...problems.slice(0, 10));
       result.status = "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED";
+      // Intended rows that did not land (e.g. a writer that returned without
+      // writing all of W) are preserved; nothing here reports success.
+      const landed = new Set(appended);
+      const missing = toWrite.filter((r) => !landed.has(r.rowId));
+      if (missing.length > 0) capture(result.status, "intended rows missing after append", missing);
       return result;
     }
     result.appended_row_ids = appended; // verified W (history side)
@@ -1048,19 +1060,13 @@ function parsedHistoryRecord(row: HistoryRow): Record<string, string> {
   return parseCsvTable(renderHistoryCsv([row])).rows[0] ?? {};
 }
 
-function legacyAppendLockState(path: string): "free" | "busy" | "cleared_dead_pid" {
-  if (!existsSync(path)) return "free";
-  let text = "";
-  try { text = readFileSync(path, "utf8"); } catch { return "busy"; }
-  const pid = Number(/^pid=(\d+)$/mu.exec(text)?.[1] ?? NaN);
-  const host = /^host=(.+)$/mu.exec(text)?.[1];
-  if (!Number.isInteger(pid) || host !== hostname()) return "busy"; // unknown owner: never removed by age
+function describeLegacyLock(path: string): string {
   try {
-    process.kill(pid, 0);
-    return "busy"; // alive (or pid reused): fail-safe
-  } catch (error) {
-    if ((error as { code?: string }).code !== "ESRCH") return "busy";
+    const text = readFileSync(path, "utf8");
+    const pid = /^pid=(\d+)$/mu.exec(text)?.[1];
+    const ageMin = Math.round((Date.now() - statSync(path).mtimeMs) / 60000);
+    return `${(text.split("\n", 1)[0] ?? "").slice(0, 80)}${pid === undefined ? ", no pid" : `, pid ${pid}`}, ${ageMin} min old`;
+  } catch {
+    return "unreadable";
   }
-  rmSync(path, { force: true });
-  return "cleared_dead_pid";
 }
