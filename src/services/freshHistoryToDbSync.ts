@@ -838,7 +838,7 @@ export function trustedAppendAndMirror(input: {
   // whose primitive has no lock of its own, so manual runRealAppend backs off);
   // "primitive": the write itself (runRealAppend) takes it.
   legacyAppendLock?: "hold" | "primitive";
-  hooks?: { afterLock?: () => void; afterClassify?: () => void; afterShardParsed?: (file: string) => void; afterAppend?: () => void; beforeCommit?: () => void; afterCommit?: () => void } | undefined;
+  hooks?: { afterLock?: () => void; afterClassify?: () => void; afterShardParsed?: (file: string) => void; afterAppend?: () => void; beforeCommit?: () => void; afterCommit?: () => void; afterCaptureWrite?: (path: string) => void } | undefined;
 }): TrustedAppendResult {
   const waitMs = input.lockWaitMs ?? HISTORY_WRITER_LOCK_WAIT_MS;
   const result: TrustedAppendResult = {
@@ -846,15 +846,17 @@ export function trustedAppendAndMirror(input: {
     rows_skipped_identical: 0, rows_appended: 0, inserted_rows: 0, history_rows_before: null, history_rows_after: null,
     db_rows_before: null, db_rows_after: null, mirror_exact_match: false, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: [], unsaved_row_ids: []
   };
-  // Saved only if the file is actually on disk and reads back with every row.
+  // Saved only if the file on disk is byte-identical to what was serialized
+  // (every field of every row, not just the row_ids).
   const capture = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): boolean => {
     const path = resolve(input.captureDir, `trusted_append_unappended_${input.runId}.json`);
     try {
       mkdirSync(resolve(input.captureDir), { recursive: true });
-      writeFileSync(`${path}.tmp`, `${JSON.stringify({ run_id: input.runId, status, reason, rows }, null, 2)}\n`, "utf8");
+      const body = Buffer.from(`${JSON.stringify({ run_id: input.runId, status, reason, rows }, null, 2)}\n`, "utf8");
+      writeFileSync(`${path}.tmp`, body);
       renameSync(`${path}.tmp`, path);
-      const back = JSON.parse(readFileSync(path, "utf8")) as { rows?: Array<{ rowId?: string }> };
-      if (back.rows?.length !== rows.length || back.rows.some((r, i) => r.rowId !== rows[i]!.rowId)) throw new Error("capture read-back mismatch");
+      input.hooks?.afterCaptureWrite?.(path);
+      if (!readFileSync(path).equals(body)) throw new Error("capture read-back mismatch (bytes differ from what was serialized)");
       result.capture_path = path;
       return true;
     } catch (error) {

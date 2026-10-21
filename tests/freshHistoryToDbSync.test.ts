@@ -1182,6 +1182,34 @@ describe("capture failure is explicit (EACCES / ENOTDIR fault injection)", () =>
     expect(dbSnapshot(f.dbPath)).toBe(before);
   });
 
+  it("same row_ids but another field changed on disk after the write: not preserved (byte-exact read-back)", () => {
+    const f = fx();
+    const before = dbSnapshot(f.dbPath);
+    const historyBefore = shard(f);
+    const other = new Database(historyWriterLockPath(f.historyDir));
+    other.exec("BEGIN EXCLUSIVE");
+    let r: TrustedAppendResult;
+    try {
+      r = call(f, "busy_tampered", [liveHistoryRow("tp_1"), liveHistoryRow("tp_2")], join(f.root, "capture_tp"), { hooks: { afterCaptureWrite: (path) => {
+        // e.g. a partial/corrupt write or another writer: identical rowIds, different price.
+        const doc = JSON.parse(readFileSync(path, "utf8")) as { rows: HistoryRow[] };
+        doc.rows[1] = { ...doc.rows[1]!, normalizedTotalPrice: 1 };
+        writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`);
+        expect(doc.rows.map((x) => x.rowId)).toEqual(["tp_1", "tp_2"]);
+      } } });
+    } finally {
+      other.exec("ROLLBACK");
+      other.close();
+    }
+    expect(r.status).toBe("CAPTURE_FAILED_ROWS_UNSAVED");
+    expect(r.capture_path).toBeNull();
+    expect(r.unsaved_row_ids).toEqual(["tp_1", "tp_2"]);
+    expect(r.reasons.join("|")).toContain("capture read-back mismatch (bytes differ from what was serialized)");
+    expect(isTrustedAppendCollected(r)).toBe(false);
+    expect(shard(f)).toBe(historyBefore);
+    expect(dbSnapshot(f.dbPath)).toBe(before);
+  });
+
   it("a writable capture dir still preserves (control)", () => {
     const f = fx();
     const other = new Database(historyWriterLockPath(f.historyDir));
@@ -1190,7 +1218,7 @@ describe("capture failure is explicit (EACCES / ENOTDIR fault injection)", () =>
       const r = call(f, "busy_ok", [liveHistoryRow("ok_1")], join(f.root, "capture_ok"));
       expect(r.status).toBe("LOCK_BUSY_CAPTURE_PRESERVED");
       expect(r.unsaved_row_ids).toEqual([]);
-      expect((JSON.parse(readFileSync(r.capture_path!, "utf8")) as { rows: HistoryRow[] }).rows.map((x) => x.rowId)).toEqual(["ok_1"]);
+      expect((JSON.parse(readFileSync(r.capture_path!, "utf8")) as { rows: HistoryRow[] }).rows).toEqual([liveHistoryRow("ok_1")]); // every field round-trips
     } finally {
       other.exec("ROLLBACK");
       other.close();
