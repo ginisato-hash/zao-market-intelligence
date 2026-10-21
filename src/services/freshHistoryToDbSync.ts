@@ -7,7 +7,7 @@
 
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { closeDatabase, openLocalDatabase } from "../db/client";
@@ -746,7 +746,8 @@ export type TrustedAppendStatus =
   | "LOCK_BUSY_CAPTURE_PRESERVED" // history or DB writer lock not obtained: no append
   | "STATE_UNKNOWN_CAPTURE_PRESERVED" // history/DB could not be read: no append
   | "APPEND_CONFLICT_CAPTURE_PRESERVED" // a row_id already exists with another row_hash: no append
-  | "APPEND_CAP_EXCEEDED_CAPTURE_PRESERVED"; // more rows than the job's legal per-run cap: no append
+  | "APPEND_CAP_EXCEEDED_CAPTURE_PRESERVED" // more rows than the job's legal per-run cap: no append
+  | "CAPTURE_FAILED_ROWS_UNSAVED"; // rows reached neither history nor the capture file (fatal; see unsaved_row_ids)
 
 export interface TrustedAppendResult {
   status: TrustedAppendStatus;
@@ -766,6 +767,12 @@ export interface TrustedAppendResult {
   reasons: string[];
   // W: the row_ids this call actually appended and verified (empty otherwise).
   appended_row_ids: string[];
+  // Rows that reached neither canonical history nor a verified capture file.
+  unsaved_row_ids: string[];
+}
+
+export function isTrustedAppendCollected(result: TrustedAppendResult): boolean {
+  return (TRUSTED_APPEND_COLLECTED_STATUSES as readonly string[]).includes(result.status);
 }
 
 // Outcomes in which this run's collected rows are now in canonical history
@@ -837,22 +844,30 @@ export function trustedAppendAndMirror(input: {
   const result: TrustedAppendResult = {
     status: "NOTHING_TO_APPEND", state: "not_evaluated", mirror_enabled: input.mirrorEnabled, rows_requested: input.rows.length,
     rows_skipped_identical: 0, rows_appended: 0, inserted_rows: 0, history_rows_before: null, history_rows_after: null,
-    db_rows_before: null, db_rows_after: null, mirror_exact_match: false, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: []
+    db_rows_before: null, db_rows_after: null, mirror_exact_match: false, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: [], unsaved_row_ids: []
   };
-  const capture = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): void => {
+  // Saved only if the file is actually on disk and reads back with every row.
+  const capture = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): boolean => {
+    const path = resolve(input.captureDir, `trusted_append_unappended_${input.runId}.json`);
     try {
       mkdirSync(resolve(input.captureDir), { recursive: true });
-      const path = resolve(input.captureDir, `trusted_append_unappended_${input.runId}.json`);
-      writeFileSync(path, `${JSON.stringify({ run_id: input.runId, status, reason, rows }, null, 2)}\n`, "utf8");
+      writeFileSync(`${path}.tmp`, `${JSON.stringify({ run_id: input.runId, status, reason, rows }, null, 2)}\n`, "utf8");
+      renameSync(`${path}.tmp`, path);
+      const back = JSON.parse(readFileSync(path, "utf8")) as { rows?: Array<{ rowId?: string }> };
+      if (back.rows?.length !== rows.length || back.rows.some((r, i) => r.rowId !== rows[i]!.rowId)) throw new Error("capture read-back mismatch");
       result.capture_path = path;
+      return true;
     } catch (error) {
       result.reasons.push(`capture not written: ${(error as Error).message}`);
+      result.unsaved_row_ids.push(...rows.map((r) => r.rowId));
+      return false;
     }
   };
   const preserve = (status: TrustedAppendStatus, reason: string, rows: readonly HistoryRow[]): TrustedAppendResult => {
-    result.status = status;
     result.reasons.push(reason);
-    capture(status, reason, rows);
+    // Never report "preserved" when nothing was saved: no history/DB fallback write.
+    result.status = capture(status, reason, rows) ? status : "CAPTURE_FAILED_ROWS_UNSAVED";
+    if (result.status !== status) result.reasons.push(`intended outcome ${status} not reached: rows unsaved`);
     return result;
   };
   if (input.rows.length === 0) return result;

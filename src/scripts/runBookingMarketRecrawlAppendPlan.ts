@@ -301,6 +301,7 @@ function run(): void {
   console.log(`rollback_performed=${result.rollbackPerformed}`);
   console.log(`post_header_ok=${postOk}`);
   console.log(`trusted_append_status=${trusted.status}`);
+  console.log(`trusted_append_unsaved_rows=${trusted.unsaved_row_ids.length}`);
   console.log(`trusted_append_reasons=${trusted.reasons.join(";")}`);
   console.log(`plan_json=${planJson}`);
   if (result.rollbackPerformed || result.rowsConflict > 0 || !TRUSTED_APPEND_COLLECTED_STATUSES.includes(trusted.status)) process.exitCode = 1;

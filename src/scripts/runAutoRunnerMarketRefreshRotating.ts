@@ -19,7 +19,7 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
-import { isVerifiedTrustedMirror, rowsActuallyAppended, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
+import { isTrustedAppendCollected, isVerifiedTrustedMirror, rowsActuallyAppended, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
@@ -409,7 +409,8 @@ async function run(): Promise<void> {
     rejected_rows_by_reason: countRejected(appendPlan),
     price_sanity_excluded_count: appendPlan?.price_sanity_excluded_records.length ?? 0,
     price_sanity_excluded_records: appendPlan?.price_sanity_excluded_records ?? [],
-    db_synced: dbSynced, trusted_append: trustedAppend, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
+    db_synced: dbSynced, trusted_append: trustedAppend,
+    trusted_append_status: trustedAppend?.status ?? "not_run", trusted_append_unsaved_rows: trustedAppend?.unsaved_row_ids.length ?? 0, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
     history_rows: post.history_rows, db_rows: post.db_rows, ai_context_rows: post.ai_context_rows, duplicate_row_id_count: post.duplicate_row_id_count,
     selected_targets_by_source: plan.selected_by_source, selected_targets_by_bucket: plan.selected_by_bucket, selected_targets_by_tier: plan.selected_by_tier,
     selected_distinct_properties_by_source: plan.selected_distinct_properties_by_source,
@@ -450,6 +451,9 @@ async function run(): Promise<void> {
     if (typeof v === "object") continue;
     console.log(`${k}=${typeof v === "boolean" ? v : v}`);
   }
+  // Collected rows that are in neither history nor a saved capture (or were not
+  // appended at all) make the run fail visibly.
+  if (trustedAppend !== null && !isTrustedAppendCollected(trustedAppend)) process.exitCode = 1;
 }
 
 function readExistingKeys(): ExistingHistoryKey[] {

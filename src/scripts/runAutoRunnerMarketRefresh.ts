@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isVerifiedTrustedMirror, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
+import { isTrustedAppendCollected, isVerifiedTrustedMirror, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { MAX_TOTAL_LIVE_PAGES } from "../services/autoRunnerMarketRefresh";
 import { scaleCap } from "../services/crawlVolumeConfig";
 
@@ -614,6 +614,9 @@ run()
     console.log(`property_coverage_count=${result.monitoring.property_coverage_count}`);
     console.log(`history_appended=${result.safety_confirmation.history_appended}`);
     console.log(`rows_appended=${result.append_result?.rows_written ?? 0}`);
+    console.log(`trusted_append_status=${result.trusted_append?.status ?? "not_run"}`);
+    console.log(`trusted_append_unsaved_rows=${result.trusted_append?.unsaved_row_ids.length ?? 0}`);
+    if (result.trusted_append !== null && !isTrustedAppendCollected(result.trusted_append)) process.exitCode = 1;
     console.log(`db_synced=${result.safety_confirmation.db_synced}`);
     console.log(`ai_context_refreshed=${result.safety_confirmation.ai_context_refreshed}`);
     console.log(`history_rows=${result.post_run_state.history_rows}`);

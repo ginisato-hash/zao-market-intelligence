@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync as listDir, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -17,6 +17,7 @@ import {
   SYNC_PERMIT_MAX_ROWS,
   historyWriterLockPath,
   isVerifiedTrustedMirror,
+  isTrustedAppendCollected,
   combineAppendOutcomes,
   rowsActuallyAppended,
   TRUSTED_APPEND_COLLECTED_STATUSES,
@@ -812,7 +813,7 @@ console.log("RESULT=" + JSON.stringify(r));
   }
 
   it("isVerifiedTrustedMirror is false for every non-mirrored outcome", () => {
-    const base: TrustedAppendResult = { status: "MIRRORED", state: "consistent", mirror_enabled: true, rows_requested: 1, rows_skipped_identical: 0, rows_appended: 1, inserted_rows: 1, history_rows_before: 1, history_rows_after: 2, db_rows_before: 1, db_rows_after: 2, mirror_exact_match: true, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: ["x"] };
+    const base: TrustedAppendResult = { status: "MIRRORED", state: "consistent", mirror_enabled: true, rows_requested: 1, rows_skipped_identical: 0, rows_appended: 1, inserted_rows: 1, history_rows_before: 1, history_rows_after: 2, db_rows_before: 1, db_rows_after: 2, mirror_exact_match: true, lock_wait_ms: 0, capture_path: null, reasons: [], appended_row_ids: ["x"], unsaved_row_ids: [] };
     expect(isVerifiedTrustedMirror(base)).toBe(true);
     for (const status of ["HISTORY_APPENDED_MIRROR_DISABLED", "HISTORY_APPENDED_MIRROR_BLOCKED", "HISTORY_APPEND_FAILED_MIRROR_BLOCKED", "HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED", "MIRROR_FAILED_ROLLED_BACK", "LOCK_BUSY_CAPTURE_PRESERVED", "STATE_UNKNOWN_CAPTURE_PRESERVED", "APPEND_CONFLICT_CAPTURE_PRESERVED"] as const) {
       expect(isVerifiedTrustedMirror({ ...base, status })).toBe(false);
@@ -1090,5 +1091,124 @@ describe("P0 legacy real-run sync (real-run:history-to-db-sync) is permanently c
     const scripts = readdirSync(resolve(REPO_ROOT, "src/scripts")).filter((f: string) => f.endsWith(".ts"));
     const writers = scripts.filter((f: string) => /applyRealSync\(|ensureMirrorSchema\(|(INSERT|DELETE|UPDATE)[^;]*market_signal_history/u.test(readFileSync(resolve(REPO_ROOT, "src/scripts", f), "utf8")));
     expect(writers).toEqual(["runRakutenSoldOutRevertRealRun.ts"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TD RELEASE_READINESS_NO_WRITE: a failed capture is never reported as preserved.
+
+describe("capture failure is explicit (EACCES / ENOTDIR fault injection)", () => {
+  const AT = "2026-10-21T09:00:00+09:00";
+  function fx(): { root: string; historyDir: string; dbPath: string } {
+    const root = tempRoot();
+    const f = { root, historyDir: join(root, ".data/history"), dbPath: join(root, ".data/zao-market-intelligence.sqlite") };
+    mkdirSync(f.historyDir, { recursive: true });
+    const seed = trustedAppendAndMirror({ historyDir: f.historyDir, dbPath: f.dbPath, runId: "seed", generatedAtJst: AT, rows: [liveHistoryRow("cf_0")], maxRows: 150, captureDir: join(root, "capture"), mirrorEnabled: true, lockWaitMs: 1_000,
+      write: (rs) => { appendHistoryRowsAtomic({ rows: rs, historyDir: f.historyDir, backupDir: join(f.historyDir, ".backup", "seed"), historyBefore: 0 }); } });
+    expect(seed.status).toBe("MIRRORED");
+    return f;
+  }
+  // A capture dir that cannot be created: parent is read-only (EACCES).
+  function unwritableCaptureDir(root: string): string {
+    const parent = join(root, "readonly_debug");
+    mkdirSync(parent);
+    writeFileSync(join(parent, "existing_artifact.json"), "{}"); // pre-existing debug artifact must survive
+    chmodSync(parent, 0o500);
+    return join(parent, "capture");
+  }
+  function call(f: { root: string; historyDir: string; dbPath: string }, runId: string, rows: HistoryRow[], captureDir: string, extra: Partial<Parameters<typeof trustedAppendAndMirror>[0]> = {}): TrustedAppendResult {
+    return trustedAppendAndMirror({ historyDir: f.historyDir, dbPath: f.dbPath, runId, generatedAtJst: AT, rows, maxRows: 150, captureDir, mirrorEnabled: true, lockWaitMs: 300,
+      write: (rs) => { appendHistoryRowsAtomic({ rows: rs, historyDir: f.historyDir, backupDir: join(f.historyDir, ".backup", runId), historyBefore: 0 }); }, ...extra });
+  }
+  const shard = (f: { historyDir: string }): string => readFileSync(join(f.historyDir, "zao_signals_2026_11.csv"), "utf8");
+
+  it("lock busy + EACCES capture: CAPTURE_FAILED_ROWS_UNSAVED, every row listed unsaved, no history/DB/schema/sync_runs change", () => {
+    const f = fx();
+    const before = dbSnapshot(f.dbPath);
+    const historyBefore = shard(f);
+    const captureDir = unwritableCaptureDir(f.root);
+    const other = new Database(historyWriterLockPath(f.historyDir));
+    other.exec("BEGIN EXCLUSIVE");
+    let r: TrustedAppendResult;
+    try {
+      r = call(f, "busy_eacces", [liveHistoryRow("cf_1"), liveHistoryRow("cf_2")], captureDir);
+    } finally {
+      other.exec("ROLLBACK");
+      other.close();
+      chmodSync(join(f.root, "readonly_debug"), 0o700);
+    }
+    expect(r.status).toBe("CAPTURE_FAILED_ROWS_UNSAVED");
+    expect(r.capture_path).toBeNull();
+    expect(r.unsaved_row_ids).toEqual(["cf_1", "cf_2"]);
+    expect(r.reasons.join("|")).toMatch(/history writer lock busy\|capture not written: .*(EACCES|permission denied).*\|intended outcome LOCK_BUSY_CAPTURE_PRESERVED not reached: rows unsaved/iu);
+    expect(isTrustedAppendCollected(r)).toBe(false);
+    expect(isVerifiedTrustedMirror(r)).toBe(false);
+    expect(combineAppendOutcomes([{ name: "own", attempted: true, status: r.status }]).ok).toBe(false);
+    expect(shard(f)).toBe(historyBefore); // no fallback write to history
+    expect(dbSnapshot(f.dbPath)).toBe(before); // nor to the DB
+    expect(listDir(join(f.root, "readonly_debug"))).toEqual(["existing_artifact.json"]); // existing debug artifact kept
+  });
+
+  it("cap exceeded + ENOTDIR capture path: CAPTURE_FAILED_ROWS_UNSAVED, nothing appended", () => {
+    const f = fx();
+    const before = dbSnapshot(f.dbPath);
+    const historyBefore = shard(f);
+    writeFileSync(join(f.root, "not_a_dir"), "x");
+    const r = call(f, "cap_enotdir", Array.from({ length: 3 }, (_, i) => liveHistoryRow(`cn_${i}`)), join(f.root, "not_a_dir", "capture"), { maxRows: 2 });
+    expect(r.status).toBe("CAPTURE_FAILED_ROWS_UNSAVED");
+    expect(r.reasons.join("|")).toMatch(/3 rows > per-run cap 2\|capture not written: .*ENOTDIR/u);
+    expect(r.unsaved_row_ids).toHaveLength(3);
+    expect(shard(f)).toBe(historyBefore);
+    expect(dbSnapshot(f.dbPath)).toBe(before);
+  });
+
+  it("partly landed W + EACCES capture: W and the unsaved rows are reported separately; not success", () => {
+    const f = fx();
+    const before = dbSnapshot(f.dbPath);
+    const captureDir = unwritableCaptureDir(f.root);
+    let r: TrustedAppendResult;
+    try {
+      r = call(f, "partial_eacces", [liveHistoryRow("pe_1"), liveHistoryRow("pe_2"), liveHistoryRow("pe_3")], captureDir, { write: (rs) => {
+        appendHistoryRowsAtomic({ rows: rs.slice(0, 1), historyDir: f.historyDir, backupDir: join(f.historyDir, ".backup", "pe"), historyBefore: 0 });
+      } });
+    } finally {
+      chmodSync(join(f.root, "readonly_debug"), 0o700);
+    }
+    expect(r.status).toBe("HISTORY_APPEND_UNVERIFIED_MIRROR_BLOCKED");
+    expect(r.capture_path).toBeNull();
+    expect(r.unsaved_row_ids).toEqual(["pe_2", "pe_3"]); // in neither history nor a capture
+    expect(isTrustedAppendCollected(r)).toBe(false);
+    expect(shard(f)).toContain("pe_1"); // the row that did land stays; nothing is deleted
+    expect(dbSnapshot(f.dbPath)).toBe(before);
+  });
+
+  it("a writable capture dir still preserves (control)", () => {
+    const f = fx();
+    const other = new Database(historyWriterLockPath(f.historyDir));
+    other.exec("BEGIN EXCLUSIVE");
+    try {
+      const r = call(f, "busy_ok", [liveHistoryRow("ok_1")], join(f.root, "capture_ok"));
+      expect(r.status).toBe("LOCK_BUSY_CAPTURE_PRESERVED");
+      expect(r.unsaved_row_ids).toEqual([]);
+      expect((JSON.parse(readFileSync(r.capture_path!, "utf8")) as { rows: HistoryRow[] }).rows.map((x) => x.rowId)).toEqual(["ok_1"]);
+    } finally {
+      other.exec("ROLLBACK");
+      other.close();
+    }
+  });
+
+  it("all five entries end non-zero / partial on an uncollected outcome", () => {
+    const rotating = readFileSync(resolve(REPO_ROOT, "src/scripts/runAutoRunnerMarketRefreshRotating.ts"), "utf8");
+    expect(rotating).toContain("if (trustedAppend !== null && !isTrustedAppendCollected(trustedAppend)) process.exitCode = 1;");
+    expect(rotating).toContain('trusted_append_status: trustedAppend?.status ?? "not_run", trusted_append_unsaved_rows: trustedAppend?.unsaved_row_ids.length ?? 0,');
+    const live = readFileSync(resolve(REPO_ROOT, "src/scripts/runAutoRunnerMarketRefresh.ts"), "utf8");
+    expect(live).toContain("if (result.trusted_append !== null && !isTrustedAppendCollected(result.trusted_append)) process.exitCode = 1;");
+    const recrawl = readFileSync(resolve(REPO_ROOT, "src/scripts/runBookingMarketRecrawlAppendPlan.ts"), "utf8");
+    expect(recrawl).toContain("!TRUSTED_APPEND_COLLECTED_STATUSES.includes(trusted.status)) process.exitCode = 1;");
+    expect(recrawl).toContain("trusted_append_unsaved_rows=");
+    const pricing = readFileSync(resolve(REPO_ROOT, "src/scripts/runPricingCriticalRecrawl.ts"), "utf8");
+    expect(pricing).toContain("const outcome = combineAppendOutcomes(appendParts);");
+    expect(pricing).toContain("own_trusted_append_unsaved_rows=");
+    expect(TRUSTED_APPEND_COLLECTED_STATUSES).not.toContain("CAPTURE_FAILED_ROWS_UNSAVED");
   });
 });

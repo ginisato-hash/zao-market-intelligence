@@ -355,6 +355,7 @@ async function run(): Promise<void> {
       console.log(`own_append_decision=${r.appendResult?.decision ?? "no_rows_to_append"}`);
       console.log(`own_rows_written=${r.appendResult?.rowsWritten ?? 0}`);
       console.log(`own_trusted_append_status=${r.trusted?.status ?? "no_rows_to_append"}`);
+      console.log(`own_trusted_append_unsaved_rows=${r.trusted?.unsaved_row_ids.length ?? 0}`);
       if (r.trusted !== null) appendParts.push({ name: "own", attempted: true, status: r.trusted.status });
     } else {
       console.log(`own_append_skipped=true`);
