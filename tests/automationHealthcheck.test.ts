@@ -1,5 +1,9 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import Database from "better-sqlite3";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const SCRIPT_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/runAutomationHealthcheck.ts"), "utf8");
@@ -117,6 +121,108 @@ describe("AUTOMATION-HEALTHCHECK01", () => {
       const markerIdx = PUBLISH_CHATGPT_DB_SOURCE.indexOf("writePublishMarker(releaseUrl, assetUrl)");
       expect(uploadIdx).toBeGreaterThan(-1);
       expect(markerIdx).toBeGreaterThan(uploadIdx);
+    });
+  });
+
+  // Runs the real script in a throwaway git repo. launchctl/osascript are
+  // stubbed on PATH so no real launchd state is read and no notification fires.
+  describe("stale lock detection (real run)", () => {
+    const SCRIPT = resolve(__dirname, "../src/scripts/runAutomationHealthcheck.ts");
+    const TSX_LOADER = pathToFileURL(resolve(__dirname, "../node_modules/tsx/dist/loader.mjs")).href;
+    const HOUR = 60 * 60 * 1000;
+
+    function workspace(): { cwd: string; locks: string; bin: string } {
+      const cwd = mkdtempSync(join(tmpdir(), "zmi-healthcheck-"));
+      const git = (...args: string[]): void => {
+        const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], { cwd, encoding: "utf8" });
+        if (r.status !== 0) throw new Error(r.stderr);
+      };
+      git("init", "-q");
+      writeFileSync(join(cwd, ".gitignore"), ".data/\nbin/\n");
+      git("add", ".gitignore");
+      git("commit", "-q", "-m", "init");
+      const bin = join(cwd, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(bin, "launchctl"), "#!/bin/sh\nprintf 'state = not running\\nruns = 1\\nlast exit code = 0\\n'\n");
+      writeFileSync(join(bin, "osascript"), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(bin, "launchctl"), 0o755);
+      chmodSync(join(bin, "osascript"), 0o755);
+      const locks = join(cwd, ".data/locks");
+      mkdirSync(locks, { recursive: true });
+      return { cwd, locks, bin };
+    }
+    function ageFile(path: string, hours: number): void {
+      const t = new Date(Date.now() - hours * HOUR);
+      utimesSync(path, t, t);
+    }
+    function run(w: { cwd: string; bin: string }, env: Record<string, string> = {}): { status: number | null; report: { healthy: boolean; stale_lock_files: Array<{ path: string }>; alerts: string[] } } {
+      const childEnv: Record<string, string | undefined> = { ...process.env, PATH: `${w.bin}:${process.env["PATH"] ?? ""}`, ...env };
+      delete childEnv["ZMI_HEALTHCHECK_SLACK_WEBHOOK_URL"];
+      delete childEnv["ZMI_HEALTHCHECK_DISCORD_WEBHOOK_URL"];
+      if (!("ZMI_HEALTHCHECK_STALE_LOCK_HOURS" in env)) delete childEnv["ZMI_HEALTHCHECK_STALE_LOCK_HOURS"];
+      if (!("ZMI_HEALTHCHECK_STALE_HOURS" in env)) delete childEnv["ZMI_HEALTHCHECK_STALE_HOURS"];
+      const r = spawnSync(process.execPath, ["--import", TSX_LOADER, SCRIPT], { cwd: w.cwd, encoding: "utf8", env: childEnv });
+      const dir = join(w.cwd, ".data/reports/automation");
+      const name = readdirSync(dir).find((f) => f.endsWith(".json"));
+      if (!name) throw new Error(`no report: ${r.stdout}${r.stderr}`);
+      return { status: r.status, report: JSON.parse(readFileSync(join(dir, name), "utf8")) };
+    }
+    const names = (r: { stale_lock_files: Array<{ path: string }> }): string[] => r.stale_lock_files.map((l) => l.path.split("/").pop()!).sort();
+
+    it("an old history_writer.lock.sqlite (real SQLite EXCLUSIVE taken and released) is not a stale lock; the run is healthy", () => {
+      const w = workspace();
+      const lockPath = join(w.locks, "history_writer.lock.sqlite");
+      const lock = new Database(lockPath);
+      lock.exec("BEGIN EXCLUSIVE");
+      lock.exec("ROLLBACK");
+      lock.close();
+      ageFile(lockPath, 30);
+      const before = statSync(lockPath).mtimeMs;
+      const { status, report } = run(w);
+      expect(report.stale_lock_files).toEqual([]);
+      expect(report.alerts).toEqual([]);
+      expect(report.healthy).toBe(true);
+      expect(status).toBe(0);
+      expect(statSync(lockPath).mtimeMs).toBe(before); // the healthcheck does not touch it either
+    });
+
+    it("the exemption does not hide an old ordinary lock next to it, nor near-miss names", () => {
+      const w = workspace();
+      for (const name of ["history_writer.lock.sqlite", ".append.lock", "rotating.lock", "history_writer.lock.sqlite-journal", "x_history_writer.lock.sqlite", "history_writer.lock"]) {
+        writeFileSync(join(w.locks, name), "");
+        ageFile(join(w.locks, name), 5);
+      }
+      const { status, report } = run(w);
+      expect(names(report)).toEqual([".append.lock", "history_writer.lock", "history_writer.lock.sqlite-journal", "rotating.lock", "x_history_writer.lock.sqlite"]);
+      expect(report.alerts.filter((a) => a.startsWith("stale_lock_files:"))).toHaveLength(1);
+      expect(report.healthy).toBe(false);
+      expect(status).toBe(1);
+    });
+
+    it("the 3h default and the ZMI_HEALTHCHECK_STALE_LOCK_HOURS override are unchanged", () => {
+      const w = workspace();
+      writeFileSync(join(w.locks, "fresh.lock"), "");
+      ageFile(join(w.locks, "fresh.lock"), 2);
+      writeFileSync(join(w.locks, "history_writer.lock.sqlite"), "");
+      ageFile(join(w.locks, "history_writer.lock.sqlite"), 2);
+      expect(run(w).report.stale_lock_files).toEqual([]); // 2h < 3h default
+      const w2 = workspace();
+      writeFileSync(join(w2.locks, "fresh.lock"), "");
+      ageFile(join(w2.locks, "fresh.lock"), 2);
+      writeFileSync(join(w2.locks, "history_writer.lock.sqlite"), "");
+      ageFile(join(w2.locks, "history_writer.lock.sqlite"), 2);
+      expect(names(run(w2, { ZMI_HEALTHCHECK_STALE_LOCK_HOURS: "1" }).report)).toEqual(["fresh.lock"]);
+    });
+
+    it("other alerts still fire while the SQLite lock file is present", () => {
+      const w = workspace();
+      writeFileSync(join(w.locks, "history_writer.lock.sqlite"), "");
+      ageFile(join(w.locks, "history_writer.lock.sqlite"), 30);
+      writeFileSync(join(w.cwd, "stray.txt"), "x");
+      const { status, report } = run(w);
+      expect(report.stale_lock_files).toEqual([]);
+      expect(report.alerts.some((a) => a.startsWith("unexpected_dirty_files:") && a.includes("stray.txt"))).toBe(true);
+      expect(status).toBe(1);
     });
   });
 });

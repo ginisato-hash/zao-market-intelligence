@@ -44,6 +44,7 @@ import { toPreviewRow, type PreviewRow } from "../services/autoRunnerBookingPrev
 import { buildProposedHistoryRow } from "../services/bookingPreviewAppendProposal";
 import { groupRowsToSourceShards } from "../services/bookingPreviewHistoryAppendRealRun";
 import { runRealAppend } from "../services/localHistoryRealAppend";
+import { combineAppendOutcomes, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
 import { HISTORY_CSV_HEADERS, type HistoryRow } from "../services/localHistorySchemaDesign";
 import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppendValidationPolicy";
 import { backoffDelayMs, classifyBlock, jitterDelayMs, shouldEarlyStop, sleep } from "../services/crawlThrottlePolicy";
@@ -53,6 +54,7 @@ import { buildRefreshPlan, roundRobinByGroup, rotateWithinGroup, todaysSelectedT
 import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 
 const HISTORY_DIR = ".data/history";
+const DB_PATH = ".data/zao-market-intelligence.sqlite";
 const REPORT_DIR = ".data/reports/source-discovery";
 const OUT_DIR = ".data/validation";
 const DEBUG_ROOT = ".data/debug/pricing-critical-recrawl";
@@ -169,7 +171,7 @@ function readExistingRowHashById(): Map<string, string> {
 // Own-property append: same primitives as the competitor path (buildProposedHistoryRow
 // + runRealAppend), own rows explicitly ALLOWED (that gate is specific to the
 // competitor-evidence script, not a general prohibition on recording our own price).
-function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; noUsableRoomPrice: number; appendResult: ReturnType<typeof runRealAppend> | null } {
+function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: number; dupSkipped: number; dupConflicts: number; implausiblePrice: number; noUsableRoomPrice: number; appendResult: ReturnType<typeof runRealAppend> | null; trusted: TrustedAppendResult | null } {
   const existing = readExistingRowHashById();
   const toAppend: HistoryRow[] = [];
   let dupSkipped = 0, dupConflicts = 0, implausiblePrice = 0, noUsableRoomPrice = 0;
@@ -195,10 +197,20 @@ function appendOwnPropertyRows(rows: readonly PreviewRow[]): { rowsToAppend: num
     }
     toAppend.push(hRow);
   }
-  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: null };
+  if (toAppend.length === 0) return { rowsToAppend: 0, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: null, trusted: null };
   const runId = `pricing_critical_own_recrawl_${ts()}`;
-  const result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(toAppend) });
-  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: result };
+  // runRealAppend inside the shared history-writer lock; the DB mirror (default
+  // OFF) can only insert the rows this append wrote (P0-G2).
+  let result: ReturnType<typeof runRealAppend> | null = null;
+  const trusted = trustedAppendAndMirror({
+    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstIso(), rows: toAppend, captureDir: resolve(DEBUG_ROOT, runId), maxRows: MAX_PAGES_PER_BATCH,
+    mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
+    write: (rs) => {
+      result = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: ts(), sourceShards: groupRowsToSourceShards(rs) });
+      if (result.decision !== "local_history_real_append_success") throw new Error(result.decision);
+    }
+  });
+  return { rowsToAppend: toAppend.length, dupSkipped, dupConflicts, implausiblePrice, noUsableRoomPrice, appendResult: result, trusted };
 }
 
 async function run(): Promise<void> {
@@ -313,6 +325,9 @@ async function run(): Promise<void> {
 
   if (!appendMode) { console.log(`decision=pricing_critical_recrawl_preview_ready`); return; }
 
+  // Both append parts feed the final result: a failed or unappended part is a
+  // partial failure, never "append_ready" (TD private #13 P1).
+  const appendParts: Array<{ name: string; attempted: boolean; exitCode?: number | null; status?: string | null }> = [];
   // Competitor append: reuse the EXISTING, unmodified append-plan script.
   if (competitorRows.length > 0 && competitorArtifactPath !== "") {
     const spawnResult = spawnSync("npm", ["run", "plan:booking-market-recrawl-append"], {
@@ -322,6 +337,10 @@ async function run(): Promise<void> {
     console.log(`competitor_append_exit_code=${spawnResult.status}`);
     console.log(spawnResult.stdout ?? "");
     if (spawnResult.stderr) console.error(spawnResult.stderr);
+    const childKv = Object.fromEntries((spawnResult.stdout ?? "").split(/\r?\n/u).map((l) => l.trim()).filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+    // "noop_all_duplicates": nothing new to append is a collected outcome.
+    const childStatus = childKv["trusted_append_status"] ?? (childKv["decision"] === "booking_market_recrawl_append_noop_all_duplicates" ? "NOTHING_TO_APPEND" : childKv["decision"] ?? null);
+    appendParts.push({ name: "competitor", attempted: true, exitCode: spawnResult.status, status: childStatus });
   }
 
   // Own-property append: same underlying primitives, gated separately.
@@ -335,13 +354,23 @@ async function run(): Promise<void> {
       console.log(`own_no_usable_room_price_excluded=${r.noUsableRoomPrice}`);
       console.log(`own_append_decision=${r.appendResult?.decision ?? "no_rows_to_append"}`);
       console.log(`own_rows_written=${r.appendResult?.rowsWritten ?? 0}`);
+      console.log(`own_trusted_append_status=${r.trusted?.status ?? "no_rows_to_append"}`);
+      console.log(`own_trusted_append_unsaved_rows=${r.trusted?.unsaved_row_ids.length ?? 0}`);
+      if (r.trusted !== null) appendParts.push({ name: "own", attempted: true, status: r.trusted.status });
     } else {
       console.log(`own_append_skipped=true`);
       console.log(`note=set ZMI_APPEND_OWN_PROPERTY_RECRAWL=1 to append own-property observations`);
     }
   }
 
-  console.log(`decision=pricing_critical_recrawl_append_ready`);
+  const outcome = combineAppendOutcomes(appendParts);
+  if (outcome.ok) {
+    console.log(`decision=pricing_critical_recrawl_append_ready`);
+  } else {
+    console.log(`append_failed_parts=${outcome.failed.join(";")}`);
+    console.log(`decision=pricing_critical_recrawl_append_partial_failure`);
+    process.exitCode = 1;
+  }
 }
 
 run().catch((e) => { console.error(e); process.exitCode = 1; });

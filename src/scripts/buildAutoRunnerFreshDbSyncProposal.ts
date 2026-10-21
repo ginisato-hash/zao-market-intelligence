@@ -6,6 +6,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 import {
   buildCompatibilityPlan,
   buildCurrentStateSummary,
@@ -78,7 +79,7 @@ function historySummary(): { row_count: number; shards: Record<string, number> }
   const shards: Record<string, number> = {};
   let rowCount = 0;
   for (const name of readdirSync(resolve(".data/history")).filter((file) => /^zao_signals_\d{4}_\d{2}\.csv$/.test(file)).sort()) {
-    const count = readFileSync(resolve(".data/history", name), "utf8").trim().split(/\r?\n/u).filter(Boolean).length - 1;
+    const count = Math.max(0, splitCsvRecords(readFileSync(resolve(".data/history", name), "utf8")).length - 1);
     shards[name] = count;
     rowCount += count;
   }

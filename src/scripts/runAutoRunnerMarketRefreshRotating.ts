@@ -9,7 +9,7 @@
 
 import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import {
@@ -19,6 +19,8 @@ import {
   sanitizeBookingUrl,
   type BookingRenderedDomRow
 } from "../services/bookingRenderedDomProbe";
+import { isTrustedAppendCollected, isVerifiedTrustedMirror, rowsActuallyAppended, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror, type TrustedAppendResult } from "../services/freshHistoryToDbSync";
+import { readHistoryShards, summarizeHistoryRows, toSingleLine } from "../services/historyCsvRecords";
 import { toPreviewRow, type PreviewRow as BookingPreviewRow } from "../services/autoRunnerBookingPreview";
 import {
   MARKET_EVIDENCE_SIDECAR_DIR, appendEvidenceSidecar, buildEvidenceForAcceptedRows, captureBookingEvidence, evidenceExportStatus, guardedReader,
@@ -98,30 +100,13 @@ function jstParts(): { iso: string; date: string; hour: number } {
 }
 function writeJson(path: string, value: unknown): void { writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8"); }
 
-function parseCsvLine(line: string): string[] {
-  const cells: string[] = []; let cur = ""; let q = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"' && q && line[i + 1] === '"') { cur += '"'; i += 1; }
-    else if (ch === '"') q = !q;
-    else if (ch === "," && !q) { cells.push(cur); cur = ""; }
-    else cur += (ch ?? "");
-  }
-  cells.push(cur);
-  return cells;
-}
-
 // Most-recent collected_at per (source|slug|checkin) for 24h cooldown.
 function readLastCollectedAt(): Map<string, string> {
   const map = new Map<string, string>();
   if (!existsSync(HISTORY_DIR)) return map;
-  for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
-    if (lines.length < 2) continue;
-    const h = parseCsvLine(lines[0]!);
+  for (const { header: h, rows } of readHistoryShards(HISTORY_DIR)) {
     const si = h.indexOf("source"); const slugI = h.indexOf("source_slug_or_code"); const ci = h.indexOf("checkin"); const atI = h.indexOf("collected_at_jst");
-    for (const line of lines.slice(1)) {
-      const c = parseCsvLine(line);
+    for (const c of rows) {
       const key = `${c[si]}|${c[slugI]}|${c[ci]}`;
       const at = c[atI] ?? "";
       const prev = map.get(key);
@@ -144,14 +129,9 @@ function writeWinterTransitionLedger(keys: ReadonlySet<string>): void {
 
 interface StateSummary { history_rows: number; db_rows: number; ai_context_rows: number; duplicate_row_id_count: number }
 function readState(): StateSummary {
-  let history = 0; const ids = new Map<string, number>();
-  if (existsSync(HISTORY_DIR)) {
-    for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-      const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
-      const h = parseCsvLine(lines[0] ?? ""); const ri = h.indexOf("row_id");
-      for (const line of lines.slice(1)) { history += 1; const id = parseCsvLine(line)[ri] ?? ""; ids.set(id, (ids.get(id) ?? 0) + 1); }
-    }
-  }
+  // Logical CSV records, not physical lines: the sync service counts records, and
+  // EXPECTED_HISTORY_ROW_COUNT below must use the same unit or the sync never runs.
+  const { history_rows: history, duplicate_row_id_count: duplicateRowIds } = summarizeHistoryRows(HISTORY_DIR);
   let dbRows = 0;
   if (existsSync(DB_PATH)) {
     const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
@@ -159,7 +139,7 @@ function readState(): StateSummary {
   }
   let ai = 0;
   if (existsSync(AI_CONTEXT_PATH)) ai = (JSON.parse(readFileSync(AI_CONTEXT_PATH, "utf8")) as { market_signal_history_row_count?: number }).market_signal_history_row_count ?? 0;
-  return { history_rows: history, db_rows: dbRows, ai_context_rows: ai, duplicate_row_id_count: [...ids.values()].filter((n) => n > 1).length };
+  return { history_rows: history, db_rows: dbRows, ai_context_rows: ai, duplicate_row_id_count: duplicateRowIds };
 }
 
 function runCmd(cmd: string, args: string[], env: Record<string, string | undefined> = {}): { status: number | null; stdout: string; stderr: string; parsed: Record<string, unknown> } {
@@ -196,7 +176,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         await page.waitForTimeout(5_000);
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
-      } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); finalUrl = page.url() || probeUrl; }
+      } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
       finally { await page.close().catch(() => undefined); }
       const signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
@@ -309,6 +289,7 @@ async function run(): Promise<void> {
   let rowsAppended = 0;
   let appendPlan: AppendPlan | null = null;
   let dbSynced = false;
+  let trustedAppend: TrustedAppendResult | null = null;
   let aiContextRefreshed = false;
   let chatgptPublished = false;
   let releaseUrl = "";
@@ -365,19 +346,28 @@ async function run(): Promise<void> {
     sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
     if (appendPlan.append_allowed && appendPlan.new_row_count > 0) {
-      const r = appendHistoryRowsAtomic({ rows: appendPlan.approved_rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows });
-      rowsAppended = r.rows_written;
-      if (evidenceOn) evidenceSidecar = exportEvidenceSidecar(appendPlan.approved_rows, bookingEvidence, runId);
-      const after = readState();
-      const sync = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "1", EXPECTED_HISTORY_ROW_COUNT: String(after.history_rows) });
-      dbSynced = sync.status === 0 && Number(sync.parsed["db_after_count"]) === after.history_rows;
+      // Append and DB mirror in this process under the shared history-writer
+      // lock; only the rows this append wrote can reach the DB (P0-G2).
+      trustedAppend = trustedAppendAndMirror({
+        historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jst.iso, rows: appendPlan.approved_rows, captureDir: debugPath,
+        mirrorEnabled: env[TRUSTED_MIRROR_FLAG] === "1", legacyAppendLock: "hold", maxRows: caps.total_pages_per_run,
+        write: (rows) => { appendHistoryRowsAtomic({ rows, historyDir: HISTORY_DIR, backupDir: resolve(HISTORY_DIR, ".backup", runId), historyBefore: preflight.history_rows }); }
+      });
+      rowsAppended = trustedAppend.rows_appended;
+      // Evidence only for W: rows this run actually appended (not ones another job added first).
+      if (evidenceOn && rowsAppended > 0) evidenceSidecar = exportEvidenceSidecar(rowsActuallyAppended(appendPlan.approved_rows, trustedAppend), bookingEvidence, runId);
+      dbSynced = isVerifiedTrustedMirror(trustedAppend);
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {
-      dbSynced = true; aiContextRefreshed = true; // no-change run
+      // No-change run: nothing to write, but "synced" still needs a read-only
+      // exact-mirror check (gate off) rather than being assumed.
+      const check = runCmd("npm", ["run", "sync:history-to-db:fresh"], { HISTORY_TO_DB_SYNC: "" });
+      dbSynced = check.status === 0 && String(check.parsed["mirror_exact_match"] ?? "") === "true" && Number(check.parsed["history_count"]) === preflight.history_rows;
+      aiContextRefreshed = dbSynced;
     }
 
     const post = readState();
-    const aligned = post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
+    const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";
 
     // Publish only when gated AND aligned AND gh available.
@@ -419,7 +409,8 @@ async function run(): Promise<void> {
     rejected_rows_by_reason: countRejected(appendPlan),
     price_sanity_excluded_count: appendPlan?.price_sanity_excluded_records.length ?? 0,
     price_sanity_excluded_records: appendPlan?.price_sanity_excluded_records ?? [],
-    db_synced: dbSynced, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
+    db_synced: dbSynced, trusted_append: trustedAppend,
+    trusted_append_status: trustedAppend?.status ?? "not_run", trusted_append_unsaved_rows: trustedAppend?.unsaved_row_ids.length ?? 0, ai_context_refreshed: aiContextRefreshed, chatgpt_db_published: chatgptPublished, release_url: releaseUrl,
     history_rows: post.history_rows, db_rows: post.db_rows, ai_context_rows: post.ai_context_rows, duplicate_row_id_count: post.duplicate_row_id_count,
     selected_targets_by_source: plan.selected_by_source, selected_targets_by_bucket: plan.selected_by_bucket, selected_targets_by_tier: plan.selected_by_tier,
     selected_distinct_properties_by_source: plan.selected_distinct_properties_by_source,
@@ -460,19 +451,19 @@ async function run(): Promise<void> {
     if (typeof v === "object") continue;
     console.log(`${k}=${typeof v === "boolean" ? v : v}`);
   }
+  // Collected rows that are in neither history nor a saved capture (or were not
+  // appended at all) make the run fail visibly.
+  if (trustedAppend !== null && !isTrustedAppendCollected(trustedAppend)) process.exitCode = 1;
 }
 
 function readExistingKeys(): ExistingHistoryKey[] {
   const keys: ExistingHistoryKey[] = [];
   if (!existsSync(HISTORY_DIR)) return keys;
-  for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
-    const h = parseCsvLine(lines[0] ?? "");
+  for (const { header: h, rows } of readHistoryShards(HISTORY_DIR)) {
     const ri = h.indexOf("row_id"); const hi = h.indexOf("row_hash"); const si = h.indexOf("shard_month");
     const pi = h.indexOf("normalized_total_price"); const ai = h.indexOf("availability_status"); const bi = h.indexOf("basis_confidence");
     const ddi = h.indexOf("is_price_usable_for_dp_directional"); const dei = h.indexOf("is_price_excluded_from_dp");
-    for (const line of lines.slice(1)) {
-      const c = parseCsvLine(line);
+    for (const c of rows) {
       const rawPrice = pi >= 0 ? (c[pi] ?? "") : "";
       keys.push({ row_id: c[ri] ?? "", row_hash: c[hi] ?? "", shard_month: c[si] ?? "", normalized_total_price: rawPrice.trim() === "" ? null : Number(rawPrice), availability_status: ai >= 0 ? c[ai] : undefined, basis_confidence: bi >= 0 ? c[bi] : undefined, dp_directional: ddi >= 0 ? (c[ddi] ?? "").toLowerCase() === "true" : undefined, dp_excluded: dei >= 0 ? (c[dei] ?? "").toLowerCase() === "true" : undefined });
     }

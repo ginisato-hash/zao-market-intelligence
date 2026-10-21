@@ -9,6 +9,7 @@
 // this stays consistent with the room-only / two-person-standard gates.
 
 import { deriveBiMealBasis, deriveBiRoomBasis, canonicalizeName, type BiHistoryRow } from "./biWebDataExport";
+import { splitCsvRecords } from "./historyCsvRecords";
 
 export type NormalizedStatus = "available" | "sold_out" | "not_listed" | "unavailable" | "unknown";
 
@@ -639,7 +640,9 @@ export function parseHistoryForPriceHistory(files: readonly { filename: string; 
   let observedAtColumnUsed = "collected_at_jst";
   let observedAtConfidence = "high";
   for (const { content } of files) {
-    const lines = content.split(/\r?\n/u).filter((l) => l.length > 0);
+    // Quote-aware: a quoted multi-line warning_flags value is one record, not
+    // several garbage rows (see historyCsvRecords).
+    const lines = splitCsvRecords(content);
     if (lines.length < 2) continue;
     const h = parseCsvLine(lines[0]!);
     const idx = (name: string): number => h.indexOf(name);

@@ -263,24 +263,30 @@ function main(): void {
     history_mtimes_unchanged: Boolean(psv?.["history_mtimes_unchanged"] ?? false)
   };
 
+  // The legacy real-run sync is permanently disabled (TD private #13) and exits
+  // 2 on a write request. A refused or failed sync stops the chain: no AI
+  // context build and no task queries run on an unsynced DB.
+  const syncOk = syncRun.ok && isDbSyncOk(dbSync.decision);
+  const skipped: CommandResult = { ok: false, stdout: "", error: "skipped: DB sync refused or failed" };
+
   // ---- 2. AI context refresh ----
-  commandsRun.push("npm run build:ai-context-packs");
-  const contextRun = runScript("src/scripts/buildAiContextPacks.ts", [], {});
-  const contextReportPath = newestReportJson("ai_context_packs_");
+  if (syncOk) commandsRun.push("npm run build:ai-context-packs");
+  const contextRun = syncOk ? runScript("src/scripts/buildAiContextPacks.ts", [], {}) : skipped;
+  const contextReportPath = syncOk ? newestReportJson("ai_context_packs_") : null;
   const contextReport = contextReportPath ? readJson<Record<string, unknown>>(contextReportPath) : null;
   const contextMtimesAfter = mtimes(CONTEXT_PACK_FILES);
   const regeneratedFiles = CONTEXT_PACK_FILES.filter((p) => (contextMtimesAfter[p] ?? -1) > (contextMtimesBefore[p] ?? -1));
   const realFiles = CONTEXT_PACK_FILES.every((p) => existsSync(resolve(p)) && !lstatSync(resolve(p)).isSymbolicLink());
   const contextRefresh: ContextRefreshSummary = {
-    decision: String(contextReport?.["decision"] ?? (contextRun.ok ? "missing_context_report" : "context_refresh_failed")),
+    decision: String(contextReport?.["decision"] ?? (!syncOk ? "skipped_db_sync_refused" : contextRun.ok ? "missing_context_report" : "context_refresh_failed")),
     context_packs_regenerated: regeneratedFiles.length === CONTEXT_PACK_FILES.length,
     context_packs_are_real_files: realFiles,
     regenerated_files: regeneratedFiles
   };
 
   // ---- 3. Task query smoke ----
-  const bootstrap = runScript("src/scripts/runAiTaskQuery.ts", ["--task", "bootstrap"], {});
-  commandsRun.push("npm run query:ai-task -- --task bootstrap");
+  const bootstrap = syncOk ? runScript("src/scripts/runAiTaskQuery.ts", ["--task", "bootstrap"], {}) : skipped;
+  if (syncOk) commandsRun.push("npm run query:ai-task -- --task bootstrap");
   let bootstrapDecision = "query_failed";
   if (bootstrap.ok) {
     const p = newestReportJson("ai_task_query_");
@@ -291,7 +297,7 @@ function main(): void {
     { label: "npm run query:ai-task -- --task sold_out_pressure --limit 10", args: ["--task", "sold_out_pressure", "--limit", "10"], task: "sold_out_pressure" },
     { label: "npm run query:ai-task -- --task market_report --start 2026-06-04 --end 2026-07-31", args: ["--task", "market_report", "--start", "2026-06-04", "--end", "2026-07-31"], task: "market_report" }
   ];
-  for (const spec of optionalSpecs) {
+  for (const spec of syncOk ? optionalSpecs : []) {
     const r = runScript("src/scripts/runAiTaskQuery.ts", spec.args, {});
     commandsRun.push(spec.label);
     let decision = "query_failed";
@@ -398,13 +404,17 @@ function main(): void {
   console.log(`report_path=${reportPath}`);
   console.log(`json_path=${jsonPath}`);
   console.log(`csv_path=${csvPath}`);
+  if (!syncOk) {
+    console.log("downstream_skipped=ai_context,task_queries");
+    process.exitCode = 2;
+  }
   console.log(`debug_artifact_path=${debugPath}`);
 
   const acceptable = new Set([
     "post_auto_history_append_refresh_success",
     "post_auto_history_append_refresh_basis_caution"
   ]);
-  if (!acceptable.has(decision)) process.exitCode = 1;
+  if (!acceptable.has(decision)) process.exitCode = syncOk ? 1 : 2; // 2: DB sync refused (downstream skipped)
 }
 
 main();

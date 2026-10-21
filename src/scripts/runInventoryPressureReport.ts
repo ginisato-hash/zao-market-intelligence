@@ -8,6 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 import {
   buildInventoryKpiReport,
   buildPricePressureRows,
@@ -50,7 +51,7 @@ function todayJst(): string {
 function readHistoryRows(): InventoryHistoryRow[] {
   const rows: InventoryHistoryRow[] = [];
   for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
+    const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, f), "utf8"));
     if (lines.length < 2) continue;
     const h = parseCsvLine(lines[0]!);
     const idx = (name: string): number => h.indexOf(name);

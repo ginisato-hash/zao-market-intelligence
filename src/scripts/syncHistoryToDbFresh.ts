@@ -1,8 +1,9 @@
 // Phase AUTO-RUNNER07C - fresh history-to-DB sync helper.
 //
-// This command writes the DB only when HISTORY_TO_DB_SYNC=1. It always builds a
-// fresh mapping from current .data/history in the same run and does not use
-// timestamped dry-run input pointers or manually pinned mapped-row constants.
+// Read-only: it reports the fresh history->DB mapping and whether the DB is an
+// exact mirror. It never writes the DB. HISTORY_TO_DB_SYNC=1 is refused (exit 2):
+// DB writes only happen inside trustedAppendAndMirror, in the process that
+// performed the append (TD private #13, P0-G2).
 
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -51,7 +52,6 @@ function main(): void {
     jsonPath: resolve(REPORT_DIR, `${runId}.json`),
     csvPath: resolve(REPORT_DIR, `${runId}.csv`),
     debugPath,
-    historyToDbSyncGate: process.env["HISTORY_TO_DB_SYNC"],
     expectedHistoryRowCount: process.env["EXPECTED_HISTORY_ROW_COUNT"],
     sourceAutoRunner07bArtifact: SOURCE_AUTO_RUNNER07B_ARTIFACT
   });
@@ -60,6 +60,9 @@ function main(): void {
   console.log(`history_count=${report.history_summary.row_count}`);
   console.log(`mapped_row_count=${report.fresh_mapping_summary.mapped_row_count}`);
   console.log(`conflicts=${report.fresh_mapping_summary.would_conflict_rows}`);
+  console.log(`gate_passed=${report.gate_result.passed}`);
+  console.log(`gate_reasons=${[...report.gate_result.reasons, ...report.gate_result.point_of_use_reasons].join(";")}`);
+  console.log(`mirror_exact_match=${report.mirror_exact_match}`);
   console.log(`db_write_executed=${report.sync_result.db_write_executed}`);
   console.log(`inserted_rows=${report.sync_result.inserted_rows}`);
   console.log(`skipped_identical_rows=${report.sync_result.skipped_identical_rows}`);
@@ -70,6 +73,12 @@ function main(): void {
   console.log(`json_path=${report.json_path}`);
   console.log(`csv_path=${report.csv_path}`);
   console.log(`debug_artifact_path=${report.debug_artifact_path}`);
+  // A write request is always refused; read-only runs keep exit 0.
+  if (process.env["HISTORY_TO_DB_SYNC"] === "1") {
+    console.log("sync_write_refused=true");
+    console.log("sync_write_refused_reason=direct CLI DB writes are disabled; only trustedAppendAndMirror writes the DB");
+    process.exitCode = 2;
+  }
 }
 
 main();

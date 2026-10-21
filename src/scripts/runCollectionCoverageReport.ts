@@ -7,6 +7,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { splitCsvRecords } from "../services/historyCsvRecords";
 
 const HISTORY_DIR = ".data/history";
 const REPORT_DIR = ".data/reports/automation";
@@ -40,7 +41,7 @@ function run(): void {
   let dpDirectional = 0; let excluded = 0; let total = 0; let collectedToday = 0;
 
   for (const f of readdirSync(HISTORY_DIR).filter((x) => /^zao_signals_.*\.csv$/u.test(x))) {
-    const lines = readFileSync(join(HISTORY_DIR, f), "utf8").split(/\r?\n/u).filter((l) => l.length > 0);
+    const lines = splitCsvRecords(readFileSync(join(HISTORY_DIR, f), "utf8"));
     if (lines.length < 2) continue;
     const h = parseCsvLine(lines[0]!);
     const si = h.indexOf("source"); const ni = h.indexOf("canonical_property_name"); const ci = h.indexOf("checkin");

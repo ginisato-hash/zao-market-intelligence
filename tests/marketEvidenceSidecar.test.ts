@@ -50,7 +50,8 @@ describe("flag, isolation, OFF path", () => {
     const src = readFileSync("src/scripts/runAutoRunnerMarketRefreshRotating.ts", "utf8");
     expect(src).toMatch(/collectBookingLive\(bookingTargets, debugPath, jst\.iso, evidenceOn \? bookingEvidence : undefined\)/u);
     expect(src).toMatch(/if \(evidenceSink !== undefined\) captureBookingEvidence\(/u);
-    expect(src).toMatch(/rowsAppended = r\.rows_written;\n\s+if \(evidenceOn\) evidenceSidecar = exportEvidenceSidecar\(appendPlan\.approved_rows, bookingEvidence, runId\);/u);
+    // Since P0-G2 final the append runs inside trustedAppendAndMirror; evidence is exported only if rows were actually appended.
+    expect(src).toMatch(/rowsAppended = trustedAppend\.rows_appended;\n\s+\/\/ Evidence only for W[^\n]*\n\s+if \(evidenceOn && rowsAppended > 0\) evidenceSidecar = exportEvidenceSidecar\(rowsActuallyAppended\(appendPlan\.approved_rows, trustedAppend\), bookingEvidence, runId\);/u);
     expect(src).toMatch(/\.\.\.\(evidenceOn \? \{ evidence_sidecar: evidenceSidecar \} : \{\}\)/u);
     expect((src.match(/appendEvidenceSidecar\(|captureBookingEvidence\(/gu) ?? []).length).toBe(2);
   });

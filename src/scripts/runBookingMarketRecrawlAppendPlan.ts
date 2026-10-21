@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { buildProposedHistoryRow } from "../services/bookingPreviewAppendProposal";
 import { groupRowsToSourceShards } from "../services/bookingPreviewHistoryAppendRealRun";
 import { runRealAppend, validatePostWriteShards } from "../services/localHistoryRealAppend";
+import { TRUSTED_APPEND_COLLECTED_STATUSES, TRUSTED_MIRROR_FLAG, trustedAppendAndMirror } from "../services/freshHistoryToDbSync";
 import { validatePrimaryPriceNumeric } from "../services/pricePlausibilityGuard";
 import { HISTORY_CSV_HEADERS, type HistoryRow } from "../services/localHistorySchemaDesign";
 import { historyRowFromCsvRecord, parseCsv } from "../services/localHistoryAppendValidationPolicy";
@@ -24,6 +25,11 @@ import { checkoutForOneNight } from "../services/bookingRenderedDomProbe";
 import { canonicalizeName, isOwnProperty } from "../services/biWebDataExport";
 
 const HISTORY_DIR = ".data/history";
+const DB_PATH = ".data/zao-market-intelligence.sqlite";
+// Legal per-run row caps of the two jobs that feed this script (one row per
+// page): recrawl batch (preview default 6) and pricing-critical competitor batch
+// (default 8), read from the same env vars with the same defaults.
+const APPEND_MAX_ROWS = Math.max(Number(process.env["ZMI_RECRAWL_MAX_PAGES_PER_BATCH"] ?? "6") || 6, Number(process.env["ZMI_PRICING_CRITICAL_MAX_PAGES_PER_BATCH"] ?? "8") || 8);
 const REPORT_GLOB_DIR = ".data/reports/source-discovery";
 const CRAWL_DIR = ".data/crawl-priority";
 const OUT_DIR = ".data/validation";
@@ -264,9 +270,22 @@ function run(): void {
   if (!appendAllowed) { printPlan(); console.log(`decision=booking_market_recrawl_append_blocked_gate_failed`); process.exitCode = 1; return; }
   if (toAppend.length === 0) { printPlan(); console.log(`decision=booking_market_recrawl_append_noop_all_duplicates`); return; }
 
-  // Gated atomic append (lock + backup + rollback are inside runRealAppend).
+  // Gated atomic append (lock + backup + rollback are inside runRealAppend), run
+  // inside the shared history-writer lock; the DB mirror (default OFF) can only
+  // insert the rows this append wrote (P0-G2).
   const backupTs = ts();
-  const result = runRealAppend({ historyDir: HISTORY_DIR, runId: `booking_market_recrawl_append_${backupTs}`, backupTimestamp: backupTs, sourceShards: groupRowsToSourceShards(toAppend) });
+  const runId = `booking_market_recrawl_append_${backupTs}`;
+  let written: ReturnType<typeof runRealAppend> | null = null;
+  const trusted = trustedAppendAndMirror({
+    historyDir: HISTORY_DIR, dbPath: DB_PATH, runId, generatedAtJst: jstNow(), rows: toAppend, captureDir: resolve(".data/debug/booking-market-recrawl-append", runId), maxRows: APPEND_MAX_ROWS,
+    mirrorEnabled: process.env[TRUSTED_MIRROR_FLAG] === "1",
+    write: (rows) => {
+      written = runRealAppend({ historyDir: HISTORY_DIR, runId, backupTimestamp: backupTs, sourceShards: groupRowsToSourceShards(rows) });
+      if (written.decision !== "local_history_real_append_success") throw new Error(written.decision);
+    }
+  });
+  const result: ReturnType<typeof runRealAppend> | { decision: string; rowsWritten: number; rowsSkippedDuplicate: number; rowsConflict: number; filesUpdated: number; backupsCreated: number; backupDir: string; rollbackPerformed: boolean } =
+    written ?? { decision: `not_appended_${trusted.status}`, rowsWritten: 0, rowsSkippedDuplicate: trusted.rows_skipped_identical, rowsConflict: 0, filesUpdated: 0, backupsCreated: 0, backupDir: "", rollbackPerformed: false };
   const touched = [...new Set(toAppend.map((r) => r.shardMonth))].map((sm) => ({ fileName: `zao_signals_${sm}.csv`, csv: readFileSync(resolve(HISTORY_DIR, `zao_signals_${sm}.csv`), "utf8"), expectedRowCount: 0 }));
   const postOk = touched.every((t) => /^row_id,/u.test(t.csv) || t.csv.split("\n")[0]?.startsWith("row_id"));
   plan.append_performed = result.rowsWritten > 0;
@@ -281,8 +300,11 @@ function run(): void {
   console.log(`backups_created=${result.backupsCreated}`);
   console.log(`rollback_performed=${result.rollbackPerformed}`);
   console.log(`post_header_ok=${postOk}`);
+  console.log(`trusted_append_status=${trusted.status}`);
+  console.log(`trusted_append_unsaved_rows=${trusted.unsaved_row_ids.length}`);
+  console.log(`trusted_append_reasons=${trusted.reasons.join(";")}`);
   console.log(`plan_json=${planJson}`);
-  if (result.rollbackPerformed || result.rowsConflict > 0) process.exitCode = 1;
+  if (result.rollbackPerformed || result.rowsConflict > 0 || !TRUSTED_APPEND_COLLECTED_STATUSES.includes(trusted.status)) process.exitCode = 1;
 }
 
 run();

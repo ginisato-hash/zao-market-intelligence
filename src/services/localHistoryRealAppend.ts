@@ -27,6 +27,7 @@ import {
   statSync,
   writeFileSync
 } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import {
   HISTORY_SCHEMA_VERSION,
@@ -307,7 +308,9 @@ export function runRealAppend(input: RunRealAppendInput): RunRealAppendResult {
     rmSync(lockFilePath, { force: true });
     base.rollbackActions.push(`removed_stale_lock:${lockFilePath}`);
   }
-  writeFileSync(lockFilePath, `${input.runId}\n${new Date(nowMs).toISOString()}\n`, "utf8");
+  // pid/host let the shared trusted append path clear a lock left by a crashed
+  // writer by liveness instead of by age (TD private #13 release gate).
+  writeFileSync(lockFilePath, `${input.runId}\n${new Date(nowMs).toISOString()}\npid=${process.pid}\nhost=${hostname()}\n`, "utf8");
   base.lockAcquired = true;
 
   // 3. Build the merge plan (existing target rows + incoming source rows).
