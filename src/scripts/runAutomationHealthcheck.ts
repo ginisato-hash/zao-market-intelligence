@@ -28,6 +28,11 @@ const BI_PUBLISH_MARKER_PATH = ".data/state/last_bi_web_publish.json";
 const CHATGPT_PUBLISH_MARKER_PATH = ".data/state/last_chatgpt_db_publish.json";
 const STALE_HOURS = Number(process.env["ZMI_HEALTHCHECK_STALE_HOURS"] ?? "4") || 4;
 const STALE_LOCK_HOURS = Number(process.env["ZMI_HEALTHCHECK_STALE_LOCK_HOURS"] ?? "3") || 3;
+// The shared history-writer lock (freshHistoryToDbSync) is a persistent,
+// empty SQLite file: its EXCLUSIVE lock is taken and released by the OS and
+// never changes the file's mtime, so its age says nothing about a stuck
+// writer. Only this exact file name is exempt from the mtime check.
+const SQLITE_HISTORY_WRITER_LOCK_FILE = "history_writer.lock.sqlite";
 const ALLOWED_DIRTY_PREFIXES = [".data/history/", "apps/zmi-bi-web/data/"];
 const LAUNCHD_JOBS = [
   "com.yuge.zmi.market-refresh-rotating",
@@ -78,6 +83,7 @@ function checkStaleLocks(): Array<{ path: string; age_hours: number }> {
   const now = Date.now();
   const stale: Array<{ path: string; age_hours: number }> = [];
   for (const name of entries) {
+    if (name === SQLITE_HISTORY_WRITER_LOCK_FILE) continue;
     const p = resolve(LOCKS_DIR, name);
     try {
       const ageHours = (now - statSync(p).mtimeMs) / (60 * 60 * 1000);
