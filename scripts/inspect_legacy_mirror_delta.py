@@ -61,7 +61,7 @@ def inspect(history_dir, db_path, prior, max_db_rows=3000):
     if len(selected)>12:
         raise AuditError('HISTORICAL_SHARD_BUDGET')
     matched, summaries = set(), []
-    budget = [64*1024*1024]
+    budget = [96*1024*1024]
     for name in selected:
         if name not in references:
             raise AuditError('DB_SHARD_NOT_IN_PRIOR_AUDIT')
