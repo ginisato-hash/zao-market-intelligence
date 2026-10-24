@@ -1,7 +1,7 @@
 // Explicit operator tool, never scheduled/imported by collectors. Prints safe metadata only.
 import Database from 'better-sqlite3';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, realpathSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { prepareMirrorRecovery, publishRecoveredLegacyHistory, applyMirrorDatabaseRecovery, rollbackMirrorDatabaseRecovery, withMirrorRecoveryLock, persistMirrorRecoveryPlan, resumeMirrorRecovery, readPersistedMirrorRecoveryPlan, type MirrorRecoveryAcceptance, type PinnedMarketShard } from '../services/marketMirrorRecoveryPlan';
@@ -40,9 +40,15 @@ export function reconcileMarketMirror(args: string[]): unknown {
     } => {
         if (!o.get('acceptance'))
             return refuse('ACCEPTANCE_REQUIRED');
+        if (statSync(o.get('acceptance')!).size > 65536)
+            return refuse('ACCEPTANCE_BUDGET');
         const a = JSON.parse(readFileSync(o.get('acceptance')!, 'utf8')) as ReturnType<typeof accept>;
         if (a.releaseGitSha !== release || a.dbPathSha256 !== pathSha(dbPath) || a.historyPathSha256 !== pathSha(historyDir))
             return refuse('ACCEPTANCE_SOURCE_OR_TARGET');
+        const ref = /^https:\/\/github\.com\/ginisato-hash\/zao-market-intelligence-private\/issues\/13#issuecomment-\d+$/u;
+        if (a.purpose !== (mode === 'rollback' ? 'MIRROR_RECONCILIATION_ROLLBACK' : 'MIRROR_RECONCILIATION') || !/^[0-9a-f]{64}$/u.test(a.planSha256)
+            || typeof a.ownerApprovalRef !== 'string' || !ref.test(a.ownerApprovalRef) || typeof a.tdAcceptanceRef !== 'string' || !ref.test(a.tdAcceptanceRef))
+            return refuse('FULL_ACCEPTANCE_REQUIRED');
         return a;
     };
     if (mode === 'rollback') {
