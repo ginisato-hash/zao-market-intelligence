@@ -1,5 +1,6 @@
 // Existing budgets/backoff/cooldown remain binding. Default OFF does no file I/O.
-import { constants, existsSync, fstatSync, openSync, closeSync, readFileSync, mkdirSync, fsyncSync, writeSync } from 'node:fs';
+import { constants, existsSync, fstatSync, openSync, closeSync, readFileSync, mkdirSync, fsyncSync, writeSync,statSync,unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { CORE_COMPETITORS } from './coreCompetitorTargets';
 import { readRmsQuoteRequest } from './rmsQuoteRequest';
@@ -36,11 +37,24 @@ export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
  return rows;
 }
 
-export function reserveQuoteRequest(target:RotatingTarget,at:string,root=ROOT):void{
+export function reserveQuoteRequest(target:RotatingTarget,at:string,root=ROOT):boolean{
  const row:Reservation={kind:'QUOTE_REQUEST_RESERVED_V1',source:'booking',propertySlug:target.property_slug,stayDate:target.stay_date,attemptAt:at};
  if(target.source!=='booking'||!valid(row))throw Error('QUOTE_ATTEMPT_SCOPE');
- mkdirSync(root,{recursive:true,mode:0o700});const fd=openSync(join(root,jstDate(Date.parse(at))+'.jsonl'),constants.O_WRONLY|constants.O_APPEND|constants.O_CREAT|constants.O_NOFOLLOW,0o600);
- try{const bytes=Buffer.from(JSON.stringify(row)+'\n');if(writeSync(fd,bytes)!==bytes.length)throw Error('QUOTE_ATTEMPT_PARTIAL_WRITE');fsyncSync(fd);}finally{closeSync(fd);}
+ const lockDir=join(root,'locks'),key='booking|'+row.propertySlug+'|'+row.stayDate,lockPath=join(lockDir,createHash('sha256').update(key).digest('hex')+'.lock');
+ mkdirSync(lockDir,{recursive:true,mode:0o700});let lock:number;
+ try{lock=openSync(lockPath,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}catch{return false;}
+ const own=fstatSync(lock,{bigint:true});
+ try{
+  // Reread AND append under the same pair lock. An orphan lock is never guessed stale/deleted.
+  const recent=readQuoteReservations(at,root);
+  if(recent.some(r=>r.propertySlug===row.propertySlug&&r.stayDate===row.stayDate&&Date.parse(at)-Date.parse(r.attemptAt)<24*3600000))return false;
+  const fd=openSync(join(root,jstDate(Date.parse(at))+'.jsonl'),constants.O_WRONLY|constants.O_APPEND|constants.O_CREAT|constants.O_NOFOLLOW,0o600);
+  try{const bytes=Buffer.from(JSON.stringify(row)+'\n');if(fstatSync(fd).size+bytes.length>1024*1024||writeSync(fd,bytes)!==bytes.length)throw Error('QUOTE_ATTEMPT_BUDGET_OR_PARTIAL_WRITE');fsyncSync(fd);}finally{closeSync(fd);}
+  return true;
+ }catch{return false;}finally{
+  closeSync(lock);
+  try{const current=statSync(lockPath,{bigint:true});if(current.dev===own.dev&&current.ino===own.ino)unlinkSync(lockPath);}catch{/* Never remove a replacement/unknown lock. */}
+ }
 }
 
 export function resolvePricingQuoteLane(env:Record<string,string|undefined>,input:{
@@ -69,8 +83,9 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
   const allowed=new Set(targets.map(t=>t.source+'|'+t.property_slug+'|'+t.stay_date));
   const reserved=new Set<string>();
   const reserve=(target:RotatingTarget,at:string)=>{const key=target.source+'|'+target.property_slug+'|'+target.stay_date;
-   if(!allowed.has(key)||reserved.has(key)||!Number.isFinite(Date.parse(at))||Date.parse(at)<Date.parse(input.now)||Date.parse(at)>=Date.parse(request.expiresAt))throw Error('QUOTE_ATTEMPT_NOT_SELECTED_OR_EXPIRED');
-   reserveQuoteRequest(target,at,input.reservationRoot);reserved.add(key);};
+   if(!allowed.has(key)||!Number.isFinite(Date.parse(at))||Date.parse(at)<Date.parse(input.now)||Date.parse(at)>=Date.parse(request.expiresAt))throw Error('QUOTE_ATTEMPT_NOT_SELECTED_OR_EXPIRED');
+   if(reserved.has(key))return false;
+   const ok=reserveQuoteRequest(target,at,input.reservationRoot);if(ok)reserved.add(key);return ok;};
   return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,usableQuoteAssertions:0,priceAuthority:false}};
  }catch{return {enabled:true,status:'HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE',targets:[] as RotatingTarget[],diagnostics:null,reserve:undefined};}
 }

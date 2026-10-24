@@ -153,7 +153,7 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>void): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
   if(targets.length===0)return rows;
   const browser = await chromium.launch({ headless: true });
@@ -172,7 +172,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const artifactDir = join(debugPath, "booking", `${t.property_slug}_${t.checkin}`);
       mkdirSync(artifactDir, { recursive: true });
       const screenshotPath = join(artifactDir, "screenshot.png");
-      reserveAttempt?.(t,new Date().toISOString());
+      if(reserveAttempt&& !reserveAttempt(t,new Date().toISOString())){
+        rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;
+      }
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.

@@ -1,6 +1,7 @@
 import { expect,it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync,mkdtempSync,writeFileSync } from 'node:fs';
+import { existsSync,mkdtempSync,writeFileSync,mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalJson } from '../src/services/marketEvidenceSidecar';
@@ -38,11 +39,38 @@ it('connects actual far-date needs to existing verified mappings while preservin
 it('persists a pre-request reservation so a failed/crashed request still has cooldown; never records a usable price',()=>{
  const f=setup(),p=resolvePricingQuoteLane(f.env,f.input),target=p.targets[0]!;
  p.reserve!(target,at);expect(readQuoteReservations(at,f.root)).toHaveLength(1);
- expect(()=>p.reserve!(target,at)).toThrow(/NOT_SELECTED_OR_EXPIRED/);
+ expect(p.reserve!(target,at)).toBe(false);
  const next=resolvePricingQuoteLane(f.env,f.input);
  expect(next.targets.some(t=>t.property_slug===target.property_slug&&t.stay_date===target.stay_date)).toBe(false);
  expect(next.diagnostics?.usableQuoteAssertions).toBe(0);
  const text=JSON.stringify(readQuoteReservations(at,f.root));expect(text).not.toMatch(/price|guest|bookingId|token|url/i);
+});
+
+it('two plans resolved before either request cannot reserve the same pair within 24h',()=>{
+ const f=setup(),first=resolvePricingQuoteLane(f.env,f.input),second=resolvePricingQuoteLane(f.env,f.input),target=first.targets[0]!;
+ expect(first.reserve!(target,at)).toBe(true);expect(second.reserve!(target,at)).toBe(false);
+ expect(readQuoteReservations(at,f.root)).toHaveLength(1);
+});
+
+it('two fresh processes racing the same request create at most one persisted reservation',async()=>{
+ const f=setup(),plan=resolvePricingQuoteLane(f.env,f.input),target=plan.targets[0]!;
+ const moduleUrl=new URL('../src/services/pricingQuoteLane.ts',import.meta.url).href;
+ const code=`import {reserveQuoteRequest} from ${JSON.stringify(moduleUrl)};console.log('READY');await new Promise(r=>process.stdin.once('data',r));console.log(JSON.stringify({ok:reserveQuoteRequest(${JSON.stringify(target)},${JSON.stringify(at)},${JSON.stringify(f.root)})}));`;
+ const start=()=>{
+  const child=spawn(process.execPath,['--import','tsx','--input-type=module','-e',code],{stdio:['pipe','pipe','pipe']});let output='',error='';
+  const ready=new Promise<void>((resolve,reject)=>{child.stdout.on('data',b=>{output+=b;if(output.includes('READY'))resolve();});child.once('error',reject);child.once('exit',c=>{if(!output.includes('READY'))reject(Error('fixture child failed '+c));});});
+  child.stderr.on('data',b=>{error+=b;});
+  const done=new Promise<boolean>((resolve,reject)=>child.once('exit',c=>{if(c!==0)reject(Error('fixture child failed '+error));else resolve(JSON.parse(output.trim().split('\n').at(-1)!).ok);}));
+  return {child,ready,done};
+ };
+ const first=start(),second=start();await Promise.all([first.ready,second.ready]);first.child.stdin.end('go');second.child.stdin.end('go');
+ expect((await Promise.all([first.done,second.done])).filter(Boolean)).toHaveLength(1);expect(readQuoteReservations(at,f.root)).toHaveLength(1);
+});
+
+it('an existing unresolved lock is preserved and causes no network reservation',()=>{
+ const f=setup(),plan=resolvePricingQuoteLane(f.env,f.input),target=plan.targets[0]!,lockDir=join(f.root,'locks');
+ mkdirSync(lockDir,{recursive:true});const key='booking|'+target.property_slug+'|'+target.stay_date,lock=join(lockDir,createHash('sha256').update(key).digest('hex')+'.lock');writeFileSync(lock,'UNRESOLVED_OTHER_OWNER');
+ expect(plan.reserve!(target,at)).toBe(false);expect(existsSync(lock)).toBe(true);expect(readQuoteReservations(at,f.root)).toEqual([]);
 });
 it('invalid exact-source input or corrupt request state holds only this collection lane with zero targets',()=>{
  const f=setup();expect(resolvePricingQuoteLane({...f.env,ZMI_RMS_QUOTE_SOURCE_RELEASE:'f'.repeat(40)},f.input).targets).toEqual([]);
