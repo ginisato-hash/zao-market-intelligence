@@ -8,9 +8,10 @@ import { scrubExcerpt,canonicalJson,K27_T04_REFERENCE } from './marketEvidenceSi
 export interface BookingRateCell {
   blockId:string;roomName:string;roomText:string;occupancyText:string;priceText:string;conditionsText:string;
   oneRoomOptionText:string;policyControlId:string|null;policyContainerId:string|null;policyText:string|null;
+  priceRoleText?:string;taxDetails?:Array<{label:string;details:string}>;
 }
 export interface BookingRateCellCapture {
-  schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v2';propertySlug:string;observedAt:string;
+  schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v2'|'booking-rate-cell-v3';propertySlug:string;observedAt:string;
   request:{checkin:string;checkout:string;adults:2;children:0;rooms:1;currency:'JPY'};
   requestUrlMatches:boolean;displayedCheckin:string|null;displayedCheckout:string|null;displayedParty:string;
   cells:BookingRateCell[];problems:string[];blockReason:BlockReason;blockStateVerified:boolean;captureSha256:string;
@@ -19,7 +20,7 @@ const isoDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/u.test(s)&&Number.isFinite(Date.p
 const yen=(s:string)=>[...s.matchAll(/[￥¥]\s*([\d,]+)/gu)].map(m=>Number(m[1]!.replace(/,/gu,''))).filter(Number.isSafeInteger);
 export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRateCell){
   const reasons:string[]=[],m=/^(\d+)_(\d+)_(\d+)_(\d+)_(\d+)$/u.exec(cell.blockId);
-  if(cap.schema!=='ZMI_BOOKING_RATE_CELLS_V1'||cap.parserVersion!=='booking-rate-cell-v2')reasons.push('CAPTURE_SCHEMA_UNKNOWN');
+  if(cap.schema!=='ZMI_BOOKING_RATE_CELLS_V1'||!['booking-rate-cell-v2','booking-rate-cell-v3'].includes(cap.parserVersion))reasons.push('CAPTURE_SCHEMA_UNKNOWN');
   const {captureSha256,...unsigned}=cap;
   if(captureSha256!==createHash('sha256').update(canonicalJson(unsigned)).digest('hex'))reasons.push('CAPTURE_SEAL_INVALID');
   const ownCells=cap.cells.filter(c=>c.blockId===cell.blockId);
@@ -28,8 +29,9 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   if(!cap.requestUrlMatches||cap.displayedCheckin!==cap.request.checkin||cap.displayedCheckout!==cap.request.checkout
     ||!/大人\s*2名.*子供\s*0名.*1部屋/u.test(cap.displayedParty))reasons.push('SERVED_TUPLE_NOT_CONFIRMED');
   if(!cell.roomName||!cell.roomText.includes(cell.roomName)||!/人数:\s*2\b/u.test(cell.occupancyText))reasons.push('ROOM_OR_OCCUPANCY_UNBOUND');
-  const pair=/元の料金\s*[￥¥]\s*([\d,]+)\s*現在の料金\s*[￥¥]\s*([\d,]+)/u.exec(cell.priceText);
-  const values=[...new Set(yen(cell.priceText))],original=pair?Number(pair[1]!.replace(/,/gu,'')):null;
+  const roleText=cap.parserVersion==='booking-rate-cell-v3'?cell.priceRoleText??'':cell.priceText;
+  const pair=/元の料金\s*[￥¥]\s*([\d,]+)\s*現在の料金\s*[￥¥]\s*([\d,]+)/u.exec(roleText);
+  const values=[...new Set(yen(roleText))],original=pair?Number(pair[1]!.replace(/,/gu,'')):null;
   const current=pair?Number(pair[2]!.replace(/,/gu,'')):values.length===1?values[0]!:null;
   if(current===null||current<=0||current>2_000_000||original!==null&&(original<current||original>2_000_000))reasons.push('PRICE_ROLE_AMBIGUOUS_OR_INVALID');
   const quantity=/^1\s*[（(]\s*[￥¥]\s*([\d,]+)\s*[)）]/u.exec(cell.oneRoomOptionText.trim());
@@ -38,19 +40,35 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   const policy=cell.policyText;
   if(!policy||!cell.policyControlId||cell.policyControlId!==`policyModal_${cell.blockId}`||cell.policyContainerId!==cell.policyControlId)reasons.push('SELECTED_POLICY_NOT_CAPTURED');
   const meal=policy&&/お食事は含まれておりません|食事は含まれていません|No meals are included/iu.test(policy)?'ROOM_ONLY' as const:'UNKNOWN' as const;
-  const refund=policy&&/返金不可|払い戻し不可|non[- ]?refundable/iu.test(policy)?'NON_REFUNDABLE' as const:
-    policy&&/キャンセル無料|無料でキャンセル|free cancellation/iu.test(policy)?'CONDITIONAL_REFUNDABLE' as const:'UNKNOWN' as const;
+  const refundKinds=[policy&&/返金不可|払い戻し不可|non[- ]?refundable/iu.test(policy)?'NON_REFUNDABLE':null,
+    policy&&/一部返金可|partially refundable/iu.test(policy)?'PARTIAL_REFUNDABLE':null,
+    policy&&/キャンセル無料|無料でキャンセル|free cancellation/iu.test(policy)?'CONDITIONAL_REFUNDABLE':null].filter((v):v is string=>v!==null);
+  const refund=refundKinds.length===1?refundKinds[0]!:'UNKNOWN';
   const tax=/税・手数料込/u.test(cell.priceText)?'DISPLAYED_TAX_FEES_INCLUDED' as const:'UNKNOWN' as const;
   const member=/ログインして.*会員限定料金|Genius|会員限定/u.test(cell.priceText);
   if(meal==='UNKNOWN')reasons.push('MEAL_UNKNOWN');if(refund==='UNKNOWN')reasons.push('CANCELLATION_UNKNOWN');if(tax==='UNKNOWN')reasons.push('TAX_BASIS_UNKNOWN');
   // An absent sale marker NEVER proves no discount. Preserve both explicit roles and the eligibility text.
   const promotion=pair?member?'MEMBER_CONDITIONAL_PAIR' as const:'EXPLICIT_PRICE_PAIR' as const:'UNCLASSIFIED' as const;
+  const localTax=deriveLocalTaxDetail(cap.parserVersion==='booking-rate-cell-v3'?cell.taxDetails:undefined);
   return {blockId:cell.blockId,roomId:m?.[1]??null,ratePlanId:m?.[2]??null,adults:2 as const,
     currentDisplayedJpy:current,prePromotionPlanJpy:original,memberConditional:member,meal,refund,tax,promotion,
-    localTaxTreatment:'UNKNOWN' as const,cancellationTerms:policy,priceTerms:cell.priceText,
+    ...localTax,cancellationTerms:policy,priceTerms:cell.priceText,
     tupleAndProductBound:reasons.length===0,reasons,
     // Commercial comparison policy and independent ownership are separate accepted inputs, never inferred here.
     marketPriceEligible:false as const};
+}
+/** Only an explicit selected-row label and a per-person/per-night amount establish local-tax treatment. */
+export function deriveLocalTaxDetail(rows:BookingRateCell['taxDetails']){
+  const scope={localTaxKind:'ONSEN_TAX' as const,taxScope:'SELECTED_ROW_DECLARED_ITEMS_ONLY' as const};
+  const unknown={...scope,localTaxTreatment:'UNKNOWN' as const,localTaxPerAdultNightJpy:null as number|null};
+  if(!rows||rows.length>5||rows.some(r=>typeof r.label!=='string'||typeof r.details!=='string'||r.label.length>50||r.details.length>1000))return unknown;
+  const taxes=rows.filter(r=>/入湯税/u.test(r.details));if(taxes.length!==1)return unknown;
+  const row=taxes[0]!,text=row.details.normalize('NFKC'),m=/1名\s*[/／]\s*1泊につき\s*[¥￥]\s*([\d,]+)\s*の入湯税/u.exec(text);
+  const amount=m?Number(m[1]!.replace(/,/gu,'')):NaN;
+  if(!Number.isSafeInteger(amount)||amount<0||amount>10000||/ただし|別途|追加|含まれな/u.test(text))return unknown;
+  if(['込','含まれるもの'].includes(row.label.trim()))return {...scope,localTaxTreatment:'EXPLICIT_INCLUDED' as const,localTaxPerAdultNightJpy:amount};
+  if(['別','含まれないもの'].includes(row.label.trim()))return {...scope,localTaxTreatment:'EXPLICIT_EXCLUDED' as const,localTaxPerAdultNightJpy:amount};
+  return unknown;
 }
 export function sealBookingRateCellCapture(x:Omit<BookingRateCellCapture,'captureSha256'>):BookingRateCellCapture{
   return {...x,captureSha256:createHash('sha256').update(canonicalJson(x)).digest('hex')};
@@ -64,7 +82,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const requestUrlMatches=served.hostname==='www.booking.com'&&served.pathname===`/hotel/jp/${input.propertySlug}.ja.html`
     &&Object.entries({checkin:input.checkin,checkout:input.checkout,group_adults:'2',group_children:'0',no_rooms:'1',selected_currency:'JPY'}).every(([k,v])=>served.searchParams.get(k)===v);
   let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='';
-  const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v2',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
+  const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v3',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
   const guard=externalGuard??new BookingUiBlockGuard(page);
   let result:BookingRateCellCapture;
@@ -90,6 +108,11 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     return {overflow:visible.length>200,rows:clipped.map(e=>{const blockId=(e.getAttribute('data-block-id')??'').slice(0,200),id=blockId.split('_')[0]??'',room=names.get(id),get=(s:string)=>((e.querySelector(s) as HTMLElement|null)?.innerText??'').slice(0,4001);
       const btn=e.querySelector('.hprt-table-cell-conditions button[aria-controls]');
       return {blockId,roomName:room?.name??'',roomText:room?.text??'',occupancyText:get('.hprt-table-cell-occupancy'),priceText:get('.hprt-table-cell-price'),conditionsText:get('.hprt-table-cell-conditions'),
+        priceRoleText:get('.hprt-table-cell-price .prco-wrapper'),
+        taxDetails:Array.from(e.querySelectorAll('.hprt-table-cell-price .hptr-taxinfo-block')).filter(t=>t.getBoundingClientRect().width>0&&t.getBoundingClientRect().height>0).slice(0,6).map(t=>{
+          const label=((t.querySelector('.hptr-taxinfo-label') as HTMLElement|null)?.innerText??'').trim(),all=(t as HTMLElement).innerText.trim();
+          return {label:label.slice(0,51),details:(all.startsWith(label)&&label!==''?all.slice(label.length).trim():'').slice(0,1001)};
+        }),
         oneRoomOptionText:(Array.from(e.querySelectorAll('select option')).find(x=>(x as HTMLOptionElement).value==='1')?.textContent??'').slice(0,4001),policyControlId:btn?.getAttribute('aria-controls')?.slice(0,200)??null};})};
   });
   if(rows.overflow)problems.push('RATE_ROW_BUDGET_EXCEEDED');
@@ -118,11 +141,11 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     finally{if(opened&&await guard.checkpoint()&&await dialog.isVisible().catch(()=>false))await dialog.getByRole('button',{name:'閉じる',exact:true}).click({timeout:3000}).catch(()=>{problems.push('POLICY_PANEL_CLOSE_FAILED');});}
     await guard.requireClear();
     if(Object.values(row).some(v=>typeof v==='string'&&v.length>4000)){problems.push('RATE_CELL_TEXT_BUDGET_EXCEEDED');continue;}
-    cells.push({...row,roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyContainerId,policyText});
+    cells.push({...row,roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),priceRoleText:scrubExcerpt(row.priceRoleText,1600),taxDetails:row.taxDetails.map(t=>({label:scrubExcerpt(t.label,51),details:scrubExcerpt(t.details,1001)})),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyContainerId,policyText});
     if(problems.includes('POLICY_PANEL_CLOSE_FAILED'))break;
   }
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
-  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v2',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
+  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v3',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
   }catch{result=empty('CAPTURE_UNVERIFIED');}
   finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
