@@ -10,6 +10,8 @@
 import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {createHash} from 'node:crypto';
+import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import {
@@ -149,7 +151,7 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[]): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
@@ -175,6 +177,14 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
         await page.waitForTimeout(5_000);
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
+        if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
+          try{
+            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()});
+            const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
+            const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
+            rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,marketPriceEligible:false});
+          }catch{rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false});}
+        }
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
       finally { await page.close().catch(() => undefined); }
@@ -236,6 +246,7 @@ async function run(): Promise<void> {
   if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const evidenceOn = isEvidenceSidecarEnabled(env);
+  const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
   const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
@@ -307,7 +318,7 @@ async function run(): Promise<void> {
     liveExecuted = true;
     const bookingTargets = plan.selected.filter((t) => t.source === "booking");
     const jalanRotating = plan.selected.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined);
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const browser = await chromium.launch({ headless: true });
@@ -427,6 +438,7 @@ async function run(): Promise<void> {
     pricing_output_generated: false, pms_output_generated: false,
     winter_sales_lane_enabled: winterLaneEnabled,
     ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
+    ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false}}:{}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",
     winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,
     winter_lane_selected: plan.winter_lane.selected_count,

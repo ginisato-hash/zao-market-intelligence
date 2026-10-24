@@ -48,7 +48,7 @@ describe("flag, isolation, OFF path", () => {
   });
   it("the rotating script touches evidence only behind the flag and only after an accepted append", () => {
     const src = readFileSync("src/scripts/runAutoRunnerMarketRefreshRotating.ts", "utf8");
-    expect(src).toMatch(/collectBookingLive\(bookingTargets, debugPath, jst\.iso, evidenceOn \? bookingEvidence : undefined\)/u);
+    expect(src).toMatch(/collectBookingLive\(bookingTargets, debugPath, jst\.iso, evidenceOn \? bookingEvidence : undefined(?:,|\))/u);
     expect(src).toMatch(/if \(evidenceSink !== undefined\) captureBookingEvidence\(/u);
     // Since P0-G2 final the append runs inside trustedAppendAndMirror; evidence is exported only if rows were actually appended.
     expect(src).toMatch(/rowsAppended = trustedAppend\.rows_appended;\n\s+\/\/ Evidence only for W[^\n]*\n\s+if \(evidenceOn && rowsAppended > 0\) evidenceSidecar = exportEvidenceSidecar\(rowsActuallyAppended\(appendPlan\.approved_rows, trustedAppend\), bookingEvidence, runId\);/u);
