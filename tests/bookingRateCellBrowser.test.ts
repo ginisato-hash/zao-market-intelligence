@@ -67,3 +67,18 @@ for (const status of [403, 429]) it(`retains HTTP ${status} even if the visible 
     expect(guard.reason).toBe(status === 429 ? 'rate_limited_429' : 'forbidden_403');
   } finally { guard.dispose(); await page.close(); }
 });
+
+it('retains a policy response that arrives after capture, through normal page close', async () => {
+  const page=await fixture(),guard=new BookingUiBlockGuard(page);
+  let release: (()=>void)|undefined;
+  await page.route('**/policy-late',async route=>{await new Promise<void>(resolve=>{release=resolve;});await route.fulfill({status:429,body:'blocked'});});
+  try{
+    await page.locator(`button[aria-controls="${control}"]`).evaluate(e=>e.setAttribute('onclick',e.getAttribute('onclick')+";void fetch('/policy-late')"));
+    const cap=await captureBookingRateCells(page,input,1,guard);
+    expect(cap.cells).toHaveLength(1);expect(cap.blockReason).toBeNull();expect(guard.reason).toBeNull();
+    const received=page.waitForResponse(r=>r.url().endsWith('/policy-late'));
+    expect(release).toBeTypeOf('function');release!();await received;
+    await guard.checkpoint();await page.close();
+    expect(guard.reason).toBe('rate_limited_429');
+  }finally{release?.();guard.dispose();if(!page.isClosed())await page.close();}
+});

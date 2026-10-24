@@ -56,7 +56,7 @@ export function sealBookingRateCellCapture(x:Omit<BookingRateCellCapture,'captur
   return {...x,captureSha256:createHash('sha256').update(canonicalJson(x)).digest('hex')};
 }
 /** Only date/policy information controls are used. Blocked pages receive no further interaction. */
-export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string},maxProducts=3):Promise<BookingRateCellCapture>{
+export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string},maxProducts=3,externalGuard?:BookingUiBlockGuard):Promise<BookingRateCellCapture>{
   if(!/^[a-z0-9-]+$/u.test(input.propertySlug)||!isoDate(input.checkin)||!isoDate(input.checkout)
     ||Date.parse(input.checkout)-Date.parse(input.checkin)!==86400000||!Number.isSafeInteger(maxProducts)||maxProducts<1||maxProducts>5)throw Error('RATE_CELL_CAPTURE_SCOPE');
   const problems:string[]=[],request={checkin:input.checkin,checkout:input.checkout,adults:2 as const,children:0 as const,rooms:1 as const,currency:'JPY' as const};
@@ -66,7 +66,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='';
   const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v2',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
-  const guard=new BookingUiBlockGuard(page);
+  const guard=externalGuard??new BookingUiBlockGuard(page);
   let result:BookingRateCellCapture;
   try{
   await guard.requireClear();
@@ -124,7 +124,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
   result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v2',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
   }catch{result=empty('CAPTURE_UNVERIFIED');}
-  finally{await guard.checkpoint();guard.dispose();}
+  finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
   if(guard.reason!==null||!guard.stateVerified)return sealBookingRateCellCapture({...unsigned,cells:[],blockReason:guard.reason,blockStateVerified:guard.stateVerified,problems:[...new Set([...result.problems,'UI_BLOCKED_OR_UNVERIFIED'])]});
   return result;

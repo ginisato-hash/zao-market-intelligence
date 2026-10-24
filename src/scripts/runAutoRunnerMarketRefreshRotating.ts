@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {createHash} from 'node:crypto';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
+import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import {
@@ -171,6 +172,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const screenshotPath = join(artifactDir, "screenshot.png");
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
+      // Retain asynchronous response detection through screenshot and normal page close.
+      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page):null;
+      let rateCellRecord:Record<string,unknown>|null=null;
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
       try {
@@ -180,16 +184,25 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
         if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
           try{
-            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()});
+            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!);
             uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
-            rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false});
+            rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
+            rateCellSink.push(rateCellRecord);
           }catch{rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false});}
         }
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
-      finally { await page.close().catch(() => undefined); }
+      finally {
+        if(pageGuard)await pageGuard.checkpoint();
+        await page.close().catch(() => undefined);
+        if(pageGuard){
+          uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
+          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;}
+          pageGuard.dispose();
+        }
+      }
       const signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
