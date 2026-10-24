@@ -63,9 +63,9 @@ export function deriveLocalTaxDetail(rows:BookingRateCell['taxDetails']){
   const unknown={...scope,localTaxTreatment:'UNKNOWN' as const,localTaxPerAdultNightJpy:null as number|null};
   if(!rows||rows.length>5||rows.some(r=>typeof r.label!=='string'||typeof r.details!=='string'||r.label.length>50||r.details.length>1000))return unknown;
   const taxes=rows.filter(r=>/入湯税/u.test(r.details));if(taxes.length!==1)return unknown;
-  const row=taxes[0]!,text=row.details.normalize('NFKC'),m=/1名\s*[/／]\s*1泊につき\s*[¥￥]\s*([\d,]+)\s*の入湯税/u.exec(text);
-  const amount=m?Number(m[1]!.replace(/,/gu,'')):NaN;
-  if(!Number.isSafeInteger(amount)||amount<0||amount>10000||/ただし|別途|追加|含まれな/u.test(text))return unknown;
+  const row=taxes[0]!,text=row.details.normalize('NFKC'),matches=[...text.matchAll(/1名\s*[/／]\s*1泊につき\s*[¥￥]\s*([\d,]+)\s*の入湯税/gu)];
+  const amounts=[...new Set(matches.map(m=>Number(m[1]!.replace(/,/gu,''))))],amount=amounts.length===1?amounts[0]!:NaN;
+  if(!Number.isSafeInteger(amount)||amount<0||amount>10000||/ただし|別途|追加|含まれな|子供|子ども|歳|免除|場合|年齢|以上|以下|対象/iu.test(text))return unknown;
   if(['込','含まれるもの'].includes(row.label.trim()))return {...scope,localTaxTreatment:'EXPLICIT_INCLUDED' as const,localTaxPerAdultNightJpy:amount};
   if(['別','含まれないもの'].includes(row.label.trim()))return {...scope,localTaxTreatment:'EXPLICIT_EXCLUDED' as const,localTaxPerAdultNightJpy:amount};
   return unknown;

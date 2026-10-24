@@ -41,6 +41,8 @@ it('v3 separates an explicitly selected price wrapper from the included per-pers
 it('does not infer a missing local tax, an unlabeled charge, multiple contradictory tax rows or an all-tax guarantee',()=>{
  for(const rows of [undefined,[],[{label:'込',details:'消費税/VAT10%'}],[{label:'?',details:'1名/1泊につき¥150の入湯税'}],[{label:'込',details:'1名/1泊につき¥150の入湯税。ただし別途課税'}],[{label:'込',details:'1名/1泊につき¥150の入湯税'},{label:'別',details:'1名/1泊につき¥150の入湯税'}]])expect(deriveLocalTaxDetail(rows).localTaxTreatment).toBe('UNKNOWN');
  expect(deriveLocalTaxDetail([{label:'別',details:'1名/1泊につき¥150の入湯税'}])).toMatchObject({localTaxTreatment:'EXPLICIT_EXCLUDED',localTaxPerAdultNightJpy:150});
+ expect(deriveLocalTaxDetail([{label:'込',details:'1名/1泊につき¥150の入湯税、1名/1泊につき¥300の入湯税'}]).localTaxTreatment).toBe('UNKNOWN');
+ expect(deriveLocalTaxDetail([{label:'込',details:'1名/1泊につき¥150の入湯税、12歳以下は免除'}]).localTaxTreatment).toBe('UNKNOWN');
 });
 it('keeps conflicting cancellation categories unknown rather than picking the most favorable interpretation',()=>{
  const c={...cell,policyText:'お食事は含まれておりません。キャンセル無料。返金不可。'};const x=deriveBookingRateCell(capture(c),c);

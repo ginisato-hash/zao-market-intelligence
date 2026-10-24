@@ -8,10 +8,10 @@ export const MARKET_PROPERTY_GROUP_PROVENANCE = Object.freeze({ verifiedAt: '202
 const aliases = new Map<string, string>([
     ['booking|hammond-takamiya', 'hammond'], ['jalan|yad348320', 'hammond'],
     ['booking|onsen-amp-stay-oakhill', 'oakhill'], ['jalan|yad388065', 'oakhill'],
-    ['booking|rurikura-resort', 'rurikura'], ['booking|ji-tian-wu-shan-xing-shi', 'yoshidaya']
+    ['booking|rurikura-resort', 'rurikura'], ['booking|ji-tian-wu-shan-xing-shi', 'yoshidaya'], ['jalan|yad327282', 'yoshidaya']
 ]);
 export function marketPropertyGroup(source: string, propertySlug: string) {
-    if (source === 'booking' && propertySlug === 'xi-raku') return { role: 'OWN' as const, propertyKey: 'kiraku', groupKey: null };
+    if (source === 'booking' && propertySlug === 'xi-raku' || source === 'jalan' && propertySlug === 'yad325153') return { role: 'OWN' as const, propertyKey: 'kiraku', groupKey: null };
     const propertyKey = aliases.get(source + '|' + propertySlug);
     return propertyKey ? { role: 'COMPARISON_CANDIDATE' as const, propertyKey, groupKey: 'TAKAMIYA_OPERATING_GROUP' }
         : { role: 'UNKNOWN' as const, propertyKey: null, groupKey: null };
