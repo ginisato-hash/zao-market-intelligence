@@ -1,6 +1,8 @@
 import csv
 import importlib.util
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +52,33 @@ class MirrorIdentityAuditTests(unittest.TestCase):
         Path(str(db) + "-wal").touch()
         with self.assertRaisesRegex(ValueError, "WAL_PRESENT"):
             audit.inspect(root, db)
+
+    def test_rejects_ambiguous_csv_shape(self):
+        root, shard, db = self.fixture([], [("a", "2" * 64)])
+        shard.write_text("row_id,row_hash,row_hash\na," + "1" * 64 + "," + "2" * 64 + "\n")
+        with self.assertRaisesRegex(ValueError, "DUPLICATE_CSV_HEADERS"):
+            audit.inspect(root, db)
+        shard.write_text("row_id,row_hash\na," + "2" * 64 + ",unexpected\n")
+        with self.assertRaisesRegex(ValueError, "ROW_WIDTH"):
+            audit.inspect(root, db)
+
+    def test_bounded_shards_bytes_and_db_identity_size(self):
+        root, shard, db = self.fixture([], [("a" * 257, "1" * 64)])
+        with self.assertRaisesRegex(ValueError, "SIZE_OR_TYPE"):
+            audit.inspect(root, db)
+        with self.assertRaisesRegex(ValueError, "BYTE_BUDGET"):
+            audit.inspect(root, db, max_bytes=1)
+        with self.assertRaisesRegex(ValueError, "SHARD_BUDGET"):
+            audit.inspect(root, db, max_shards=0)
+
+    def test_cli_error_redacts_paths_and_tracebacks(self):
+        script = Path(__file__).parents[1] / "scripts/inspect_mirror_identity.py"
+        run = subprocess.run([sys.executable, str(script), "--history-dir", "/missing/SECRET_PATH", "--db", "/missing/SECRET_DB"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2)
+        self.assertNotIn("SECRET", run.stdout + run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertNotIn(str(script), run.stderr)
+        self.assertIn("AUDIT_INPUT_UNREADABLE_OR_INVALID", run.stderr)
 
 
 if __name__ == "__main__":
