@@ -1,14 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareMirrorRecovery, applyMirrorDatabaseRecovery, rollbackMirrorDatabaseRecovery, publishRecoveredLegacyHistory, withMirrorRecoveryLock, type MirrorRecoveryAcceptance } from "../src/services/marketMirrorRecoveryPlan";
+import { prepareMirrorRecovery, applyMirrorDatabaseRecovery, rollbackMirrorDatabaseRecovery, publishRecoveredLegacyHistory, resumeMirrorRecovery, persistMirrorRecoveryPlan, withMirrorRecoveryLock, type MirrorRecoveryAcceptance } from "../src/services/marketMirrorRecoveryPlan";
 import { ensureMirrorSchema, applyRealSync } from "../src/services/historyToDbSyncRealRun";
 import { mapHistoryRowToMarketSignalHistoryRow, parseCsvTable } from "../src/services/historyToDbSyncDryRun";
 import { HISTORY_CSV_HEADERS, buildRowId, buildRowHash, renderHistoryCsv, type HistoryRow } from "../src/services/localHistorySchemaDesign";
 import { parseShardRows } from "../src/services/localHistoryRealAppend";
+vi.mock("node:fs", async (importOriginal) => { const fs = await importOriginal<typeof import("node:fs")>(); return { ...fs, writeFileSync: vi.fn(fs.writeFileSync) }; });
 const AT = "2026-10-25T01:00:00+09:00", REF = "https://github.com/ginisato-hash/zao-market-intelligence-private/issues/13#issuecomment-9999999999";
 function row(day: number): HistoryRow {
     const raw: Record<string, string> = Object.fromEntries(HISTORY_CSV_HEADERS.map(k => [k, ""]));
@@ -21,10 +22,10 @@ function row(day: number): HistoryRow {
     parsed.rowHash = buildRowHash(parsed);
     return parsed;
 }
-function fixture(history: HistoryRow[], existing: HistoryRow[]) {
+function fixture(history: HistoryRow[], existing: HistoryRow[], fileDb = false) {
     const dir = mkdtempSync(join(tmpdir(), "mirror-recovery-")), path = join(dir, "zao_signals_2027_01.csv"), content = renderHistoryCsv(history);
     writeFileSync(path, content);
-    const db = new Database(":memory:");
+    const db = new Database(fileDb ? join(dir, "market.sqlite") : ":memory:");
     ensureMirrorSchema(db);
     db.exec("CREATE TABLE protected_state(v TEXT); INSERT INTO protected_state VALUES('KEEP')");
     if (existing.length)
@@ -146,60 +147,218 @@ describe("bounded explicit mirror recovery", () => {
         }
     });
     it("restores legacy history with byte-preserving prefix and multiline data, then backfills DB under the same accepted plan", () => {
-        const legacy = {...row(3),basisNote:'quote, "text"\n\nsecond paragraph'};
-        const x = fixture([row(1),row(2)],[row(1),legacy]), before = readFileSync(x.path), p = prepareMirrorRecovery(x.db,x.dir,x.pin());
+        const legacy = { ...row(3), basisNote: 'quote, "text"\n\nsecond paragraph' };
+        const x = fixture([row(1), row(2)], [row(1), legacy]), before = readFileSync(x.path), p = prepareMirrorRecovery(x.db, x.dir, x.pin());
         try {
-            withMirrorRecoveryLock(x.dir,lock => {
-                expect(existsSync(join(x.dir,".append.lock"))).toBe(true);
-                const published = publishRecoveredLegacyHistory(p,accept(p),join(x.dir,".recovery"),Buffer.alloc(32,7),lock);
-                expect(published).toEqual({appended:1,touchedShards:1});
-                expect(readFileSync(x.path).subarray(0,before.length).equals(before)).toBe(true);
-                expect(parseShardRows(readFileSync(x.path,"utf8")).find(r=>r.rowId===legacy.rowId)!.basisNote).toBe(legacy.basisNote);
-                expect(publishRecoveredLegacyHistory(p,accept(p),join(x.dir,".recovery"),Buffer.alloc(32,7),lock)).toEqual({appended:0,touchedShards:0});
-                expect(applyMirrorDatabaseRecovery(x.db,p,accept(p),AT,lock)).toEqual({state:"APPLIED",inserted:1,mirrorExact:true});
+            withMirrorRecoveryLock(x.dir, lock => {
+                expect(existsSync(join(x.dir, ".append.lock"))).toBe(true);
+                const published = publishRecoveredLegacyHistory(p, accept(p), join(x.dir, ".recovery"), Buffer.alloc(32, 7), lock);
+                expect(published).toEqual({ appended: 1, touchedShards: 1 });
+                expect(readFileSync(x.path).subarray(0, before.length).equals(before)).toBe(true);
+                expect(parseShardRows(readFileSync(x.path, "utf8")).find(r => r.rowId === legacy.rowId)!.basisNote).toBe(legacy.basisNote);
+                expect(publishRecoveredLegacyHistory(p, accept(p), join(x.dir, ".recovery"), Buffer.alloc(32, 7), lock)).toEqual({ appended: 0, touchedShards: 0 });
+                expect(applyMirrorDatabaseRecovery(x.db, p, accept(p), AT, lock)).toEqual({ state: "APPLIED", inserted: 1, mirrorExact: true });
             });
-            const encrypted=readdirSync(join(x.dir,".recovery")).find(n=>n.endsWith('.aesgcm'))!;
-            expect(readFileSync(join(x.dir,".recovery",encrypted)).includes(before)).toBe(false);
-            expect(existsSync(join(x.dir,".append.lock"))).toBe(false);
-            expect(x.db.prepare("SELECT COUNT(*) n FROM market_signal_history").get()).toEqual({n:3});
-        } finally {p.close();x.db.close();}
+            const encrypted = readdirSync(join(x.dir, ".recovery")).find(n => n.endsWith('.aesgcm'))!;
+            expect(readFileSync(join(x.dir, ".recovery", encrypted)).includes(before)).toBe(false);
+            expect(existsSync(join(x.dir, ".append.lock"))).toBe(false);
+            expect(x.db.prepare("SELECT COUNT(*) n FROM market_signal_history").get()).toEqual({ n: 3 });
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
     });
     it("a fake or expired canonical lock and a different target DB cannot authorize writes", () => {
-        const x=fixture([row(1),row(2)],[row(1)]),p=prepareMirrorRecovery(x.db,x.dir,x.pin());
+        const x = fixture([row(1), row(2)], [row(1)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin());
         try {
-            expect(()=>applyMirrorDatabaseRecovery(x.db,p,accept(p),AT,{historyDir:x.dir})).toThrow("CANONICAL_HISTORY_LOCK_REQUIRED");
-            const token=withMirrorRecoveryLock(x.dir,lock=>lock);
-            expect(()=>applyMirrorDatabaseRecovery(x.db,p,accept(p),AT,token)).toThrow("CANONICAL_HISTORY_LOCK_REQUIRED");
-            const other=fixture([row(1),row(2)],[row(1)]);
-            try {expect(()=>withMirrorRecoveryLock(x.dir,lock=>applyMirrorDatabaseRecovery(other.db,p,accept(p),AT,lock))).toThrow("TARGET_DATABASE_CHANGED");}finally{other.db.close();}
-        }finally{p.close();x.db.close();}
+            expect(() => applyMirrorDatabaseRecovery(x.db, p, accept(p), AT, { historyDir: x.dir })).toThrow("CANONICAL_HISTORY_LOCK_REQUIRED");
+            const token = withMirrorRecoveryLock(x.dir, lock => lock);
+            expect(() => applyMirrorDatabaseRecovery(x.db, p, accept(p), AT, token)).toThrow("CANONICAL_HISTORY_LOCK_REQUIRED");
+            const other = fixture([row(1), row(2)], [row(1)]);
+            try {
+                expect(() => withMirrorRecoveryLock(x.dir, lock => applyMirrorDatabaseRecovery(other.db, p, accept(p), AT, lock))).toThrow("TARGET_DATABASE_CHANGED");
+            }
+            finally {
+                other.db.close();
+            }
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
     });
-
-    it("never clears a prior or replaced legacy lock, and refuses writes after lock ownership changes",()=>{
-        const x=fixture([row(1),row(2)],[row(1)]),p=prepareMirrorRecovery(x.db,x.dir,x.pin()),path=join(x.dir,'.append.lock');
-        try{
-            writeFileSync(path,'prior owner');
-            expect(()=>withMirrorRecoveryLock(x.dir,()=>{})).toThrow('LEGACY_APPEND_LOCK_PRESENT');
-            expect(readFileSync(path,'utf8')).toBe('prior owner');
-        }finally{p.close();x.db.close();}
-        const y=fixture([row(1),row(2)],[row(1)]),q=prepareMirrorRecovery(y.db,y.dir,y.pin()),other=join(y.dir,'.append.lock');
-        try{
-            withMirrorRecoveryLock(y.dir,lock=>{
-                writeFileSync(other,'replaced owner');
-                expect(()=>applyMirrorDatabaseRecovery(y.db,q,accept(q),AT,lock)).toThrow('CANONICAL_HISTORY_LOCK_REQUIRED');
+    it("never clears a prior or replaced legacy lock, and refuses writes after lock ownership changes", () => {
+        const x = fixture([row(1), row(2)], [row(1)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin()), path = join(x.dir, '.append.lock');
+        try {
+            writeFileSync(path, 'prior owner');
+            expect(() => withMirrorRecoveryLock(x.dir, () => { })).toThrow('LEGACY_APPEND_LOCK_PRESENT');
+            expect(readFileSync(path, 'utf8')).toBe('prior owner');
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
+        const y = fixture([row(1), row(2)], [row(1)]), q = prepareMirrorRecovery(y.db, y.dir, y.pin()), other = join(y.dir, '.append.lock');
+        try {
+            withMirrorRecoveryLock(y.dir, lock => {
+                writeFileSync(other, 'replaced owner');
+                expect(() => applyMirrorDatabaseRecovery(y.db, q, accept(q), AT, lock)).toThrow('CANONICAL_HISTORY_LOCK_REQUIRED');
             });
-            expect(readFileSync(other,'utf8')).toBe('replaced owner');
-            expect(y.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({n:1});
-        }finally{q.close();y.db.close();}
+            expect(readFileSync(other, 'utf8')).toBe('replaced owner');
+            expect(y.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({ n: 1 });
+        }
+        finally {
+            q.close();
+            y.db.close();
+        }
     });
-    it("refuses rollback when a recovery row changed, without deleting any row",()=>{
-        const x=fixture([row(1),row(2)],[row(1)]),p=prepareMirrorRecovery(x.db,x.dir,x.pin());
-        try{
-            withMirrorRecoveryLock(x.dir,lock=>applyMirrorDatabaseRecovery(x.db,p,accept(p),AT,lock));
-            x.db.prepare('UPDATE market_signal_history SET row_hash=? WHERE row_id=?').run('e'.repeat(64),row(2).rowId);
-            expect(()=>withMirrorRecoveryLock(x.dir,lock=>rollbackMirrorDatabaseRecovery(x.db,p.plan.planSha256,accept(p,'MIRROR_RECONCILIATION_ROLLBACK'),lock))).toThrow('ROLLBACK_ROW_CHANGED');
-            expect(x.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({n:2});
-        }finally{p.close();x.db.close();}
+    it("refuses rollback when a recovery row changed, without deleting any row", () => {
+        const x = fixture([row(1), row(2)], [row(1)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin());
+        try {
+            withMirrorRecoveryLock(x.dir, lock => applyMirrorDatabaseRecovery(x.db, p, accept(p), AT, lock));
+            x.db.prepare('UPDATE market_signal_history SET row_hash=? WHERE row_id=?').run('e'.repeat(64), row(2).rowId);
+            expect(() => withMirrorRecoveryLock(x.dir, lock => rollbackMirrorDatabaseRecovery(x.db, p.plan.planSha256, accept(p, 'MIRROR_RECONCILIATION_ROLLBACK'), lock))).toThrow('ROLLBACK_ROW_CHANGED');
+            expect(x.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({ n: 2 });
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
     });
-
+    it("binds legacy saved fields excluded from row_hash and refuses changed raw JSON before any publication", () => {
+        const x = fixture([row(1)], [row(2)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin());
+        try {
+            const raw = JSON.parse((x.db.prepare('SELECT raw_json FROM market_signal_history').get() as {
+                raw_json: string;
+            }).raw_json);
+            raw.basis_note = 'changed note';
+            x.db.prepare('UPDATE market_signal_history SET raw_json=?').run(JSON.stringify(raw));
+            const next = prepareMirrorRecovery(x.db, x.dir, x.pin());
+            try {
+                expect(next.plan.planSha256).not.toBe(p.plan.planSha256);
+            }
+            finally {
+                next.close();
+            }
+            expect(() => withMirrorRecoveryLock(x.dir, lock => publishRecoveredLegacyHistory(p, accept(p), join(x.dir, '.recovery'), Buffer.alloc(32, 7), lock))).toThrow('LEGACY_SAVED_JSON_CHANGED');
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
+    });
+    it("resumes the exact accepted plan after a restart between CSV publication and DB commit, then replays a committed result", () => {
+        const x = fixture([row(1), row(2)], [row(1), row(3)], true), pins = x.pin(), p = prepareMirrorRecovery(x.db, x.dir, pins), a = accept(p), backup = join(x.dir, '.recovery'), key = Buffer.alloc(32, 7);
+        withMirrorRecoveryLock(x.dir, lock => publishRecoveredLegacyHistory(p, a, backup, key, lock));
+        p.close();
+        x.db.close();
+        const db = new Database(join(x.dir, 'market.sqlite'));
+        try {
+            expect(() => prepareMirrorRecovery(db, x.dir, pins)).toThrow('SOURCE_CHANGED');
+            withMirrorRecoveryLock(x.dir, lock => {
+                const resumed = resumeMirrorRecovery(db, x.dir, backup, a, key, lock);
+                try {
+                    expect(resumed.plan.planSha256).toBe(a.planSha256);
+                    expect(publishRecoveredLegacyHistory(resumed, a, backup, key, lock).appended).toBe(0);
+                    expect(applyMirrorDatabaseRecovery(db, resumed, a, AT, lock)).toEqual({ state: 'APPLIED', inserted: 1, mirrorExact: true });
+                }
+                finally {
+                    resumed.close();
+                }
+            });
+        }
+        finally {
+            db.close();
+        }
+        const db2 = new Database(join(x.dir, 'market.sqlite'));
+        try {
+            withMirrorRecoveryLock(x.dir, lock => {
+                const resumed = resumeMirrorRecovery(db2, x.dir, backup, a, key, lock);
+                try {
+                    expect(applyMirrorDatabaseRecovery(db2, resumed, a, AT, lock)).toEqual({ state: 'ALREADY_APPLIED', inserted: 0, mirrorExact: true });
+                }
+                finally {
+                    resumed.close();
+                }
+            });
+        }
+        finally {
+            db2.close();
+        }
+    });
+    it("rejects an unrelated third-state append after publication and leaves both DB and history alone", () => {
+        const x = fixture([row(1), row(2)], [row(1), row(3)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin()), a = accept(p), backup = join(x.dir, '.recovery'), key = Buffer.alloc(32, 7);
+        try {
+            withMirrorRecoveryLock(x.dir, lock => publishRecoveredLegacyHistory(p, a, backup, key, lock));
+            p.close();
+            writeFileSync(x.path, renderHistoryCsv([row(1), row(2), row(3), row(4)]));
+            const before = readFileSync(x.path);
+            expect(() => withMirrorRecoveryLock(x.dir, lock => resumeMirrorRecovery(x.db, x.dir, backup, a, key, lock))).toThrow('RESUME_RECEIPT');
+            expect(readFileSync(x.path)).toEqual(before);
+            expect(x.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({ n: 2 });
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
+    });
+    it("ignores partial unique orphans, and reclaims only its proven-dead recorded recovery lock", () => {
+        const x = fixture([row(1)], [row(2)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin()), a = accept(p), backup = join(x.dir, '.recovery'), key = Buffer.alloc(32, 7);
+        try {
+            withMirrorRecoveryLock(x.dir, lock => persistMirrorRecoveryPlan(p, a, backup, lock));
+            writeFileSync(join(backup, 'orphan.pending_fixture'), 'partial ciphertext');
+            writeFileSync(x.path + '.recovery_' + a.planSha256 + '_orphan.tmp', 'partial staging');
+            withMirrorRecoveryLock(x.dir, lock => publishRecoveredLegacyHistory(p, a, backup, key, lock));
+            p.close();
+            const body = `recovery_12345678-1234-1234-1234-123456789abc\n2026-10-25T00:00:00Z\npid=2147483000\nhost=${hostname()}\n`;
+            writeFileSync(join(x.dir, '.append.lock'), body);
+            writeFileSync(join(backup, `execution_lock_${a.planSha256}.json`), JSON.stringify({ kind: 'ZMI_RECOVERY_LOCK_V1', planSha256: a.planSha256, body }));
+            withMirrorRecoveryLock(x.dir, lock => { const resumed = resumeMirrorRecovery(x.db, x.dir, backup, a, key, lock); try {
+                expect(applyMirrorDatabaseRecovery(x.db, resumed, a, AT, lock).mirrorExact).toBe(true);
+            }
+            finally {
+                resumed.close();
+            } }, { planSha256: a.planSha256, backupDir: backup });
+            expect(existsSync(join(x.dir, '.append.lock'))).toBe(false);
+            expect(readFileSync(join(backup, 'orphan.pending_fixture'), 'utf8')).toBe('partial ciphertext');
+        }
+        finally {
+            p.close();
+            x.db.close();
+        }
+    });
+    it("recovers from interrupted encrypted backup, receipt, and source staging writes without publishing partial final artifacts", async () => {
+        const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+        for (const phase of ['backup', 'receipt', 'staging']) {
+            const x = fixture([row(1)], [row(2)]), p = prepareMirrorRecovery(x.db, x.dir, x.pin()), a = accept(p), backup = join(x.dir, '.recovery'), key = Buffer.alloc(32, 7), before = readFileSync(x.path);
+            let failed = false;
+            const mocked = vi.mocked(writeFileSync);
+            mocked.mockImplementation(((fd: Parameters<typeof writeFileSync>[0], content: Parameters<typeof writeFileSync>[1], options?: Parameters<typeof writeFileSync>[2]) => {
+                const text = Buffer.isBuffer(content) ? content.toString() : String(content);
+                const match = phase === 'backup' ? text.includes('ZMI_ENCRYPTED_MIRROR_BACKUP_V1') : phase === 'receipt' ? text.includes('ZMI_LEGACY_HISTORY_PUBLICATION_V1') : text.startsWith('row_id,row_hash');
+                if (!failed && match) {
+                    failed = true;
+                    actual.writeFileSync(fd, text.slice(0, 12), options);
+                    throw new Error('fixture interrupted write');
+                }
+                return actual.writeFileSync(fd, content, options);
+            }) as typeof writeFileSync);
+            try {
+                expect(() => withMirrorRecoveryLock(x.dir, lock => publishRecoveredLegacyHistory(p, a, backup, key, lock))).toThrow('fixture interrupted write');
+                expect(readFileSync(x.path)).toEqual(before);
+                expect(failed).toBe(true);
+                mocked.mockImplementation(actual.writeFileSync);
+                withMirrorRecoveryLock(x.dir, lock => {
+                    expect(publishRecoveredLegacyHistory(p, a, backup, key, lock).appended).toBe(1);
+                    expect(applyMirrorDatabaseRecovery(x.db, p, a, AT, lock).mirrorExact).toBe(true);
+                });
+            }
+            finally {
+                mocked.mockImplementation(actual.writeFileSync);
+                p.close();
+                x.db.close();
+            }
+        }
+    });
 });
