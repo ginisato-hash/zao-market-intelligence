@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("mirror_identity", Path(__file__).parents[1] / "scripts/inspect_mirror_identity.py")
@@ -79,6 +80,18 @@ class MirrorIdentityAuditTests(unittest.TestCase):
         self.assertNotIn("Traceback", run.stderr)
         self.assertNotIn(str(script), run.stderr)
         self.assertIn("AUDIT_INPUT_UNREADABLE_OR_INVALID", run.stderr)
+
+    def test_db_row_budget_bounds_sql_work_before_any_full_scan(self):
+        root, _, db = self.fixture([], [(str(i), "1" * 64) for i in range(5000)])
+        connect = sqlite3.connect
+        def bounded_connect(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            # A full-table COUNT/type/length validation exceeds this VM-instruction budget.
+            connection.set_progress_handler(lambda: 1, 1000)
+            return connection
+        with patch.object(audit.sqlite3, "connect", bounded_connect):
+            with self.assertRaisesRegex(ValueError, "DB_IDENTITY_BUDGET_EXCEEDED"):
+                audit.inspect(root, db, max_rows=1)
 
 
 if __name__ == "__main__":

@@ -74,18 +74,16 @@ def inspect(history_dir, db_path, max_rows=200_000, max_shards=240, max_bytes=25
     db_before = stamp(db)
     connection = sqlite3.connect(db.as_uri() + "?mode=ro&immutable=1", uri=True)
     try:
-        # SQL computes lengths before any identity TEXT is materialized into Python.
-        bad = connection.execute("SELECT COUNT(*) FROM market_signal_history WHERE typeof(row_id)!='text' OR length(CAST(row_id AS BLOB)) NOT BETWEEN 1 AND 256 OR typeof(row_hash)!='text' OR length(CAST(row_hash AS BLOB))!=64").fetchone()[0]
-        if bad:
-            raise AuditError("DB_IDENTITY_SIZE_OR_TYPE_INVALID")
-        if connection.execute("SELECT COUNT(*) FROM market_signal_history").fetchone()[0] > max_rows:
-            raise AuditError("DB_IDENTITY_BUDGET_EXCEEDED")
-        rows = connection.execute("SELECT row_id,row_hash FROM market_signal_history")
+        # One bounded pass. CASE prevents oversized/invalid identity values reaching Python.
+        valid = "typeof(row_id)='text' AND length(CAST(row_id AS BLOB)) BETWEEN 1 AND 256 AND typeof(row_hash)='text' AND length(CAST(row_hash AS BLOB))=64"
+        rows = connection.execute(f"SELECT CASE WHEN {valid} THEN row_id END, CASE WHEN {valid} THEN row_hash END FROM market_signal_history LIMIT ?", (max_rows + 1,))
         db_hashes, db_rows, db_duplicates = {}, 0, 0
         for key, value in rows:
             db_rows += 1
             if db_rows > max_rows:
                 raise AuditError("DB_IDENTITY_BUDGET_EXCEEDED")
+            if key is None or value is None:
+                raise AuditError("DB_IDENTITY_SIZE_OR_TYPE_INVALID")
             if not re.fullmatch(r"[0-9a-f]{64}", value):
                 raise AuditError("DB_IDENTITY_HASH_INVALID")
             if key in db_hashes:
