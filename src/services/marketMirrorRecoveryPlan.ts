@@ -32,6 +32,7 @@ export interface MirrorRecoveryPlan {
     historyRows: number;
     dbRows: number;
     historyOnly: number;
+    historicalIdentityFormatExceptions: number;
     dbOnly: number;
     recoverableLegacyRows: number;
     legacyIdentitySha256: string;
@@ -195,7 +196,7 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
     }
     stage.exec("CREATE TABLE history(row_id TEXT PRIMARY KEY,row_hash TEXT NOT NULL,raw_json TEXT NOT NULL)");
     const insert = stage.prepare("INSERT INTO history VALUES(?,?,?)"), find = stage.prepare("SELECT row_hash FROM history WHERE row_id=?");
-    let bytes = 0, count = 0, missing = 0;
+    let bytes = 0, count = 0, missing = 0, historicalIds = 0;
     const stamps = new Map<string, string>();
     try {
         for (const pin of [...pins].sort((a, b) => a.name.localeCompare(b.name))) {
@@ -223,8 +224,11 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                         fail("HISTORY_DUPLICATE");
                     const parsed = historyRowFromCsvRecord(HISTORY_CSV_HEADERS.map(k => row[k] ?? ""));
                     if (parsed.shardMonth !== pin.name.slice(12, -4) || parsed.shardMonth !== shardMonthFromCheckin(parsed.checkin)
-                        || buildRowId(parsed) !== row["row_id"] || buildRowHash(parsed) !== row["row_hash"])
+                        || buildRowHash(parsed) !== row["row_hash"])
                         fail("HISTORY_CONTENT_HASH_OR_SHARD");
+                    // Preserve original opaque keys: older appenders used valid suffix/scope variants. Never re-key history.
+                    if (buildRowId(parsed) !== row["row_id"])
+                        historicalIds++;
                     const old = dbMap.get(row["row_id"]);
                     if (old !== undefined && old !== row["row_hash"])
                         fail("HASH_CONFLICT");
@@ -276,7 +280,7 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
         if (!/^[0-9a-f]{40}$/u.test(releaseGitSha))
             fail("CODE_RELEASE_UNKNOWN");
         const base = { kind: "ZMI_MIRROR_RECOVERY_PLAN_V1" as const, releaseGitSha, dbIdentitySha256: mapDigest(dbMap), historyIdentitySha256: historySha, unionIdentitySha256: mapDigest(union), historyRows: count, dbRows: dbMap.size,
-            historyOnly: missing, dbOnly: legacy.length, recoverableLegacyRows: legacy.length, legacyIdentitySha256: mapDigest(legacyPairs), legacySavedJsonSha256: mapDigest(legacyRawHashes), pins: [...pins].map(p => Object.freeze({ ...p })), originalSourceAuthenticity: "NOT_ESTABLISHED" as const };
+            historyOnly: missing, historicalIdentityFormatExceptions: historicalIds, dbOnly: legacy.length, recoverableLegacyRows: legacy.length, legacyIdentitySha256: mapDigest(legacyPairs), legacySavedJsonSha256: mapDigest(legacyRawHashes), pins: [...pins].map(p => Object.freeze({ ...p })), originalSourceAuthenticity: "NOT_ESTABLISHED" as const };
         const plan = { ...base, planSha256: hash(JSON.stringify(base)) };
         Object.freeze(plan.pins);
         Object.freeze(plan);
@@ -285,13 +289,15 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                     stage.close();
             } };
         genuine.set(result, { historyDir: dir, sourceDatabase: db, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, sourceUnchanged,
-            legacyUnchanged(): void { for (const [id, sha] of legacyRawHashes) {
-                const r = getRaw.get(id) as {
-                    raw_json: string | null;
-                } | undefined;
-                if (typeof r?.raw_json !== "string" || hash(r.raw_json) !== sha)
-                    fail("LEGACY_SAVED_JSON_CHANGED");
-            } },
+            legacyUnchanged(): void {
+                for (const [id, sha] of legacyRawHashes) {
+                    const r = getRaw.get(id) as {
+                        raw_json: string | null;
+                    } | undefined;
+                    if (typeof r?.raw_json !== "string" || hash(r.raw_json) !== sha)
+                        fail("LEGACY_SAVED_JSON_CHANGED");
+                }
+            },
             admitOwnPublication(path: string): void {
                 const next = [...new Set([...expectedNames.split("|"), basename(path)])].sort().join("|");
                 if (inventory() !== next)
@@ -312,12 +318,15 @@ function acceptance(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptanc
         return fail("EXPLICIT_ACCEPTANCE_REQUIRED");
     return ctx;
 }
-function syncDirectory(path: string): void { const fd = openSync(path, "r"); try {
-    fsyncSync(fd);
+function syncDirectory(path: string): void {
+    const fd = openSync(path, "r");
+    try {
+        fsyncSync(fd);
+    }
+    finally {
+        closeSync(fd);
+    }
 }
-finally {
-    closeSync(fd);
-} }
 /** An interrupted write can leave only a unique orphan; final names never expose partial bytes. */
 function publishExclusive(path: string, body: Buffer | string): void {
     const tmp = `${path}.pending_${randomUUID()}`, fd = openSync(tmp, "wx", 0o600);
@@ -341,8 +350,12 @@ function appendImage(before: Buffer, rows: readonly HistoryRow[]): {
     if (JSON.stringify(table.headers) !== JSON.stringify(HISTORY_CSV_HEADERS))
         fail("LEGACY_SHARD_SCHEMA_MISMATCH");
     const present = new Map(table.rows.map(r => [r["row_id"], r["row_hash"]]));
-    const fresh = rows.filter(r => { const old = present.get(r.rowId); if (old !== undefined && old !== r.rowHash)
-        fail("LEGACY_HISTORY_CONFLICT"); return old === undefined; })
+    const fresh = rows.filter(r => {
+        const old = present.get(r.rowId);
+        if (old !== undefined && old !== r.rowHash)
+            fail("LEGACY_HISTORY_CONFLICT");
+        return old === undefined;
+    })
         .sort((a, b) => Buffer.compare(Buffer.from(a.rowId), Buffer.from(b.rowId)));
     if (fresh.length === 0)
         return { after: before, added: 0 };

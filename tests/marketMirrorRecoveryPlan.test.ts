@@ -314,12 +314,15 @@ describe("bounded explicit mirror recovery", () => {
             const body = `recovery_12345678-1234-1234-1234-123456789abc\n2026-10-25T00:00:00Z\npid=2147483000\nhost=${hostname()}\n`;
             writeFileSync(join(x.dir, '.append.lock'), body);
             writeFileSync(join(backup, `execution_lock_${a.planSha256}.json`), JSON.stringify({ kind: 'ZMI_RECOVERY_LOCK_V1', planSha256: a.planSha256, body }));
-            withMirrorRecoveryLock(x.dir, lock => { const resumed = resumeMirrorRecovery(x.db, x.dir, backup, a, key, lock); try {
-                expect(applyMirrorDatabaseRecovery(x.db, resumed, a, AT, lock).mirrorExact).toBe(true);
-            }
-            finally {
-                resumed.close();
-            } }, { planSha256: a.planSha256, backupDir: backup });
+            withMirrorRecoveryLock(x.dir, lock => {
+                const resumed = resumeMirrorRecovery(x.db, x.dir, backup, a, key, lock);
+                try {
+                    expect(applyMirrorDatabaseRecovery(x.db, resumed, a, AT, lock).mirrorExact).toBe(true);
+                }
+                finally {
+                    resumed.close();
+                }
+            }, { planSha256: a.planSha256, backupDir: backup });
             expect(existsSync(join(x.dir, '.append.lock'))).toBe(false);
             expect(readFileSync(join(backup, 'orphan.pending_fixture'), 'utf8')).toBe('partial ciphertext');
         }
@@ -359,6 +362,18 @@ describe("bounded explicit mirror recovery", () => {
                 p.close();
                 x.db.close();
             }
+        }
+    });
+    it('preserves pinned opaque historical ID variants, records their count, and still verifies content hashes', () => {
+        const legacy = { ...row(1), rowId: row(1).rowId + '|legacy-suffix' }, x = fixture([legacy], []), p = prepareMirrorRecovery(x.db, x.dir, x.pin());
+        try {
+            expect(p.plan.historicalIdentityFormatExceptions).toBe(1);
+            withMirrorRecoveryLock(x.dir, lock => applyMirrorDatabaseRecovery(x.db, p, accept(p), AT, lock));
+            expect(x.db.prepare('SELECT row_id,row_hash FROM market_signal_history').get()).toEqual({ row_id: legacy.rowId, row_hash: legacy.rowHash });
+        }
+        finally {
+            p.close();
+            x.db.close();
         }
     });
 });
