@@ -171,6 +171,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const screenshotPath = join(artifactDir, "screenshot.png");
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
+      let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
       try {
         const resp = await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 35_000 });
@@ -180,9 +181,10 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
           try{
             const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()});
+            uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
-            rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,marketPriceEligible:false});
+            rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false});
           }catch{rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false});}
         }
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
@@ -197,7 +199,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
 
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
-      const block = classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
+      const block = uiBlock ?? classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
+      if(uiStateUnverified){await sleep(backoffDelayMs(backoffAttempt));break;}
       if (block !== null) {
         consecutiveBlocks += 1;
         await sleep(backoffDelayMs(backoffAttempt));

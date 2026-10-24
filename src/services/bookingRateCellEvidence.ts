@@ -1,23 +1,25 @@
 // Bounded, selected-product evidence from the public page already loaded by the collector.
 // No booking selection/submission, price API, credentials or whole-page text export.
 import type { Page } from 'playwright';
+import { BookingUiBlockGuard } from './bookingUiBlockGuard';
+import type { BlockReason } from './crawlThrottlePolicy';
 import { createHash } from 'node:crypto';
 import { scrubExcerpt,canonicalJson,K27_T04_REFERENCE } from './marketEvidenceSidecar';
 export interface BookingRateCell {
   blockId:string;roomName:string;roomText:string;occupancyText:string;priceText:string;conditionsText:string;
-  oneRoomOptionText:string;policyControlId:string|null;policyText:string|null;
+  oneRoomOptionText:string;policyControlId:string|null;policyContainerId:string|null;policyText:string|null;
 }
 export interface BookingRateCellCapture {
-  schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v1';propertySlug:string;observedAt:string;
+  schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v2';propertySlug:string;observedAt:string;
   request:{checkin:string;checkout:string;adults:2;children:0;rooms:1;currency:'JPY'};
   requestUrlMatches:boolean;displayedCheckin:string|null;displayedCheckout:string|null;displayedParty:string;
-  cells:BookingRateCell[];problems:string[];captureSha256:string;
+  cells:BookingRateCell[];problems:string[];blockReason:BlockReason;blockStateVerified:boolean;captureSha256:string;
 }
 const isoDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/u.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
 const yen=(s:string)=>[...s.matchAll(/[￥¥]\s*([\d,]+)/gu)].map(m=>Number(m[1]!.replace(/,/gu,''))).filter(Number.isSafeInteger);
 export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRateCell){
   const reasons:string[]=[],m=/^(\d+)_(\d+)_(\d+)_(\d+)_(\d+)$/u.exec(cell.blockId);
-  if(cap.schema!=='ZMI_BOOKING_RATE_CELLS_V1'||cap.parserVersion!=='booking-rate-cell-v1')reasons.push('CAPTURE_SCHEMA_UNKNOWN');
+  if(cap.schema!=='ZMI_BOOKING_RATE_CELLS_V1'||cap.parserVersion!=='booking-rate-cell-v2')reasons.push('CAPTURE_SCHEMA_UNKNOWN');
   const {captureSha256,...unsigned}=cap;
   if(captureSha256!==createHash('sha256').update(canonicalJson(unsigned)).digest('hex'))reasons.push('CAPTURE_SEAL_INVALID');
   const ownCells=cap.cells.filter(c=>c.blockId===cell.blockId);
@@ -32,8 +34,9 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   if(current===null||current<=0||current>2_000_000||original!==null&&(original<current||original>2_000_000))reasons.push('PRICE_ROLE_AMBIGUOUS_OR_INVALID');
   const quantity=/^1\s*[（(]\s*[￥¥]\s*([\d,]+)\s*[)）]/u.exec(cell.oneRoomOptionText.trim());
   if(!quantity||Number(quantity[1]!.replace(/,/gu,''))!==current)reasons.push('ONE_ROOM_PRICE_NOT_CONFIRMED');
+  if(cap.blockReason!==null||!cap.blockStateVerified)reasons.push('UI_BLOCKED_OR_UNVERIFIED');
   const policy=cell.policyText;
-  if(!policy||!cell.policyControlId||!cell.policyControlId.includes(cell.blockId))reasons.push('SELECTED_POLICY_NOT_CAPTURED');
+  if(!policy||!cell.policyControlId||cell.policyControlId!==`policyModal_${cell.blockId}`||cell.policyContainerId!==cell.policyControlId)reasons.push('SELECTED_POLICY_NOT_CAPTURED');
   const meal=policy&&/お食事は含まれておりません|食事は含まれていません|No meals are included/iu.test(policy)?'ROOM_ONLY' as const:'UNKNOWN' as const;
   const refund=policy&&/返金不可|払い戻し不可|non[- ]?refundable/iu.test(policy)?'NON_REFUNDABLE' as const:
     policy&&/キャンセル無料|無料でキャンセル|free cancellation/iu.test(policy)?'CONDITIONAL_REFUNDABLE' as const:'UNKNOWN' as const;
@@ -52,7 +55,7 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
 export function sealBookingRateCellCapture(x:Omit<BookingRateCellCapture,'captureSha256'>):BookingRateCellCapture{
   return {...x,captureSha256:createHash('sha256').update(canonicalJson(x)).digest('hex')};
 }
-/** Only policy-detail and date-popover controls are used. Every opened panel is closed normally. */
+/** Only date/policy information controls are used. Blocked pages receive no further interaction. */
 export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string},maxProducts=3):Promise<BookingRateCellCapture>{
   if(!/^[a-z0-9-]+$/u.test(input.propertySlug)||!isoDate(input.checkin)||!isoDate(input.checkout)
     ||Date.parse(input.checkout)-Date.parse(input.checkin)!==86400000||!Number.isSafeInteger(maxProducts)||maxProducts<1||maxProducts>5)throw Error('RATE_CELL_CAPTURE_SCOPE');
@@ -61,20 +64,26 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const requestUrlMatches=served.hostname==='www.booking.com'&&served.pathname===`/hotel/jp/${input.propertySlug}.ja.html`
     &&Object.entries({checkin:input.checkin,checkout:input.checkout,group_adults:'2',group_children:'0',no_rooms:'1',selected_currency:'JPY'}).every(([k,v])=>served.searchParams.get(k)===v);
   let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='';
-  const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v1',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem]});
+  const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v2',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
-  if(await page.locator('#hprt-table tr[data-block-id]').count()===0)return empty('NO_RATE_TABLE_NO_INTERACTION');
+  const guard=new BookingUiBlockGuard(page);
+  let result:BookingRateCellCapture;
+  try{
+  await guard.requireClear();
+  if(await page.locator('#hprt-table tr[data-block-id]').count()===0)throw Error('NO_RATE_TABLE_NO_INTERACTION');
   const dateButton=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container');
+  let dateOpened=false;
   try{
     displayedParty=(await page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/}).getAttribute('aria-label',{timeout:3000}))??'';
     if(await dateButton.getAttribute('aria-expanded',{timeout:3000})!=='false')throw Error('DATE_PANEL_ALREADY_OPEN');
-    await dateButton.click({timeout:3000});
-    const dates=await page.locator('[role="gridcell"][aria-selected="true"] [data-date]').evaluateAll(es=>es.slice(0,4).map(e=>({date:e.getAttribute('data-date')?.slice(0,40)??null,label:(e.getAttribute('aria-label')??'').slice(0,300)})));
+    await guard.requireClear();await dateButton.click({timeout:3000});dateOpened=true;await guard.requireClear();
+    const dates=await page.locator('[role="gridcell"][aria-selected="true"] [data-date]').evaluateAll(es=>es.filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0).slice(0,4).map(e=>({date:e.getAttribute('data-date')?.slice(0,40)??null,label:(e.getAttribute('aria-label')??'').slice(0,300)})));
     const starts=dates.filter(d=>d.label.includes('チェックイン日')),ends=dates.filter(d=>d.label.includes('チェックアウト日'));
     if(starts.length===1)displayedCheckin=starts[0]!.date;if(ends.length===1)displayedCheckout=ends[0]!.date;
   }catch{problems.push('DISPLAYED_DATE_OR_PARTY_UNVERIFIED');}
-  finally{if(await dateButton.getAttribute('aria-expanded',{timeout:3000}).catch(()=>null)==='true')await dateButton.click({timeout:3000}).catch(()=>{problems.push('DATE_PANEL_CLOSE_FAILED');});}
-  if(problems.includes('DATE_PANEL_CLOSE_FAILED'))return empty('NO_RATE_INTERACTION_AFTER_PANEL_FAILURE');
+  finally{if(dateOpened&&await guard.checkpoint()&&await dateButton.getAttribute('aria-expanded',{timeout:3000}).catch(()=>null)==='true')await dateButton.click({timeout:3000}).catch(()=>{problems.push('DATE_PANEL_CLOSE_FAILED');});}
+  if(problems.includes('DATE_PANEL_CLOSE_FAILED'))throw Error('NO_RATE_INTERACTION_AFTER_PANEL_FAILURE');
+  await guard.requireClear();
   const rows=await page.locator('#hprt-table tr[data-block-id]').evaluateAll(es=>{
     const visible=es.filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0),clipped=visible.slice(0,200),names=new Map<string,{name:string;text:string}>();
     for(const e of clipped){const a=e.querySelector('[id^="room_type_id_"]');if(a){const id=a.id.slice('room_type_id_'.length);names.set(id,{name:(a as HTMLElement).innerText.slice(0,4001),text:((a.closest('th') as HTMLElement|null)?.innerText??'').slice(0,4001)});}}
@@ -88,19 +97,35 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const selected=rows.rows.filter(r=>/^\d+_\d+_2_0_0$/u.test(r.blockId)
     &&(input.propertySlug!==K27_T04_REFERENCE.ownSlug||r.blockId.startsWith(K27_T04_REFERENCE.bookingRoomId+'_'))).slice(0,maxProducts),cells:BookingRateCell[]=[];
   for(const row of selected){
-    let policyText:string|null=null;
-    const button=page.locator('#hprt-table tr[data-block-id]').filter({has:page.locator(`button[aria-controls="${row.policyControlId??'__missing__'}"]`)}).getByRole('button',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true});
-    const dialog=page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true});
+    await guard.requireClear();
+    let policyText:string|null=null,policyContainerId:string|null=null;
+    const expectedControlId=`policyModal_${row.blockId}`;
+    const button=page.locator(`#hprt-table tr[data-block-id="${row.blockId}"] button[aria-controls="${expectedControlId}"]`);
+    // Booking also has a hidden TEMPLATE with this ID. Only the visible controlled
+    // container containing this dialog is evidence; a globally named dialog is not.
+    const dialog=page.locator(`[id="${expectedControlId}"]:visible`).getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true});
+    let opened=false;
     try{
-      if(!/^policyModal_\d+_\d+_2_0_0$/u.test(row.policyControlId??''))throw Error('POLICY_ID_INVALID');
-      await button.click({timeout:3000});const text=await dialog.innerText({timeout:3000});
+      if(row.policyControlId!==expectedControlId)throw Error('POLICY_ID_INVALID');
+      if(await page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true}).isVisible())throw Error('POLICY_PANEL_ALREADY_OPEN');
+      await guard.requireClear();await button.click({timeout:3000});opened=true;await guard.requireClear();
+      await dialog.waitFor({state:'visible',timeout:3000});
+      policyContainerId=await dialog.evaluate(e=>e.closest('[id^="policyModal_"]')?.id??null);
+      if(policyContainerId!==expectedControlId)throw Error('POLICY_CONTAINER_MISMATCH');
+      const text=await dialog.innerText({timeout:3000});
       if(text.length>2400)problems.push('POLICY_TEXT_BUDGET_EXCEEDED');else policyText=scrubExcerpt(text,2400);
     }catch{problems.push('RATE_POLICY_UNVERIFIED');}
-    finally{if(await dialog.isVisible().catch(()=>false))await dialog.getByRole('button',{name:'閉じる',exact:true}).click({timeout:3000}).catch(()=>{problems.push('POLICY_PANEL_CLOSE_FAILED');});}
+    finally{if(opened&&await guard.checkpoint()&&await dialog.isVisible().catch(()=>false))await dialog.getByRole('button',{name:'閉じる',exact:true}).click({timeout:3000}).catch(()=>{problems.push('POLICY_PANEL_CLOSE_FAILED');});}
+    await guard.requireClear();
     if(Object.values(row).some(v=>typeof v==='string'&&v.length>4000)){problems.push('RATE_CELL_TEXT_BUDGET_EXCEEDED');continue;}
-    cells.push({...row,roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyText});
+    cells.push({...row,roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyContainerId,policyText});
     if(problems.includes('POLICY_PANEL_CLOSE_FAILED'))break;
   }
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
-  return sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v1',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)]});
+  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:'booking-rate-cell-v2',propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
+  }catch{result=empty('CAPTURE_UNVERIFIED');}
+  finally{await guard.checkpoint();guard.dispose();}
+  const {captureSha256,...unsigned}=result;
+  if(guard.reason!==null||!guard.stateVerified)return sealBookingRateCellCapture({...unsigned,cells:[],blockReason:guard.reason,blockStateVerified:guard.stateVerified,problems:[...new Set([...result.problems,'UI_BLOCKED_OR_UNVERIFIED'])]});
+  return result;
 }
