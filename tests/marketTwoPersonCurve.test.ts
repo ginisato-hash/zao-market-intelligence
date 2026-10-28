@@ -45,3 +45,11 @@ it('never emits an eligible composition-only shift when a proven date cohort mem
  const c=run(rows,panel,i=>{i.asOf='2026-10-29T00:02:00Z';}).curves[0]!;
  expect(c.eligible).toBe(false);expect(c.reasonCodes).toContain('ANCHOR_COHORT_INCOMPLETE');
 });
+
+it('a post-anchor failure cannot erase the failure already known at the anchor cutoff',()=>{
+ const x=run(setup(),panel,i=>{
+  i.reference.asOf='2026-10-28T12:00:00Z';
+  i.invalidations=['2026-10-28T06:00:00Z','2026-10-28T18:00:00Z'].map(t=>({propertyId:'p0',sourcePropertyId:'p0',source:'booking',productId:'double',ratePlanId:'plan',conditionKey:ck,stayDate:day,observedAt:t,ingestedAt:t,reason:'FETCH_FAILED',sourceEvidenceSha256:h(t)}));
+ });
+ expect(x.curves[0]!.anchorProducts).toBe(3);expect(x.curves[0]!.nProperties).toBe(3);
+});

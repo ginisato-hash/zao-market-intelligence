@@ -93,12 +93,16 @@ export function buildTwoPersonCurve(input:{
   const k=key(r)+'|'+r.stayDate;put(current,k,r,admission.eligible);
   if(instant(r.observedAt)<=anchorAt&&instant(r.ingestedAt)<=anchorAt)put(anchor,k,r,admission.eligible);
  }
- const invalidations=new Map<string,TwoPersonInvalidation>();
+ const invalidations=new Map<string,TwoPersonInvalidation>(),anchorInvalidations=new Map<string,TwoPersonInvalidation>();
  for(const r of input.invalidations??[]){
   if(!panelByKey.has(key(r))||!validDate(r.stayDate)||!Number.isFinite(instant(r.observedAt))||!Number.isFinite(instant(r.ingestedAt))
    ||instant(r.ingestedAt)<instant(r.observedAt)||!token(r.reason)||!hashOk(r.sourceEvidenceSha256))throw Error('INVALIDATION_CONTRACT');
   if(instant(r.observedAt)>at||instant(r.ingestedAt)>at)continue;
-  const k=key(r)+'|'+r.stayDate,old=invalidations.get(k);if(!old||instant(r.observedAt)>instant(old.observedAt))invalidations.set(k,r);
+  const k=key(r)+'|'+r.stayDate;
+  for(const [map,cutoff] of [[invalidations,at],[anchorInvalidations,anchorAt]] as const){
+   if(instant(r.observedAt)>cutoff||instant(r.ingestedAt)>cutoff)continue;
+   const old=map.get(k);if(!old||instant(r.observedAt)>instant(old.observedAt))map.set(k,r);
+  }
  }
  const anchorRows=[...anchor.values()].map(x=>[x.r.rowId,x.r.rowHash,x.r.receiptSha256]).sort((a,b)=>a[0]!.localeCompare(b[0]!));
  if(digest(anchorRows)!==reference.anchorSnapshotSha256)throw Error('ANCHOR_SNAPSHOT_BINDING');
@@ -109,9 +113,9 @@ export function buildTwoPersonCurve(input:{
   let available=0,productUnavailable=0,conditionUnavailable=0,fetchFailed=0,notObserved=0,invalidatedProducts=0;
   const anchorCohort:string[]=[],matchedCohort:string[]=[];
   for(const p of panel.products){
-   const k=key(p)+'|'+stayDate,c=current.get(k),a=anchor.get(k),invalid=invalidations.get(k);
+   const k=key(p)+'|'+stayDate,c=current.get(k),a=anchor.get(k),invalid=invalidations.get(k),anchorInvalid=anchorInvalidations.get(k);
    const anchorSupported=!!a&&a.admitted&&!a.conflict&&!anchorExpired(a.r)&&a.r.result==='AVAILABLE'
-    &&!(invalid&&instant(invalid.observedAt)<=anchorAt&&instant(invalid.ingestedAt)<=anchorAt&&instant(invalid.observedAt)>=instant(a.r.observedAt));
+    &&!(anchorInvalid&&instant(anchorInvalid.observedAt)>=instant(a.r.observedAt));
    if(anchorSupported)anchorCohort.push(key(p));
    if(invalid&&(!c||instant(invalid.observedAt)>=instant(c.r.observedAt))){invalidatedProducts++;continue;}
    if(!c){notObserved++;continue;}
@@ -156,7 +160,7 @@ export function buildTwoPersonCurve(input:{
    productAvailability:{available,productUnavailable,conditionUnavailable,fetchFailed,notObserved,invalidatedProducts,hotelOccupancyRate:null}};
  });
  const body={schema:CURVE_SCHEMA,asOf:input.asOf,panelVersion:panel.version,panelSha256:panel.panelSha256,reference,qualityPolicyVersion:policy.version,
-  qualityPolicySha256:digest(policy),qualityLedgerSha256:input.expectedQualitySha256,sourceSnapshotSha:digest({observations:[...seen].sort(([a],[b])=>a.localeCompare(b)),invalidations:[...invalidations].sort(([a],[b])=>a.localeCompare(b))}),curves,exclusions,
+  qualityPolicySha256:digest(policy),qualityLedgerSha256:input.expectedQualitySha256,sourceSnapshotSha:digest({observations:[...seen].sort(([a],[b])=>a.localeCompare(b)),invalidations:[...invalidations].sort(([a],[b])=>a.localeCompare(b)),anchorInvalidations:[...anchorInvalidations].sort(([a],[b])=>a.localeCompare(b))}),curves,exclusions,
   priceAuthority:false as const,demandInference:false as const,axis:'SAME_STAY_DATE_OBSERVATION_TIME_CHANGE' as const};
  return {...body,curveSha256:digest(body)};
 }
