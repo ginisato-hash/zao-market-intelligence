@@ -15,7 +15,7 @@ function setup(){
  const body={kind:'K27_MARKET_QUOTE_REQUEST_V1',propertyId:'330695',createdAt:at,expiresAt:'2026-10-26T12:00:00Z',source,needs:['2026-11-01','2027-10-25','2029-07-20'].map(stayDate=>({stayDate,admittedAt:'2026-10-01T00:00:00Z',priceDecisionEligible:true,decisionImpact:0.5,changedAt:null,dateEvidenceSha256:'e'.repeat(64)}))};
  writeFileSync(path,JSON.stringify({...body,requestSha256:createHash('sha256').update(canonicalJson(body)).digest('hex')}));
  const env={ZMI_USEFUL_QUOTES_ENABLED:'1',ZMI_RATE_CELL_EVIDENCE_ENABLED:'1',ZMI_RMS_QUOTE_REQUEST_PATH:path,ZMI_RMS_QUOTE_SOURCE_RELEASE:source.releaseGitSha,ZMI_RMS_QUOTE_BUNDLE_SHA256:source.bundleSha256,ZMI_RMS_QUOTE_GRAPH_SHA256:source.graphSha256};
- const properties:MarketRefreshPropertyTarget[]=['hammond-takamiya','onsen-amp-stay-oakhill','rurikura-resort','xi-raku','unapproved'].map(property_slug=>({source:'booking',canonical_property_name:'fixture',property_slug,tier:'tier_direct_mid',enabled_for_live:true,verified_mapping:true,verification_note:'fixture'}));
+ const properties:MarketRefreshPropertyTarget[]=['hammond-takamiya','onsen-amp-stay-oakhill','rurikura-resort','xi-raku','unapproved'].map(property_slug=>({source:'booking',canonical_property_name:property_slug==='xi-raku'?'ホテル喜らく':'fixture-'+property_slug,property_slug,tier:'tier_direct_mid',enabled_for_live:property_slug!=='unapproved',verified_mapping:property_slug!=='unapproved',verification_note:'fixture'}));
  const input={now:at,runDate:'2026-10-25',legacyTargets:[] as RotatingTarget[],caps:ROTATING_CAPS,config,properties,lastCollectedAt:new Map<string,string>(),reservationRoot:root};
  return {dir,path,root,env,input};
 }

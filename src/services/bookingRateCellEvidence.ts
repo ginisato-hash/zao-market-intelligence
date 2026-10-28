@@ -74,9 +74,9 @@ export function sealBookingRateCellCapture(x:Omit<BookingRateCellCapture,'captur
   return {...x,captureSha256:createHash('sha256').update(canonicalJson(x)).digest('hex')};
 }
 /** Only date/policy information controls are used. Blocked pages receive no further interaction. */
-export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string},maxProducts=3,externalGuard?:BookingUiBlockGuard):Promise<BookingRateCellCapture>{
+export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string},maxProducts=3,externalGuard?:BookingUiBlockGuard,fixedProducts?:readonly {productId:string;ratePlanId:string}[]):Promise<BookingRateCellCapture>{
   if(!/^[a-z0-9-]+$/u.test(input.propertySlug)||!isoDate(input.checkin)||!isoDate(input.checkout)
-    ||Date.parse(input.checkout)-Date.parse(input.checkin)!==86400000||!Number.isSafeInteger(maxProducts)||maxProducts<1||maxProducts>5)throw Error('RATE_CELL_CAPTURE_SCOPE');
+    ||Date.parse(input.checkout)-Date.parse(input.checkin)!==86400000||!Number.isSafeInteger(maxProducts)||maxProducts<1||maxProducts>5||fixedProducts!==undefined&&(fixedProducts.length>5||fixedProducts.some(p=>!/^\d{1,20}$/u.test(p.productId)||!/^\d{1,20}$/u.test(p.ratePlanId))))throw Error('RATE_CELL_CAPTURE_SCOPE');
   const problems:string[]=[],request={checkin:input.checkin,checkout:input.checkout,adults:2 as const,children:0 as const,rooms:1 as const,currency:'JPY' as const};
   const served=new URL(page.url());
   const requestUrlMatches=served.hostname==='www.booking.com'&&served.pathname===`/hotel/jp/${input.propertySlug}.ja.html`
@@ -118,7 +118,8 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   if(rows.overflow)problems.push('RATE_ROW_BUDGET_EXCEEDED');
   // Keep distinct room/rate products; explicit refundable and non-refundable rows remain separate.
   const selected=rows.rows.filter(r=>/^\d+_\d+_2_0_0$/u.test(r.blockId)
-    &&(input.propertySlug!==K27_T04_REFERENCE.ownSlug||r.blockId.startsWith(K27_T04_REFERENCE.bookingRoomId+'_'))).slice(0,maxProducts),cells:BookingRateCell[]=[];
+    &&(input.propertySlug!==K27_T04_REFERENCE.ownSlug||r.blockId.startsWith(K27_T04_REFERENCE.bookingRoomId+'_'))
+    &&(fixedProducts===undefined||fixedProducts.some(p=>r.blockId===`${p.productId}_${p.ratePlanId}_2_0_0`))).slice(0,maxProducts),cells:BookingRateCell[]=[];
   for(const row of selected){
     await guard.requireClear();
     let policyText:string|null=null,policyContainerId:string|null=null;

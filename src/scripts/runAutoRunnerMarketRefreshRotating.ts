@@ -11,7 +11,10 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {createHash} from 'node:crypto';
+import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelection';
+import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
+import {readAcceptedTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
 import { join, resolve } from "node:path";
@@ -153,7 +156,7 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
   if(targets.length===0)return rows;
   const browser = await chromium.launch({ headless: true });
@@ -180,6 +183,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       // Retain asynchronous response detection through screenshot and normal page close.
       const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page):null;
       let rateCellRecord:Record<string,unknown>|null=null;
+      let fixedCapture:Awaited<ReturnType<typeof captureBookingRateCells>>|null=null;
+      const fixedProducts=panel?.products.filter(p=>p.sourcePropertyId===t.property_slug&&p.source==='booking');
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
       try {
@@ -189,7 +194,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
         if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
           try{
-            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!);
+            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
+            fixedCapture=capture;
             uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
@@ -208,7 +214,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
           pageGuard.dispose();
         }
       }
-      const signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
+      let signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
+      if(fixedProducts?.length===1){const selected=selectFixedTwoPersonSignals(signals,fixedCapture,fixedProducts[0]!,uiBlock,!uiStateUnverified);signals=selected.signals;if(rateCellRecord)rateCellRecord['fixedProductSelection']=selected.status;}
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
@@ -270,6 +277,7 @@ async function run(): Promise<void> {
   const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
   const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
+  let twoPersonAdmission:ReturnType<typeof recordTwoPersonMarketAdmission>={status:"NOT_RUN",eligibleRows:0};
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
   const liveMode = !dryRun && liveGates && rotationEnabled;
@@ -342,7 +350,7 @@ async function run(): Promise<void> {
     liveExecuted = selectedTargets.length>0;
     const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
     const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve);
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readAcceptedTwoPersonPanel(env));
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const browser = jalanMatrix.targets.length>0?await chromium.launch({ headless: true }):null;
@@ -393,6 +401,8 @@ async function run(): Promise<void> {
       // Evidence only for W: rows this run actually appended (not ones another job added first).
       if (evidenceOn && rowsAppended > 0) evidenceSidecar = exportEvidenceSidecar(rowsActuallyAppended(appendPlan.approved_rows, trustedAppend), bookingEvidence, runId);
       dbSynced = isVerifiedTrustedMirror(trustedAppend);
+      twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
+        rows:rowsActuallyAppended(appendPlan.approved_rows,trustedAppend),captures:rateCellCaptures});
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {
       // No-change run: nothing to write, but "synced" still needs a read-only
@@ -463,6 +473,7 @@ async function run(): Promise<void> {
     pricing_output_generated: false, pms_output_generated: false,
     winter_sales_lane_enabled: winterLaneEnabled,
     ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
+    ...(env['ZMI_2P_QUALITY_ENABLED']==='1'?{two_person_admission:twoPersonAdmission}:{}),
     ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false}}:{}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",
     winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,

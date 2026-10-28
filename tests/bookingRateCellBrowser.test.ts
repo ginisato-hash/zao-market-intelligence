@@ -39,6 +39,19 @@ it('binds the actual visible controlled ancestor despite the same-ID hidden temp
   } finally { await page.close(); }
 });
 
+it('captures the fixed room/rate even when cheaper alternatives precede it, without selecting a booking quantity',async()=>{
+ const page=await fixture();try{
+  await page.locator('#hprt-table tr').evaluate(row=>{for(let i=0;i<4;i++){const other=row.cloneNode(true) as Element;other.setAttribute('data-block-id',`1655515709_${100+i}_2_0_0`);row.before(other);}});
+  const cap=await captureBookingRateCells(page,input,1,undefined,[{productId:'1655515709',ratePlanId:'445461931'}]);
+  expect(cap.cells.map(c=>c.blockId)).toEqual([blockId]);expect(cap.cells[0]!.policyContainerId).toBe(control);
+  expect(await page.locator('select').evaluateAll(es=>es.every(e=>(e as HTMLSelectElement).value==='0'))).toBe(true);
+ }finally{await page.close();}
+});
+
+it('does not replace an absent fixed rate with the available cheapest rate',async()=>{
+ const page=await fixture();try{const cap=await captureBookingRateCells(page,input,1,undefined,[{productId:'1655515709',ratePlanId:'999'}]);expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('NO_EXACT_RATE_CELL_CAPTURED');expect(await page.locator('html').getAttribute('data-policy-clicks')).toBeNull();}finally{await page.close();}
+});
+
 it('rejects a same-name dialog opened in another container', async () => {
   const page = await fixture('other-container');
   try {

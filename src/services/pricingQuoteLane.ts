@@ -2,7 +2,10 @@
 import { constants, existsSync, fstatSync, openSync, closeSync, readFileSync, mkdirSync, fsyncSync, writeSync,statSync,unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { CORE_COMPETITORS } from './coreCompetitorTargets';
+import {buildRegionalRegistry} from './regionalMarketRegistry';
+import {REGIONAL_OFFICIAL_DISCOVERY} from './regionalOfficialDiscovery';
+import {planRegionalQuoteRotation} from './regionalQuoteRotation';
+import {isOwnPropertyName} from './ownPropertyTargets';
 import { readRmsQuoteRequest } from './rmsQuoteRequest';
 import { planUsefulQuoteRefresh, type UsefulQuoteState } from './usefulQuoteRefreshPlanner';
 import type { MarketRefreshPropertyTarget } from './marketRefreshTargetUniverse';
@@ -67,8 +70,9 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
   if(env['ZMI_RATE_CELL_EVIDENCE_ENABLED']!=='1'||!env['ZMI_RMS_QUOTE_REQUEST_PATH'])throw Error('INPUT');
   const request=readRmsQuoteRequest(env['ZMI_RMS_QUOTE_REQUEST_PATH'],input.now,{releaseGitSha:env['ZMI_RMS_QUOTE_SOURCE_RELEASE']??'',bundleSha256:env['ZMI_RMS_QUOTE_BUNDLE_SHA256']??'',graphSha256:env['ZMI_RMS_QUOTE_GRAPH_SHA256']??''});
   // These are existing verified collection mappings, not assertions of room comparability or independent ownership.
-  const slugs=new Set([...CORE_COMPETITORS.map(p=>p.bookingSlug),'xi-raku','rurikura-resort']);
-  const properties=input.properties.filter(p=>p.source==='booking'&&slugs.has(p.property_slug)),states=new Map<string,UsefulQuoteState>();
+  const registry=buildRegionalRegistry([REGIONAL_OFFICIAL_DISCOVERY],input.properties);
+  const slugs=new Set(input.properties.filter(p=>p.source==='booking'&&p.enabled_for_live&&p.verified_mapping).map(p=>p.property_slug));
+  const states=new Map<string,UsefulQuoteState>();
   const needs=new Set(request.needs.map(n=>n.stayDate));
   const set=(slug:string,date:string,at:string)=>{
    if(!slugs.has(slug)||!needs.has(date))return;
@@ -77,7 +81,12 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
   };
   for(const [key,at]of input.lastCollectedAt){const [source,slug,date]=key.split('|');if(source==='booking'&&slug&&date)set(slug,date,at);}
   for(const r of readQuoteReservations(input.now,input.reservationRoot))set(r.propertySlug,r.stayDate,r.attemptAt);
-  const plan=planUsefulQuoteRefresh({now:input.now,runDate:input.runDate,needs:request.needs,properties,states:[...states.values()],basisVersion:'UNCLASSIFIED_SELECTED_RATE_V2',caps:input.caps,lanePages:input.caps.total_pages_per_run,freshHours:36,farDeadlineHours:168,maxPerProperty:Math.min(MAX_TARGETS_PER_PROPERTY_PER_RUN,input.caps.total_pages_per_run),config:input.config});
+  const ownKeys=new Set<string>();
+  const protectedTargets=input.legacyTargets.filter(t=>{if(!isOwnPropertyName(t.canonical_property_name)||t.source!=='booking')return false;
+   if(ownKeys.has(t.property_slug))return false;ownKeys.add(t.property_slug);return true;});
+  const urgent=input.legacyTargets.find(t=>t.source==='booking'&&!isOwnPropertyName(t.canonical_property_name)&&t.reason_codes.includes('near_term_dense'));
+  if(urgent)protectedTargets.push(urgent);
+  const plan=planRegionalQuoteRotation({now:input.now,runDate:input.runDate,registry:registry.properties,needs:request.needs,states:[...states.values()],caps:input.caps,config:input.config,legacyProtected:protectedTargets,coverageFraction:0.5,freshHours:36,farDeadlineHours:168});
   // Preserve the existing ordinary per-property cap; this lane does not inherit the separate winter quota exception.
   const targets=plan.selected;
   const allowed=new Set(targets.map(t=>t.source+'|'+t.property_slug+'|'+t.stay_date));
@@ -86,7 +95,7 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
    if(!allowed.has(key)||!Number.isFinite(Date.parse(at))||Date.parse(at)<Date.parse(input.now)||Date.parse(at)>=Date.parse(request.expiresAt))throw Error('QUOTE_ATTEMPT_NOT_SELECTED_OR_EXPIRED');
    if(reserved.has(key))return false;
    const ok=reserveQuoteRequest(target,at,input.reservationRoot);if(ok)reserved.add(key);return ok;};
-  return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,usableQuoteAssertions:0,priceAuthority:false}};
+  return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,registryVersion:registry.regionVersion,registrySha256:registry.registrySha256,registryCounts:registry.counts,usableQuoteAssertions:0,priceAuthority:false}};
  }catch{return {enabled:true,status:'HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE',targets:[] as RotatingTarget[],diagnostics:null,reserve:undefined};}
 }
 

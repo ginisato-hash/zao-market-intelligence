@@ -23,7 +23,7 @@ const keyOf = (source: string, slug: string, date: string) => source + '|' + slu
 export function planUsefulQuoteRefresh(input: {
     now: string; runDate: string; needs: readonly PricingQuoteNeed[]; properties: readonly MarketRefreshPropertyTarget[];
     states: readonly UsefulQuoteState[]; basisVersion: string; caps: RotatingCaps; lanePages: number;
-    freshHours: number; farDeadlineHours: number; maxPerProperty?:number; config: RotatingDemandConfig;
+    freshHours: number; farDeadlineHours: number; maxPerProperty?:number; includeCandidateTargets?:boolean; config: RotatingDemandConfig;
 }) {
     const now = instant(input.now), budget = input.lanePages,propertyCap=input.maxPerProperty??input.caps.total_pages_per_run;
     if (!Number.isFinite(now) || !validDate(input.runDate) || new Date(now + 9 * 3600000).toISOString().slice(0, 10) !== input.runDate
@@ -101,7 +101,7 @@ export function planUsefulQuoteRefresh(input: {
     const farCapacityPerDay = budget > 0&&propertyCap>0&&!farSourceBlocked ? SLOT_HOURS.length : 0; // One fair reserved far slot per run; never a success guarantee.
     const farMinimumCycleHours = farUniverse === 0 ? 0 : farCapacityPerDay > 0 ? Math.ceil(farUniverse / farCapacityPerDay) * 24 : null;
     return { version: 'USEFUL_QUOTE_REFRESH_PLAN_V1' as const, now: input.now, basisVersion: input.basisVersion, selected: selected.map(c => c.target), selectedBySource: counts,
-        candidates: candidates.length, excluded, overdueUnselected, farUniverse, farMinimumCycleHours,
+        candidates: candidates.length, ...(input.includeCandidateTargets?{candidateTargets:candidates.map(c=>c.target)}:{}), excluded, overdueUnselected, farUniverse, farMinimumCycleHours,
         configuredFarDeadlineHours: input.farDeadlineHours, farDeadlineCapacityFeasible: farMinimumCycleHours !== null && farMinimumCycleHours <= input.farDeadlineHours,
         deadlineClaim: 'PLANNED_CAPACITY_ONLY_NOT_OBSERVATION_SUCCESS' as const, requestsExecuted: 0 as const };
 }
