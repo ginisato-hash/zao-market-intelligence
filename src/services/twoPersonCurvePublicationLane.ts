@@ -15,7 +15,7 @@ export function beginNormalCurvePublication(env:Record<string,string|undefined>,
   return {status:'READY' as const,session};
  }catch{return {status:'HELD_SOURCE_OR_PUBLICATION_UNVERIFIED' as const,session:null};}
 }
-export function normalCurveAttempt(session:CurvePublicationSession|null,stayDate:string){return session===null||guardCurveAttempt(session,stayDate);}
+export function normalCurveAttempt(session:CurvePublicationSession|null,sourcePropertyId:string,stayDate:string){return session===null||guardCurveAttempt(session,sourcePropertyId,stayDate);}
 export function finishNormalCurvePublication(session:CurvePublicationSession|null,admission:{status:string;admissionSha256?:string}){
  if(session===null)return {status:'DISABLED_OR_HELD'};
  try{if(admission.status!=='CANONICAL_ADMISSION_RECORDED'||!admission.admissionSha256)throw Error('NORMAL_ADMISSION_NOT_VERIFIED');return finishCurvePublication(session,admission.admissionSha256);}
