@@ -14,6 +14,8 @@ import {createHash} from 'node:crypto';
 import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelection';
 import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
+import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollection} from '../services/bookingPrimaryCollection';
+import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
 import {readAcceptedTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
@@ -156,7 +158,7 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null,publicationGuard?:(stayDate:string)=>boolean): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
   if(targets.length===0)return rows;
   const browser = await chromium.launch({ headless: true });
@@ -178,6 +180,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       if(reserveAttempt&& !reserveAttempt(t,new Date().toISOString())){
         rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;
       }
+      if(publicationGuard&&!publicationGuard(t.checkin)){rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'PUBLICATION_GUARD_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;}
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
@@ -282,8 +285,10 @@ async function run(): Promise<void> {
   const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1'||env['ZMI_2P_QUALITY_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
   const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
+  let optionalJalanStatus='NOT_RUN';
+  let curvePublication:Record<string,unknown>={status:'NOT_RUN'};
   let twoPersonAdmission:ReturnType<typeof recordTwoPersonMarketAdmission>={status:"NOT_RUN",eligibleRows:0};
-  const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
+  const liveGates = bookingPrimaryLiveGates(env);
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
   const liveMode = !dryRun && liveGates && rotationEnabled;
 
@@ -318,7 +323,7 @@ async function run(): Promise<void> {
   };
   const plan: RotatingPlan = buildRotatingPlan({ ...planInput, caps });
   const quoteLane=resolvePricingQuoteLane(env,{now:jst.iso,runDate:jst.date,legacyTargets:plan.selected,caps,config:demandConfig,properties:planInput.liveTargets,lastCollectedAt});
-  const selectedTargets=quoteLane.targets;
+  let selectedTargets=liveMode?enabledCollectionTargets(quoteLane.targets,env):quoteLane.targets;
   // Baseline (multiplier=1) plan for before/after reporting (no extra collection).
   const planBefore: RotatingPlan = buildRotatingPlan({ ...planInput, caps: scaledRotatingCaps(1) });
   // 6/25-style regression visibility: is the spot-check date in candidates/selected?
@@ -352,12 +357,16 @@ async function run(): Promise<void> {
   };
 
   if (liveMode) {
+    const publication=beginNormalCurvePublication(env,{runId,root:process.cwd()});curvePublication={status:publication.status};
+    if(publication.status==='HELD_SOURCE_OR_PUBLICATION_UNVERIFIED')selectedTargets=selectedTargets.filter(t=>t.source!=='booking');
+    try {
     liveExecuted = selectedTargets.length>0;
     const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
     const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readAcceptedTwoPersonPanel(env));
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readAcceptedTwoPersonPanel(env),publication.session?(date)=>normalCurveAttempt(publication.session,date):undefined);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
+    const optionalJalan=await optionalSecondaryCollection(async()=>{
     const browser = jalanMatrix.targets.length>0?await chromium.launch({ headless: true }):null;
     try {
       if(browser===null&&jalanMatrix.targets.length>0)throw Error("JALAN_BROWSER_UNAVAILABLE");
@@ -385,6 +394,8 @@ async function run(): Promise<void> {
         }
       }
     } finally { await browser?.close().catch(() => undefined); }
+    return true;
+    });optionalJalanStatus=jalanMatrix.targets.length>0?optionalJalan.status:'NOT_SELECTED';
 
     // Source-level page caps must match the rotating per-run caps (16X-F: 12/12),
     // not the legacy 09:00-runner defaults (Booking 9), or a full source would be
@@ -418,6 +429,7 @@ async function run(): Promise<void> {
     // Record denial watermarks even when no canonical row was appended. Reservation refusal is not an observation.
     twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
       rows:trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
+    if(publication.session)curvePublication=finishNormalCurvePublication(publication.session,twoPersonAdmission);
     const post = readState();
     const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";
@@ -428,6 +440,7 @@ async function run(): Promise<void> {
       chatgptPublished = pub.status === 0 && String(pub.parsed["decision"] ?? "").includes("ready");
       releaseUrl = String(pub.parsed["release_url"] ?? "");
     }
+    } finally {closeNormalCurvePublication(publication.session);}
   }
 
   const post = readState();
@@ -442,6 +455,7 @@ async function run(): Promise<void> {
     booking_pages: selectedTargets.filter((t) => t.source === "booking").length,
     jalan_pages: selectedTargets.filter((t) => t.source === "jalan").length,
     planned_requests: selectedTargets.length,
+    optional_jalan_collection_status:optionalJalanStatus,
     planned_requests_before: planBefore.selected.length,
     planned_requests_after: selectedTargets.length,
     near_term_dense_candidate_count: plan.near_term_dense_candidate_count,
@@ -479,6 +493,7 @@ async function run(): Promise<void> {
     pricing_output_generated: false, pms_output_generated: false,
     winter_sales_lane_enabled: winterLaneEnabled,
     ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
+    ...(env['ZMI_2P_CURVE_PUBLICATION_ENABLED']==='1'?{two_person_curve_publication:curvePublication}:{}),
     ...(env['ZMI_2P_QUALITY_ENABLED']==='1'?{two_person_admission:twoPersonAdmission}:{}),
     ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false}}:{}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",

@@ -24,11 +24,7 @@ export function recordTwoPersonMarketAdmission(env:Record<string,string|undefine
  let mirror:ReturnType<typeof openReadOnlyMarketMirror>|undefined;
  try{
   if(!/^auto_runner_market_refresh_rotating_\d{8}_\d{6}$/u.test(input.runId)||input.rows.length>1000||input.captures.length>1000)throw Error('ADMISSION_SCOPE');
-  const repo=fileURLToPath(new URL('../../',import.meta.url));
-  const tree=execFileSync('git',['-C',repo,'rev-parse','HEAD:src'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();
-  const codePins=Object.fromEntries(['src','scripts','package.json','package-lock.json','tsconfig.json'].map(name=>[name,execFileSync('git',['-C',repo,'rev-parse','HEAD:'+name],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim()]));
-  const codeSha256=digest(codePins);
-  if(env['ZMI_2P_ACCEPTED_PRODUCER_DIGEST']!==codeSha256||execFileSync('git',['-C',repo,'status','--porcelain','--','src','scripts','package.json','package-lock.json','tsconfig.json'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())throw Error('ADMISSION_SOURCE_NOT_ACCEPTED_OR_DIRTY');
+  const {tree,codeSha256}=assertAcceptedTwoPersonProducer(env);
   const conservation=sealConservationReceipt({runId:input.runId,writtenAt:input.now,producerSourceTreeGitSha:tree,producerCodeSha256:codeSha256,rows:input.rows.map(r=>({rowId:r.rowId,rowHash:r.rowHash}))});
   const conservationDir=resolve(input.root,'.data/history-quality');mkdirSync(conservationDir,{recursive:true,mode:0o700});if(realpathSync(conservationDir)!==conservationDir)throw Error('CONSERVATION_OUTPUT_SYMLINK');
   const conservationPath=join(conservationDir,'append_'+input.runId+'.json');
@@ -86,4 +82,13 @@ export function normalAttemptInvalidations(panel:MarketPanel,captures:readonly R
   }
  }
  return out;
+}
+
+export function assertAcceptedTwoPersonProducer(env:Record<string,string|undefined>){
+  const repo=fileURLToPath(new URL('../../',import.meta.url));
+  const tree=execFileSync('git',['-C',repo,'rev-parse','HEAD:src'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();
+  const codePins=Object.fromEntries(['src','scripts','package.json','package-lock.json','tsconfig.json'].map(name=>[name,execFileSync('git',['-C',repo,'rev-parse','HEAD:'+name],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim()]));
+  const codeSha256=digest(codePins);
+  if(env['ZMI_2P_ACCEPTED_PRODUCER_DIGEST']!==codeSha256||execFileSync('git',['-C',repo,'status','--porcelain','--','src','scripts','package.json','package-lock.json','tsconfig.json'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())throw Error('ADMISSION_SOURCE_NOT_ACCEPTED_OR_DIRTY');
+  return {tree,codeSha256};
 }
