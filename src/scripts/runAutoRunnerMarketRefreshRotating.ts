@@ -200,8 +200,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
             rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
-            rateCellSink.push(rateCellRecord);
-          }catch{rateCellSink.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false});}
+
+          }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
         }
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
@@ -216,6 +216,11 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       }
       let signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
       if(fixedProducts?.length===1){const selected=selectFixedTwoPersonSignals(signals,fixedCapture,fixedProducts[0]!,uiBlock,!uiStateUnverified);signals=selected.signals;if(rateCellRecord)rateCellRecord['fixedProductSelection']=selected.status;}
+      if(rateCellSink){
+        const record=rateCellRecord??{propertySlug:t.property_slug,stayDate:t.checkin,status:'NO_SELECTED_CAPTURE',marketPriceEligible:false};
+        Object.assign(record,{attemptedNetwork:true,completedAt:new Date().toISOString(),pageFinalBlockReason:uiBlock,pageFinalBlockStateVerified:!uiStateUnverified});
+        rateCellSink.push(record);
+      }
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
@@ -274,7 +279,7 @@ async function run(): Promise<void> {
   if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const evidenceOn = isEvidenceSidecarEnabled(env);
-  const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
+  const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1'||env['ZMI_2P_QUALITY_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
   const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
   let twoPersonAdmission:ReturnType<typeof recordTwoPersonMarketAdmission>={status:"NOT_RUN",eligibleRows:0};
@@ -401,8 +406,6 @@ async function run(): Promise<void> {
       // Evidence only for W: rows this run actually appended (not ones another job added first).
       if (evidenceOn && rowsAppended > 0) evidenceSidecar = exportEvidenceSidecar(rowsActuallyAppended(appendPlan.approved_rows, trustedAppend), bookingEvidence, runId);
       dbSynced = isVerifiedTrustedMirror(trustedAppend);
-      twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
-        rows:rowsActuallyAppended(appendPlan.approved_rows,trustedAppend),captures:rateCellCaptures});
       if (dbSynced) { const ctx = runCmd("npm", ["run", "build:ai-context-packs"]); aiContextRefreshed = ctx.status === 0; }
     } else {
       // No-change run: nothing to write, but "synced" still needs a read-only
@@ -412,6 +415,9 @@ async function run(): Promise<void> {
       aiContextRefreshed = dbSynced;
     }
 
+    // Record denial watermarks even when no canonical row was appended. Reservation refusal is not an observation.
+    twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
+      rows:trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
     const post = readState();
     const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";

@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';import {createHash} from 'node:crypto';
 import {sealBookingRateCellCapture,type BookingRateCell} from '../src/services/bookingRateCellEvidence';
-import {admitCanonicalBookingTwoPerson} from '../src/services/bookingTwoPersonMarketAdmission';
+import {admitCanonicalBookingTwoPerson,hasExplicitAllMandatoryTotal} from '../src/services/bookingTwoPersonMarketAdmission';
 import {recordTwoPersonMarketAdmission,readAcceptedTwoPersonPanel} from '../src/services/twoPersonMarketAdmissionLane';
 import {selectFixedTwoPersonSignals} from '../src/services/bookingFixedProductSelection';
 import {marketConditionKey} from '../src/services/marketTwoPersonCurve';import {digest} from '../src/services/marketRowPriceQuality';
@@ -19,3 +19,11 @@ it('does not use a selected room different from the price actually stored in can
 it('does not promote selected-declared-only taxes, member prices or unknown prepayment into a public gross total',()=>{for(const change of [{priceText:'￥20,000 税・手数料込 一般公開料金'},{priceText:'￥20,000 税・手数料込 すべての税金と料金が含まれています。会員限定料金 Genius'},{policyText:'お食事は含まれておりません。返金不可。'}]){const f=fixture();f.capture=sealBookingRateCellCapture({...f.capture,cells:[{...f.capture.cells[0]!,...change}]});f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).observation).toBeNull();}});
 it('fixed row selection ignores cheaper suite/replacement and leaves hotel-level sold-out inference untouched',()=>{const f=fixture(),original={primaryPriceCandidate:{numericValue:10000},soldOutOrUnavailableDetected:false} as BookingRenderedDomSignals;const selected=selectFixedTwoPersonSignals(original,f.capture,f.product,null,true);expect(selected.signals.primaryPriceCandidate?.numericValue).toBe(20000);const missing=selectFixedTwoPersonSignals(original,f.capture,{...f.product,productId:'999'},null,true);expect(missing.signals.primaryPriceCandidate).toBeNull();expect(missing.signals.soldOutOrUnavailableDetected).toBe(false);});
 it('disabled admission lane does no file I/O and unavailable secondary OTA/mirror never admits a price',()=>{expect(readAcceptedTwoPersonPanel({})).toBeNull();const input={runId:'fixture',now:'invalid',root:'/no-such-fixture',captureDir:'/no-such-fixture',dbPath:'/no-such-fixture',mirrorExact:false,rows:[],captures:[]};expect(recordTwoPersonMarketAdmission({},input).status).toBe('DISABLED');expect(recordTwoPersonMarketAdmission({ZMI_2P_QUALITY_ENABLED:'1'},input).status).toBe('ADMISSION_UNVERIFIED_NO_PRICE_INPUT');});
+
+it('rejects negated or contradictory all-tax declarations in the selected price block',()=>{
+ for(const priceText of ['￥20,000 税・手数料込。すべての税金と料金が含まれません。一般公開料金','￥20,000 税・手数料込。すべての税金と料金が含まれていません。一般公開料金',
+  '￥20,000 税・手数料込。すべての税金と料金が含まれています。サービス料金は別途支払い。一般公開料金']){
+  const f=fixture();f.capture=sealBookingRateCellCapture({...f.capture,cells:[{...f.capture.cells[0]!,priceText}]});f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');
+  expect(hasExplicitAllMandatoryTotal(priceText)).toBe(false);expect(admitCanonicalBookingTwoPerson(f).observation).toBeNull();
+ }
+});

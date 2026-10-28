@@ -23,8 +23,7 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
  const cell=cells[0]!,d=deriveBookingRateCell(c,cell);
  if(!d.tupleAndProductBound)return no('SELECTED_PRODUCT_FACTS_UNVERIFIED');
  // A selected-row tax item is not proof that ALL mandatory fees are included. Require the explicit global declaration.
- if(!/すべての税[金・および]*[・とおよび]*手数料.*含|すべての税金と料金が含まれ/iu.test(cell.priceText)
-  ||d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)return no('ALL_MANDATORY_TOTAL_NOT_PROVED');
+ if(!hasExplicitAllMandatoryTotal(cell.priceText)||d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)return no('ALL_MANDATORY_TOTAL_NOT_PROVED');
  if(d.memberConditional||!/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText))return no('PUBLIC_PRICE_NOT_PROVED');
  if(d.meal!=='ROOM_ONLY'||!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))return no('CONDITIONS_NOT_KNOWN');
  const prepaid=/予約時に.*支払|事前に.*全額.*支払/u.test(cell.policyText??''),notPrepaid=/事前支払い不要|前払い不要/u.test(cell.policyText??'');
@@ -39,4 +38,11 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
   ...conditions,result:'AVAILABLE',totalJpy:d.currentDisplayedJpy};
  const quality:QualityEntry={rowId:r.rowId,rowHash:r.rowHash,status:'VERIFIED_SOURCE',observedAt:observation.observedAt,ingestedAt:observation.ingestedAt,receiptSha256:observation.receiptSha256,observationSha256:digest(observation)};
  return {status:'VERIFIED_CANONICAL_TWO_PERSON_FACT' as const,reason:'SOURCE_RECEIPT_AND_CANONICAL_MIRROR_IDENTITY_MATCH',observation,quality};
+}
+
+export function hasExplicitAllMandatoryTotal(text:string):boolean{
+ const taxText=text.normalize('NFKC');
+ const affirmative=/(?:すべての税金と料金|すべての税金[・とおよび]*手数料)が含まれています(?:[。.!！\s]|$)/u.test(taxText);
+ const exclusion=/(?:税|手数料|料金|入湯税)[^。.!！\n]{0,80}(?:含まれません|含まれていません|含まない|別途|別料金|除外|現地(?:で)?支払|含まれておりません)|(?:exclud(?:e[ds]?|ing)|not includ(?:ed|ing)|pay(?:able)? (?:at|on))[^.\n]{0,80}(?:tax|fee|charge)/iu.test(taxText);
+ return affirmative&&!exclusion;
 }

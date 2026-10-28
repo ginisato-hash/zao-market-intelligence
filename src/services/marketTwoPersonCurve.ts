@@ -20,6 +20,11 @@ export interface TwoPersonObservation extends RowIdentity {
  discount:'PUBLIC'|'PUBLIC_PROMO';tax:'ALL_MANDATORY_INCLUDED';
  result:'AVAILABLE'|'PRODUCT_UNAVAILABLE'|'CONDITION_UNAVAILABLE'|'FETCH_FAILED'|'NOT_OBSERVED';totalJpy:number|null;
 }
+// Denial-only watermarks from actual normal requests. They never imply sold-out, price zero or source-price authenticity.
+export interface TwoPersonInvalidation {
+ propertyId:string;sourcePropertyId:string;source:string;productId:string;ratePlanId:string;conditionKey:string;stayDate:string;
+ observedAt:string;ingestedAt:string;reason:string;sourceEvidenceSha256:string;
+}
 export interface CurveQualityPolicy {
  version:string;maxAgeHours:number;minProperties:number;minEffectiveSampleSize:number;minKnownGroups:number;
  minMatchedCoverage:number;maxConcentration:number;maxUnknownWeight:number;maxDispersionLog:number;maxLeaveOneOutLog:number;
@@ -65,7 +70,7 @@ export function marketConditionKey(r:Pick<TwoPersonObservation,'meal'|'cancellat
 }
 export function buildTwoPersonCurve(input:{
  panel:MarketPanel;policy:CurveQualityPolicy;reference:CurveReference;asOf:string;stayDates:readonly string[];
- observations:readonly TwoPersonObservation[];qualityLedger:QualityLedger;expectedQualitySha256:string;trustedReceiptSha256:ReadonlySet<string>;
+ observations:readonly TwoPersonObservation[];invalidations?:readonly TwoPersonInvalidation[];qualityLedger:QualityLedger;expectedQualitySha256:string;trustedReceiptSha256:ReadonlySet<string>;
 }){
  const {panel,policy,reference}=input;validatePanel(panel);validatePolicy(policy);
  const at=instant(input.asOf),anchorAt=instant(reference.asOf);
@@ -88,24 +93,39 @@ export function buildTwoPersonCurve(input:{
   const k=key(r)+'|'+r.stayDate;put(current,k,r,admission.eligible);
   if(instant(r.observedAt)<=anchorAt&&instant(r.ingestedAt)<=anchorAt)put(anchor,k,r,admission.eligible);
  }
+ const invalidations=new Map<string,TwoPersonInvalidation>();
+ for(const r of input.invalidations??[]){
+  if(!panelByKey.has(key(r))||!validDate(r.stayDate)||!Number.isFinite(instant(r.observedAt))||!Number.isFinite(instant(r.ingestedAt))
+   ||instant(r.ingestedAt)<instant(r.observedAt)||!token(r.reason)||!hashOk(r.sourceEvidenceSha256))throw Error('INVALIDATION_CONTRACT');
+  if(instant(r.observedAt)>at||instant(r.ingestedAt)>at)continue;
+  const k=key(r)+'|'+r.stayDate,old=invalidations.get(k);if(!old||instant(r.observedAt)>instant(old.observedAt))invalidations.set(k,r);
+ }
  const anchorRows=[...anchor.values()].map(x=>[x.r.rowId,x.r.rowHash,x.r.receiptSha256]).sort((a,b)=>a[0]!.localeCompare(b[0]!));
  if(digest(anchorRows)!==reference.anchorSnapshotSha256)throw Error('ANCHOR_SNAPSHOT_BINDING');
  const anchorExpired=(r:TwoPersonObservation)=>anchorAt-instant(r.observedAt)>policy.maxAgeHours*3600000;
  const totalWeight=panel.products.reduce((n,p)=>n+p.weight,0);
  const curves=input.stayDates.map(stayDate=>{
   const reasons:string[]=[],property=new Map<string,{v:number;w:number;group:string|null;hashes:string[];observed:number[];ingested:number[]}>();
-  let available=0,productUnavailable=0,conditionUnavailable=0,fetchFailed=0,notObserved=0;
+  let available=0,productUnavailable=0,conditionUnavailable=0,fetchFailed=0,notObserved=0,invalidatedProducts=0;
+  const anchorCohort:string[]=[],matchedCohort:string[]=[];
   for(const p of panel.products){
-   const c=current.get(key(p)+'|'+stayDate),a=anchor.get(key(p)+'|'+stayDate);
+   const k=key(p)+'|'+stayDate,c=current.get(k),a=anchor.get(k),invalid=invalidations.get(k);
+   const anchorSupported=!!a&&a.admitted&&!a.conflict&&!anchorExpired(a.r)&&a.r.result==='AVAILABLE'
+    &&!(invalid&&instant(invalid.observedAt)<=anchorAt&&instant(invalid.ingestedAt)<=anchorAt&&instant(invalid.observedAt)>=instant(a.r.observedAt));
+   if(anchorSupported)anchorCohort.push(key(p));
+   if(invalid&&(!c||instant(invalid.observedAt)>=instant(c.r.observedAt))){invalidatedProducts++;continue;}
    if(!c){notObserved++;continue;}
    if(c.r.result==='AVAILABLE')available++;else if(c.r.result==='PRODUCT_UNAVAILABLE')productUnavailable++;else if(c.r.result==='CONDITION_UNAVAILABLE')conditionUnavailable++;else if(c.r.result==='FETCH_FAILED')fetchFailed++;else notObserved++;
-   if(!a||!a.admitted||!c.admitted||a.conflict||c.conflict||anchorExpired(a.r)||at-instant(c.r.observedAt)>policy.maxAgeHours*3600000
+   if(!a||!anchorSupported||!c.admitted||c.conflict||at-instant(c.r.observedAt)>policy.maxAgeHours*3600000
     ||a.r.result!=='AVAILABLE'||c.r.result!=='AVAILABLE'){continue;}
    if(digest([a.r.meal,a.r.cancellation,a.r.prepayment,a.r.discount,a.r.tax])!==digest([c.r.meal,c.r.cancellation,c.r.prepayment,c.r.discount,c.r.tax])){drop('CONDITIONS_CHANGED_WITHOUT_SERIES_VERSION');continue;}
+   matchedCohort.push(key(p));
    const v=Math.log(c.r.totalJpy!/a.r.totalJpy!),old=property.get(p.propertyId);
    if(old){old.v+=v*p.weight;old.w+=p.weight;old.hashes.push(a.r.rowId+'|'+a.r.rowHash,c.r.rowId+'|'+c.r.rowHash);old.observed.push(instant(c.r.observedAt));old.ingested.push(instant(c.r.ingestedAt));}
    else property.set(p.propertyId,{v:v*p.weight,w:p.weight,group:p.groupId,hashes:[a.r.rowId+'|'+a.r.rowHash,c.r.rowId+'|'+c.r.rowHash],observed:[instant(c.r.observedAt)],ingested:[instant(c.r.ingestedAt)]});
   }
+  // Freeze only this date's proven anchor cohort, not every regional property. Missing members cannot manufacture a different index.
+  if(anchorCohort.length!==matchedCohort.length)reasons.push('ANCHOR_COHORT_INCOMPLETE');
   const props=[...property].map(([id,x])=>({id,...x,v:x.v/x.w})),weight=props.reduce((s,x)=>s+x.w,0),matchedCoverage=weight/totalWeight;
   const group=new Map<string,number>();for(const x of props){const k=x.group??'__UNKNOWN__';group.set(k,(group.get(k)??0)+x.w);}
   const knownGroups=[...group.keys()].filter(k=>k!=='__UNKNOWN__').length,unknownWeight=weight?(group.get('__UNKNOWN__')??0)/weight:0;
@@ -127,15 +147,16 @@ export function buildTwoPersonCurve(input:{
   return {stayDate,asOf:input.asOf,curveIndex:logIndex===null?null:Math.exp(logIndex),referenceVersion:reference.version,anchorVersion:reference.version,
    baselineBundleSha256:reference.baselineBundleSha256,mode:reference.mode,
    confidence:reasons.length?0:Math.min(1,matchedCoverage*(1-concentration)),eligible:reasons.length===0,reasonCodes:reasons,
+   anchorCohortDigest:digest(anchorCohort.sort()),matchedCohortDigest:digest(matchedCohort.sort()),anchorProducts:anchorCohort.length,matchedProducts:matchedCohort.length,
    nProperties:props.length,effectiveSampleSize,knownGroups,concentration,unknownWeight,matchedCoverage,dispersion,
    leaveOnePropertyOutLog:leaveProperty,leaveOneGroupOutLog:leaveGroup,
    observedBounds:obs.length?[new Date(Math.min(...obs)).toISOString(),new Date(Math.max(...obs)).toISOString()]:null,
    ingestedBounds:ing.length?[new Date(Math.min(...ing)).toISOString(),new Date(Math.max(...ing)).toISOString()]:null,
    validUntil,panelVersion:panel.version,inputRowSetDigest:digest(rowIds),
-   productAvailability:{available,productUnavailable,conditionUnavailable,fetchFailed,notObserved,hotelOccupancyRate:null}};
+   productAvailability:{available,productUnavailable,conditionUnavailable,fetchFailed,notObserved,invalidatedProducts,hotelOccupancyRate:null}};
  });
  const body={schema:CURVE_SCHEMA,asOf:input.asOf,panelVersion:panel.version,panelSha256:panel.panelSha256,reference,qualityPolicyVersion:policy.version,
-  qualityPolicySha256:digest(policy),qualityLedgerSha256:input.expectedQualitySha256,sourceSnapshotSha:digest([...seen].sort(([a],[b])=>a.localeCompare(b))),curves,exclusions,
+  qualityPolicySha256:digest(policy),qualityLedgerSha256:input.expectedQualitySha256,sourceSnapshotSha:digest({observations:[...seen].sort(([a],[b])=>a.localeCompare(b)),invalidations:[...invalidations].sort(([a],[b])=>a.localeCompare(b))}),curves,exclusions,
   priceAuthority:false as const,demandInference:false as const,axis:'SAME_STAY_DATE_OBSERVATION_TIME_CHANGE' as const};
  return {...body,curveSha256:digest(body)};
 }

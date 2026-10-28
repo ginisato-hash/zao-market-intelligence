@@ -6,8 +6,8 @@ import {fileURLToPath} from 'node:url';
 import {sealConservationReceipt} from './marketConservationReceipt';
 import {join,resolve,sep} from 'node:path';
 import {admitCanonicalBookingTwoPerson} from './bookingTwoPersonMarketAdmission';
-import {sealQualityLedger,digest} from './marketRowPriceQuality';
-import {validatePanel,type MarketPanel} from './marketTwoPersonCurve';
+import {sealQualityLedger,digest,instant} from './marketRowPriceQuality';
+import {validatePanel,type MarketPanel,type TwoPersonInvalidation} from './marketTwoPersonCurve';
 import {openReadOnlyMarketMirror} from './marketMirrorReadOnly';
 import type {HistoryRow} from './localHistorySchemaDesign';
 import type {BookingRateCellCapture} from './bookingRateCellEvidence';
@@ -34,13 +34,13 @@ export function recordTwoPersonMarketAdmission(env:Record<string,string|undefine
   const conservationPath=join(conservationDir,'append_'+input.runId+'.json');
   if(existsSync(conservationPath)){if(digest(JSON.parse(bounded(conservationPath,2*1024*1024).toString('utf8')))!==digest(conservation))throw Error('CONSERVATION_RECEIPT_CONFLICT');}
   else{const fd=openSync(conservationPath,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o400);try{writeFileSync(fd,JSON.stringify(conservation)+'\n');fsyncSync(fd);}finally{closeSync(fd);}}
-  if(!input.mirrorExact)return {status:'MIRROR_NOT_EXACT_NO_PRICE_ADMISSION',eligibleRows:0,conservationReceiptSha256:conservation.receiptSha256};
   const panelPath=env['ZMI_2P_PANEL_PATH'];if(!panelPath||!env['ZMI_2P_PANEL_SHA256'])throw Error('ACCEPTED_PANEL_NOT_CONFIGURED');
   const bytes=bounded(panelPath,256*1024);if(createHash('sha256').update(bytes).digest('hex')!==env['ZMI_2P_PANEL_SHA256'])throw Error('ACCEPTED_PANEL_RAW_HASH');
   const panel=JSON.parse(bytes.toString('utf8')) as MarketPanel;validatePanel(panel);
-  mirror=openReadOnlyMarketMirror(input.dbPath);const root=realpathSync(input.captureDir),facts=[],quality=[],exclusions:Record<string,number>={};
+  if(input.mirrorExact)mirror=openReadOnlyMarketMirror(input.dbPath);
+  const root=realpathSync(input.captureDir),facts=[],quality=[],exclusions:Record<string,number>={};
   const no=(r:string)=>{exclusions[r]=(exclusions[r]??0)+1;};
-  for(const row of input.rows){
+  for(const row of input.mirrorExact?input.rows:[]){
    if(row.source!=='booking'){no('SECONDARY_OTA_NOT_REQUIRED');continue;}
    const captures=input.captures.filter(c=>c.propertySlug===row.sourceSlugOrCode&&c.stayDate===row.checkin&&typeof c.capturePath==='string');
    if(captures.length!==1){no('NORMAL_RUN_CAPTURE_NOT_UNIQUE');continue;}
@@ -48,20 +48,42 @@ export function recordTwoPersonMarketAdmission(env:Record<string,string|undefine
    const raw=bounded(path,64000),capture=JSON.parse(raw.toString('utf8')) as BookingRateCellCapture;
    const products=panel.products.filter(p=>p.sourcePropertyId===row.sourceSlugOrCode&&p.source==='booking');
    if(products.length!==1){no('FIXED_PANEL_PRODUCT_NOT_UNIQUE');continue;}
-   const identity=mirror.db.prepare('SELECT row_id,row_hash FROM market_signal_history WHERE row_id=?').get(row.rowId) as {row_id:string;row_hash:string}|undefined;
+   const identity=mirror!.db.prepare('SELECT row_id,row_hash FROM market_signal_history WHERE row_id=?').get(row.rowId) as {row_id:string;row_hash:string}|undefined;
    const fact=admitCanonicalBookingTwoPerson({row,mirrorIdentity:identity?{rowId:identity.row_id,rowHash:identity.row_hash}:null,capture,rawCaptureBytes:raw,
     independentRawCaptureSha256:String(cap.rawSha256??''),pageFinalBlockReason:typeof cap.pageFinalBlockReason==='string'?cap.pageFinalBlockReason:null,
     pageFinalBlockStateVerified:cap.pageFinalBlockStateVerified===true,product:products[0]!,standardProductProofVerified:true,ingestedAt:input.now});
    if(fact.observation&&fact.quality){facts.push(fact.observation);quality.push(fact.quality);}else no(fact.reason);
   }
-  mirror.assertUnchanged();const ledger=sealQualityLedger(quality);
-  const body={schema:'ZMI_CANONICAL_2P_ADMISSION_V1',runId:input.runId,ingestedAt:input.now,panelSha256:panel.panelSha256,source:'NORMAL_TRUSTED_APPEND_AND_EXACT_MIRROR',facts,qualityLedger:ledger,exclusions,marketPriceAuthority:false};
+  mirror?.assertUnchanged();const ledger=sealQualityLedger(quality);
+  const invalidations=normalAttemptInvalidations(panel,input.captures,input.now,facts);
+  if(!input.mirrorExact)no('MIRROR_NOT_EXACT_NO_PRICE_ADMISSION');
+  const body={schema:'ZMI_CANONICAL_2P_ADMISSION_V1',runId:input.runId,ingestedAt:input.now,panelSha256:panel.panelSha256,producerCodeSha256:codeSha256,mirrorExactVerified:input.mirrorExact,invalidations,source:'NORMAL_TRUSTED_APPEND_AND_EXACT_MIRROR',facts,qualityLedger:ledger,exclusions,marketPriceAuthority:false};
   const sha256=digest(body),out={...body,admissionSha256:sha256};
   const dir=resolve(input.root,'.data/history-quality');mkdirSync(dir,{recursive:true,mode:0o700});
   if(realpathSync(dir)!==dir)throw Error('ADMISSION_OUTPUT_SYMLINK');
   const dest=join(dir,input.runId+'.json'),encoded=JSON.stringify(out)+'\n';
   if(existsSync(dest)){if(digest(JSON.parse(bounded(dest,4*1024*1024).toString('utf8')))!==digest(out))throw Error('ADMISSION_RECEIPT_CONFLICT');}
   else {const fd=openSync(dest,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o400);try{writeFileSync(fd,encoded);fsyncSync(fd);}finally{closeSync(fd);}const d=openSync(dir,constants.O_RDONLY);try{fsyncSync(d);}finally{closeSync(d);}}
-  mirror.assertUnchanged();return {status:'CANONICAL_ADMISSION_RECORDED',eligibleRows:facts.length,exclusions,qualityLedgerSha256:ledger.ledgerSha256,admissionSha256:sha256};
+  mirror?.assertUnchanged();return {status:'CANONICAL_ADMISSION_RECORDED',eligibleRows:facts.length,exclusions,qualityLedgerSha256:ledger.ledgerSha256,admissionSha256:sha256};
  }catch{return {status:'ADMISSION_UNVERIFIED_NO_PRICE_INPUT',eligibleRows:0};}finally{mirror?.close();}
+}
+
+/** This is denial only: an actually attempted request without an admitted fact invalidates its old quote. */
+export function normalAttemptInvalidations(panel:MarketPanel,captures:readonly Record<string,unknown>[],ingestedAt:string,
+ facts:readonly {sourcePropertyId:string;stayDate:string}[]):TwoPersonInvalidation[]{
+ if(!Number.isFinite(instant(ingestedAt))||captures.length>1000)throw Error('ATTEMPT_BUDGET_OR_TIME');
+ const out:TwoPersonInvalidation[]=[];
+ for(const c of captures){
+  if(c.attemptedNetwork!==true||c.status==='REQUEST_RESERVATION_REFUSED_NO_NETWORK')continue;
+  const at=String(c.completedAt??'');
+  if(!Number.isFinite(instant(at))||instant(at)>instant(ingestedAt)||instant(ingestedAt)-instant(at)>2*3600000)throw Error('ATTEMPT_TIME_UNVERIFIED');
+  if(facts.some(f=>f.sourcePropertyId===c.propertySlug&&f.stayDate===c.stayDate))continue;
+  for(const p of panel.products.filter(p=>p.source==='booking'&&p.sourcePropertyId===c.propertySlug)){
+   out.push({propertyId:p.propertyId,sourcePropertyId:p.sourcePropertyId,source:p.source,productId:p.productId,ratePlanId:p.ratePlanId,conditionKey:p.conditionKey,
+    stayDate:String(c.stayDate),observedAt:at,ingestedAt,reason:'NORMAL_ATTEMPT_WITHOUT_ADMITTED_PRICE',
+    sourceEvidenceSha256:digest({propertySlug:c.propertySlug,stayDate:c.stayDate,attemptedNetwork:true,completedAt:at,rawSha256:c.rawSha256??null,
+     status:c.status??null,fixedProductSelection:c.fixedProductSelection??null,pageFinalBlockReason:c.pageFinalBlockReason??null,pageFinalBlockStateVerified:c.pageFinalBlockStateVerified===true})});
+  }
+ }
+ return out;
 }
