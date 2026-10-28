@@ -1,5 +1,6 @@
+import {readBoundedStableFd} from './boundedStableFile';
 // Existing budgets/backoff/cooldown remain binding. Default OFF does no file I/O.
-import { constants, existsSync, fstatSync, openSync, closeSync, readFileSync, mkdirSync, fsyncSync, writeSync,statSync,unlinkSync } from 'node:fs';
+import { constants, existsSync, fstatSync, openSync, closeSync, mkdirSync, fsyncSync, writeSync,statSync,unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {buildRegionalRegistry} from './regionalMarketRegistry';
@@ -28,7 +29,7 @@ export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
   try{
    fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);const before=fstatSync(fd,{bigint:true});
    if(!before.isFile()||before.size>1024n*1024n)throw Error('BUDGET');
-   const bytes=readFileSync(fd),after=fstatSync(fd,{bigint:true});
+   const bytes=readBoundedStableFd(fd,1024*1024),after=fstatSync(fd,{bigint:true});
    if(bytes.length>1024*1024||before.size!==after.size||before.mtimeNs!==after.mtimeNs)throw Error('CHANGED');
    for(const line of bytes.toString('utf8').split('\n')){
     if(!line)continue;if(line.length>1024||rows.length>=20000)throw Error('BUDGET');

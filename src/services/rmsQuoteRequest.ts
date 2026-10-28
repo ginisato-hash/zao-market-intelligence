@@ -1,5 +1,6 @@
+import {readBoundedStableFd} from './boundedStableFile';
 // Local, non-PII RMS -> collector request. It conveys collection priorities, never pricing authority.
-import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync } from 'node:fs';
 import { canonicalJson } from './marketEvidenceSidecar';
 import { createHash } from 'node:crypto';
 import type { PricingQuoteNeed } from './usefulQuoteRefreshPlanner';
@@ -45,7 +46,7 @@ export function readRmsQuoteRequest(path: string, now: string, accepted: Paramet
         fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         const before = fstatSync(fd, { bigint: true });
         if (!before.isFile() || before.size > 1024n * 1024n) throw Error('BUDGET');
-        const bytes = readFileSync(fd), after = fstatSync(fd, { bigint: true });
+        const bytes = readBoundedStableFd(fd,1024*1024), after = fstatSync(fd, { bigint: true });
         if (bytes.length > 1024 * 1024 || before.size !== after.size || before.mtimeNs !== after.mtimeNs) throw Error('CHANGED');
         return validateRmsQuoteRequest(JSON.parse(bytes.toString('utf8')), now, accepted);
     } catch { throw Error('RMS_QUOTE_REQUEST_UNAVAILABLE_OR_INVALID'); }

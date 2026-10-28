@@ -1,5 +1,6 @@
 // Normal post-append hook only. Default OFF: no I/O. Mirror equality and price authenticity stay separate.
-import {constants,openSync,closeSync,fstatSync,readFileSync,mkdirSync,writeFileSync,fsyncSync,realpathSync,existsSync} from 'node:fs';
+import {readBoundedStableFile as bounded} from './boundedStableFile';
+import {constants,openSync,closeSync,mkdirSync,writeFileSync,fsyncSync,realpathSync,existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -11,7 +12,6 @@ import {validatePanel,type MarketPanel,type TwoPersonInvalidation} from './marke
 import {openReadOnlyMarketMirror} from './marketMirrorReadOnly';
 import type {HistoryRow} from './localHistorySchemaDesign';
 import type {BookingRateCellCapture} from './bookingRateCellEvidence';
-function bounded(path:string,max:number){const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const a=fstatSync(fd,{bigint:true});if(!a.isFile()||a.size>BigInt(max))throw Error('ADMISSION_FILE_BUDGET');const b=readFileSync(fd),z=fstatSync(fd,{bigint:true});if(b.length>max||a.dev!==z.dev||a.ino!==z.ino||a.size!==z.size||a.mtimeNs!==z.mtimeNs||a.ctimeNs!==z.ctimeNs)throw Error('ADMISSION_FILE_CHANGED');return b;}finally{closeSync(fd);}}
 export function readAcceptedTwoPersonPanel(env:Record<string,string|undefined>):MarketPanel|null{
  if(env['ZMI_2P_QUALITY_ENABLED']!=='1')return null;
  try{const path=env['ZMI_2P_PANEL_PATH'],expected=env['ZMI_2P_PANEL_SHA256'];if(!path||!expected)throw Error('ACCEPTED_PANEL_NOT_CONFIGURED');
