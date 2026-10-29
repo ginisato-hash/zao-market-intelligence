@@ -9,19 +9,20 @@ const strings={'.hprt-table-cell-occupancy':'人数: 2','.hprt-table-cell-price'
 const row={getBoundingClientRect:()=>({width:1,height:1}),getAttribute:k=>k==='data-block-id'?block:null,
  querySelector:s=>s==='[id^="room_type_id_"]'?{id:'room_type_id_111',innerText:'ツインルーム',closest:()=>({innerText:'ツインルーム 定員2名'})}:
  s==='.hprt-table-cell-conditions button[aria-controls]'?{getAttribute:k=>k==='aria-controls'?policyId:null}:strings[s]?{innerText:strings[s]}:null,
- querySelectorAll:s=>s==='select option'?[{value:'1',textContent:'1 (￥10,000)'}]:[]};
-let expanded=false;
+ querySelectorAll:s=>s==='select option'?[{value:'1',textContent:'1 (￥10,000)',disabled:false,closest:selector=>selector==='select'?{disabled:false,getAttribute:()=>null,getBoundingClientRect:()=>({width:1,height:1})}:null}]:[]};
+let expanded=false,dialogVisible=false;
 const dateButton={getAttribute:async()=>String(expanded),click:async()=>{expanded=!expanded;}};
-const dialog={waitFor:async()=>{},evaluate:async()=>policyId,innerText:async()=>'お食事は含まれておりません。キャンセル無料。',isVisible:async()=>true,getByRole:()=>({click:async()=>{}})};
+const dialog={waitFor:async()=>{},evaluate:async()=>policyId,innerText:async()=>'お食事は含まれておりません。キャンセル無料。',isVisible:async()=>dialogVisible,getByRole:()=>({click:async()=>{dialogVisible=false;}})};
 const page={on(){},off(){},url:()=> 'https://www.booking.com/hotel/jp/fixture-hotel.ja.html?checkin=2027-01-15&checkout=2027-01-16&group_adults=2&group_children=0&no_rooms=1&selected_currency=JPY',title:async()=> 'Fixture hotel',
- getByRole:()=>({isVisible:async()=>false}),
+ getByRole:()=>({isVisible:async()=>dialogVisible}),
  locator:s=>{
+  if(s==='[role="dialog"]:visible')return {count:async()=>dialogVisible?1:0};
   if(s==='body')return {innerText:async()=> 'Fixture hotel'};
   if(s==='#hprt-table tr[data-block-id]')return {count:async()=>1,evaluateAll:async fn=>{serialized.push(fn.toString());return runInNewContext('('+fn.toString()+')',{}, {timeout:1000})([row]);}};
   if(s==='#hp_availability_style_changes')return {getByTestId:()=>dateButton,getByRole:()=>({getAttribute:async()=> '宿泊人数と部屋数。選択済みの内容：大人2名 · 子供0名 · 1部屋'})};
   if(s==='[role="gridcell"][aria-selected="true"] [data-date]')return {evaluateAll:async()=>[{date:'2027-01-15',label:'チェックイン日'},{date:'2027-01-16',label:'チェックアウト日'}]};
   if(s===`[id="${policyId}"]:visible`)return {getByRole:()=>dialog};
-  if(s.startsWith('#hprt-table tr[data-block-id="'))return {click:async()=>{}};
+  if(s.startsWith('#hprt-table tr[data-block-id="'))return {click:async()=>{dialogVisible=true;}};
   throw Error('UNEXPECTED_OFFLINE_SELECTOR:'+s);
  }};
 const capture=await captureBookingRateCells(page,{propertySlug:'fixture-hotel',checkin:'2027-01-15',checkout:'2027-01-16',observedAt:'2026-10-29T00:00:00Z'});
