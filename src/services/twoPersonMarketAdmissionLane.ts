@@ -18,6 +18,11 @@ export function readAcceptedTwoPersonPanel(env:Record<string,string|undefined>):
  const bytes=bounded(path,256*1024);if(createHash('sha256').update(bytes).digest('hex')!==expected)throw Error('ACCEPTED_PANEL_RAW_HASH');
  const panel=JSON.parse(bytes.toString('utf8')) as MarketPanel;validatePanel(panel);return panel;}catch{return null;}
 }
+/** Capture-only accepted panel targeting is independent of price-quality enablement. No admission or authority. */
+export function readCaptureTwoPersonPanel(env:Record<string,string|undefined>):MarketPanel|null{
+ if(env['ZMI_RATE_CELL_EVIDENCE_ENABLED']!=='1'&&env['ZMI_2P_QUALITY_ENABLED']!=='1')return null;
+ return readAcceptedTwoPersonPanel({...env,ZMI_2P_QUALITY_ENABLED:'1'});
+}
 export function recordTwoPersonMarketAdmission(env:Record<string,string|undefined>,input:{runId:string;now:string;root:string;captureDir:string;dbPath:string;mirrorExact:boolean;rows:readonly HistoryRow[];captures:readonly Record<string,unknown>[]}){
  if(env['ZMI_2P_QUALITY_ENABLED']!=='1')return {status:'DISABLED',eligibleRows:0};
 

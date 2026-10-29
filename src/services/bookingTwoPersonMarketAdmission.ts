@@ -1,3 +1,4 @@
+import {readBookingProductFacts} from './bookingProductObservability';
 // One route only: already accepted canonical row + SAME selected source capture + exact mirror identity.
 // Missing commercial facts remain ineligible. No alternate CSV/usable-flag bypass or extra browser request.
 import {createHash} from 'node:crypto';
@@ -21,11 +22,13 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
  if(!Number.isFinite(instant(input.ingestedAt))||instant(c.observedAt)<instant(r.collectedAtJst)||instant(c.observedAt)>instant(input.ingestedAt)||instant(c.observedAt)-instant(r.collectedAtJst)>2*3600000||instant(input.ingestedAt)-instant(c.observedAt)>2*3600000)return no('SOURCE_CAPTURE_TIME');
  const cells=c.cells.filter(x=>{const a=x.blockId.split('_');return a[0]===p.productId&&a[1]===p.ratePlanId;});
  if(cells.length!==1)return no('FIXED_PRODUCT_NOT_UNIQUE_OR_UNAVAILABLE');
- const cell=cells[0]!,d=deriveBookingRateCell(c,cell);
+ const cell=cells[0]!,d=deriveBookingRateCell(c,cell),extra=readBookingProductFacts(c,cell,d);
+ if(c.parserVersion==='booking-rate-cell-v4'&&(!extra.roomCapacityProved||extra.maximumAdults!==2))return no('FRESH_STANDARD_CAPACITY_NOT_PROVED');
  if(!d.tupleAndProductBound)return no('SELECTED_PRODUCT_FACTS_UNVERIFIED');
+ if(c.parserVersion==='booking-rate-cell-v4'&&(extra.allMandatoryText===null||!hasExplicitAllMandatoryTotal(extra.allMandatoryText)))return no('SELECTED_TOTAL_TAX_INFORMATION_NOT_PROVED');
  // A selected-row tax item is not proof that ALL mandatory fees are included. Require the explicit global declaration.
- if(!hasExplicitAllMandatoryTotal(cell.priceText)||d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)return no('ALL_MANDATORY_TOTAL_NOT_PROVED');
- if(d.memberConditional||!/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText))return no('PUBLIC_PRICE_NOT_PROVED');
+ if(!hasExplicitAllMandatoryTotal(cell.priceText+'。'+(extra.allMandatoryText??''))||d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)return no('ALL_MANDATORY_TOTAL_NOT_PROVED');
+ if(d.memberConditional||(c.parserVersion==='booking-rate-cell-v4'?!extra.publicPriceProved:!/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText)))return no('PUBLIC_PRICE_NOT_PROVED');
  if(d.meal!=='ROOM_ONLY'||!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))return no('CONDITIONS_NOT_KNOWN');
  const prepayment=deriveBookingPrepayment(cell.policyText);
  if(prepayment==='UNKNOWN')return no('PREPAYMENT_UNKNOWN_OR_CONFLICT');
@@ -45,5 +48,6 @@ export function hasExplicitAllMandatoryTotal(text:string):boolean{
  const taxText=text.normalize('NFKC');
  const affirmative=/(?:すべての税金と料金|すべての税金[・とおよび]*手数料)が含まれています(?:[。.!！\s]|$)/u.test(taxText);
  const exclusion=/(?:税|手数料|料金|入湯税)[^。.!！\n]{0,80}(?:含まれません|含まれていません|含まない|別途|別料金|除外|現地(?:で)?支払|含まれておりません)|(?:exclud(?:e[ds]?|ing)|not includ(?:ed|ing)|pay(?:able)? (?:at|on))[^.\n]{0,80}(?:tax|fee|charge)/iu.test(taxText);
- return affirmative&&!exclusion;
+ const prefixExclusion=/(?:別途|別料金|含まれないもの|除外されるもの|追加(?:の)?(?:料金|費用)|(?:additional|extra) (?:fees?|charges?)|not included|exclud(?:ed|ing)|payable (?:at|on))/iu.test(taxText);
+ return affirmative&&!exclusion&&!prefixExclusion;
 }

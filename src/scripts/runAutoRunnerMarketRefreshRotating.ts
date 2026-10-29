@@ -1,3 +1,4 @@
+import {createAnonymousBookingCaptureContext} from '../services/bookingProductObservability';
 // Phase AUTO-RUNNER16X — rotating 2-hourly market refresh runner.
 //
 // Default mode is dry-run: builds the rotating per-slot plan and writes
@@ -17,7 +18,7 @@ import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
 import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollection} from '../services/bookingPrimaryCollection';
 import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
-import {readAcceptedTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
+import {readCaptureTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
 import { join, resolve } from "node:path";
@@ -163,7 +164,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
   const rows: BookingPreviewRow[] = [];
   if(targets.length===0)return rows;
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
+  const context = await createAnonymousBookingCaptureContext(browser,USER_AGENT);
   let consecutiveBlocks = 0;
   let backoffAttempt = 0;
   let index = 0;
@@ -203,7 +204,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
             uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
-            rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
+            rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,httpStatus,parserVersion:capture.parserVersion,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
 
           }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
         }
@@ -213,8 +214,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         if(pageGuard)await pageGuard.checkpoint();
         await page.close().catch(() => undefined);
         if(pageGuard){
+          await pageGuard.finishReadOnlyInformation();
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
-          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;}
+          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;}
           pageGuard.dispose();
         }
       }
@@ -366,7 +368,7 @@ async function run(): Promise<void> {
     liveExecuted = selectedTargets.length>0;
     const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
     const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readAcceptedTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined);
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readCaptureTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const optionalJalan=await optionalSecondaryCollection(async()=>{

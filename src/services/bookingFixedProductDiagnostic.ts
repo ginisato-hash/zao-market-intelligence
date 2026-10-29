@@ -1,3 +1,4 @@
+import {readBookingProductFacts} from './bookingProductObservability';
 // Pure offline diagnostics, never an admission route. No price estimation, product substitution or authority.
 import {deriveBookingRateCell,type BookingRateCellCapture} from './bookingRateCellEvidence';
 import {deriveBookingPrepayment} from './bookingPaymentTerms';
@@ -17,14 +18,14 @@ function explicitAdultMaximum(roomText:string,roomName:string):number|null{
 export function diagnoseBookingFixedProductCapture(cap:BookingRateCellCapture){
  if(cap.cells.length>5||cap.cells.some(c=>[c.roomText,c.priceText,c.policyText??''].some(s=>s.length>4000)))throw Error('DIAGNOSTIC_CAPTURE_BUDGET');
  const cells=cap.cells.map(cell=>{
-  const d=deriveBookingRateCell(cap,cell),maxAdults=explicitAdultMaximum(cell.roomText,cell.roomName),allMandatory=hasExplicitAllMandatoryTotal(cell.priceText),prepayment=deriveBookingPrepayment(cell.policyText);
+  const d=deriveBookingRateCell(cap,cell),extra=readBookingProductFacts(cap,cell,d),maxAdults=extra.maximumAdults??explicitAdultMaximum(cell.roomText,cell.roomName),allMandatory=hasExplicitAllMandatoryTotal(cell.priceText+'。'+(extra.allMandatoryText??'')),prepayment=deriveBookingPrepayment(cell.policyText);
   const missing:string[]=[];
   if(d.roomId===null||d.ratePlanId===null)missing.push('EXACT_ROOM_RATE_ID');
   if(maxAdults===null)missing.push('EXPLICIT_MAXIMUM_ADULTS');else if(maxAdults!==2)missing.push('MAXIMUM_ADULTS_NOT_TWO');
   if(!d.tupleAndProductBound)missing.push(...d.reasons);
   if(!allMandatory)missing.push('ALL_MANDATORY_TOTAL_NOT_PROVED');
   if(d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)missing.push('LOCAL_TAX_PER_ADULT_NIGHT_NOT_PROVED');
-  const publicPrice=!d.memberConditional&&/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText);
+  const publicPrice=!d.memberConditional&&(extra.publicPriceProved||/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText));
   if(!publicPrice)missing.push(d.memberConditional?'MEMBER_CONDITIONAL_PRICE':'PUBLIC_PRICE_NOT_PROVED');
   if(d.meal!=='ROOM_ONLY')missing.push('ROOM_ONLY_NOT_PROVED');
   if(!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))missing.push('CANCELLATION_NOT_PROVED');
