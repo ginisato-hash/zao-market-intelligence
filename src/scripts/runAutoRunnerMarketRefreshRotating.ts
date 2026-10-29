@@ -10,6 +10,13 @@
 import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {createHash} from 'node:crypto';
+import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelection';
+import type {MarketPanel} from '../services/marketTwoPersonCurve';
+import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
+import {readAcceptedTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
+import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
+import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import {
@@ -149,8 +156,9 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[]): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
+  if(targets.length===0)return rows;
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
   let consecutiveBlocks = 0;
@@ -167,18 +175,52 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const artifactDir = join(debugPath, "booking", `${t.property_slug}_${t.checkin}`);
       mkdirSync(artifactDir, { recursive: true });
       const screenshotPath = join(artifactDir, "screenshot.png");
+      if(reserveAttempt&& !reserveAttempt(t,new Date().toISOString())){
+        rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;
+      }
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
+      // Retain asynchronous response detection through screenshot and normal page close.
+      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page):null;
+      let rateCellRecord:Record<string,unknown>|null=null;
+      let fixedCapture:Awaited<ReturnType<typeof captureBookingRateCells>>|null=null;
+      const fixedProducts=panel?.products.filter(p=>p.sourcePropertyId===t.property_slug&&p.source==='booking');
+      let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
       try {
         const resp = await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 35_000 });
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
         await page.waitForTimeout(5_000);
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
+        if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
+          try{
+            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
+            fixedCapture=capture;
+            uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
+            const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
+            const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
+            rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
+
+          }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
+        }
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
-      finally { await page.close().catch(() => undefined); }
-      const signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
+      finally {
+        if(pageGuard)await pageGuard.checkpoint();
+        await page.close().catch(() => undefined);
+        if(pageGuard){
+          uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
+          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;}
+          pageGuard.dispose();
+        }
+      }
+      let signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
+      if(fixedProducts?.length===1){const selected=selectFixedTwoPersonSignals(signals,fixedCapture,fixedProducts[0]!,uiBlock,!uiStateUnverified);signals=selected.signals;if(rateCellRecord)rateCellRecord['fixedProductSelection']=selected.status;}
+      if(rateCellSink){
+        const record=rateCellRecord??{propertySlug:t.property_slug,stayDate:t.checkin,status:'NO_SELECTED_CAPTURE',marketPriceEligible:false};
+        Object.assign(record,{attemptedNetwork:true,completedAt:new Date().toISOString(),pageFinalBlockReason:uiBlock,pageFinalBlockStateVerified:!uiStateUnverified});
+        rateCellSink.push(record);
+      }
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
       rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
@@ -187,7 +229,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
 
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
-      const block = classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
+      const block = uiBlock ?? classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
+      if(uiStateUnverified){await sleep(backoffDelayMs(backoffAttempt));break;}
       if (block !== null) {
         consecutiveBlocks += 1;
         await sleep(backoffDelayMs(backoffAttempt));
@@ -236,8 +279,10 @@ async function run(): Promise<void> {
   if (forced.invalid.length > 0) console.warn(`warning_invalid_forced_checkin_dates=${forced.invalid.join(",")}`);
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const evidenceOn = isEvidenceSidecarEnabled(env);
+  const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1'||env['ZMI_2P_QUALITY_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
   const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
+  let twoPersonAdmission:ReturnType<typeof recordTwoPersonMarketAdmission>={status:"NOT_RUN",eligibleRows:0};
   const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
   const liveMode = !dryRun && liveGates && rotationEnabled;
@@ -255,6 +300,7 @@ async function run(): Promise<void> {
   // default OFF: far-lead ACTIVE refresh + 自館専用予約 / 比較施設セット (registry_v0 既定)。
   const winterActiveRefresh = resolveWinterActiveRefreshEnabled(env);
   const winterComparableSet = resolveWinterComparableSet(env);
+  const lastCollectedAt=readLastCollectedAt();
   const planInput = {
     winterLaneEnabled,
     ...(winterActiveRefresh ? { winterActiveRefresh } : {}),
@@ -266,11 +312,13 @@ async function run(): Promise<void> {
     slotHourJst: jst.hour,
     liveTargets: liveTargets(),
     config: demandConfig,
-    lastCollectedAt: readLastCollectedAt(),
+    lastCollectedAt,
     nearTermDenseDays,
     forcedDates: forced.valid
   };
   const plan: RotatingPlan = buildRotatingPlan({ ...planInput, caps });
+  const quoteLane=resolvePricingQuoteLane(env,{now:jst.iso,runDate:jst.date,legacyTargets:plan.selected,caps,config:demandConfig,properties:planInput.liveTargets,lastCollectedAt});
+  const selectedTargets=quoteLane.targets;
   // Baseline (multiplier=1) plan for before/after reporting (no extra collection).
   const planBefore: RotatingPlan = buildRotatingPlan({ ...planInput, caps: scaledRotatingCaps(1) });
   // 6/25-style regression visibility: is the spot-check date in candidates/selected?
@@ -278,10 +326,10 @@ async function run(): Promise<void> {
   const sixCandidate = plan.candidate_count > 0
     ? candidateStayDates(jst.date, demandConfig, { researchWindow: skiSeasonWindowFor(winterLaneEnabled), nearTermDenseDays, forcedDates: forced.valid }).some((d) => d.stayDate === SPOT_CHECK_DATE)
     : false;
-  const sixSelectedOrBoosted = plan.selected.some((t) => t.stay_date === SPOT_CHECK_DATE) || forced.valid.includes(SPOT_CHECK_DATE);
+  const sixSelectedOrBoosted = selectedTargets.some((t) => t.stay_date === SPOT_CHECK_DATE) || forced.valid.includes(SPOT_CHECK_DATE);
 
   // transition の cooldown 上書きは世代ごとに 1 回: live で選ばれた時点で記録 (dry-run は記録しない)。
-  if (winterLaneEnabled && liveMode && plan.winter_lane.transition_keys_selected.length > 0) {
+  if (!quoteLane.enabled && winterLaneEnabled && liveMode && plan.winter_lane.transition_keys_selected.length > 0) {
     writeWinterTransitionLedger(new Set([...winterLedger, ...plan.winter_lane.transition_keys_selected]));
   }
 
@@ -304,14 +352,15 @@ async function run(): Promise<void> {
   };
 
   if (liveMode) {
-    liveExecuted = true;
-    const bookingTargets = plan.selected.filter((t) => t.source === "booking");
-    const jalanRotating = plan.selected.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined);
+    liveExecuted = selectedTargets.length>0;
+    const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
+    const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readAcceptedTwoPersonPanel(env));
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
-    const browser = await chromium.launch({ headless: true });
+    const browser = jalanMatrix.targets.length>0?await chromium.launch({ headless: true }):null;
     try {
+      if(browser===null&&jalanMatrix.targets.length>0)throw Error("JALAN_BROWSER_UNAVAILABLE");
       ensureJalanDebugDirs(resolve(debugPath, "jalan"));
       let jalanConsecutiveBlocks = 0;
       let jalanBackoffAttempt = 0;
@@ -319,7 +368,7 @@ async function run(): Promise<void> {
       for (const target of jalanMatrix.targets) {
         if (jalanIndex > 0) await sleep(jitterDelayMs());
         jalanIndex += 1;
-        const res = await collectTarget({ browser, target, runId, checkedAt: jst.iso, debugPath: resolve(debugPath, "jalan"), reportPath: "", csvPath: "" });
+        const res = await collectTarget({ browser:browser!, target, runId, checkedAt: jst.iso, debugPath: resolve(debugPath, "jalan"), reportPath: "", csvPath: "" });
         jalanRows.push(res.row);
 
         // Detect a rate-limit/block signal and back off; stop early after repeats.
@@ -335,7 +384,7 @@ async function run(): Promise<void> {
           jalanBackoffAttempt = 0;
         }
       }
-    } finally { await browser.close().catch(() => undefined); }
+    } finally { await browser?.close().catch(() => undefined); }
 
     // Source-level page caps must match the rotating per-run caps (16X-F: 12/12),
     // not the legacy 09:00-runner defaults (Booking 9), or a full source would be
@@ -366,6 +415,9 @@ async function run(): Promise<void> {
       aiContextRefreshed = dbSynced;
     }
 
+    // Record denial watermarks even when no canonical row was appended. Reservation refusal is not an observation.
+    twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
+      rows:trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
     const post = readState();
     const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";
@@ -387,11 +439,11 @@ async function run(): Promise<void> {
     invalid_forced_checkin_dates: forced.invalid.join(","),
     slot_key: plan.slot_key, slot_index: plan.slot_index,
     live_collection_executed: liveExecuted,
-    booking_pages: plan.selected.filter((t) => t.source === "booking").length,
-    jalan_pages: plan.selected.filter((t) => t.source === "jalan").length,
-    planned_requests: plan.selected.length,
+    booking_pages: selectedTargets.filter((t) => t.source === "booking").length,
+    jalan_pages: selectedTargets.filter((t) => t.source === "jalan").length,
+    planned_requests: selectedTargets.length,
     planned_requests_before: planBefore.selected.length,
-    planned_requests_after: plan.selected.length,
+    planned_requests_after: selectedTargets.length,
     near_term_dense_candidate_count: plan.near_term_dense_candidate_count,
     near_term_dense_selected_count: plan.near_term_dense_selected_count,
     ordinary_weekday_near_term_candidate_count: plan.ordinary_weekday_near_term_candidate_count,
@@ -427,6 +479,8 @@ async function run(): Promise<void> {
     pricing_output_generated: false, pms_output_generated: false,
     winter_sales_lane_enabled: winterLaneEnabled,
     ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
+    ...(env['ZMI_2P_QUALITY_ENABLED']==='1'?{two_person_admission:twoPersonAdmission}:{}),
+    ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false}}:{}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",
     winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,
     winter_lane_selected: plan.winter_lane.selected_count,
@@ -438,14 +492,20 @@ async function run(): Promise<void> {
     theoretical_daily_page_capacity: DAILY_PAGE_CAPACITY.theoretical_daily_page_capacity,
     booking_daily_capacity: DAILY_PAGE_CAPACITY.booking_daily_capacity,
     jalan_daily_capacity: DAILY_PAGE_CAPACITY.jalan_daily_capacity,
-    selected_targets: plan.selected,
+    ...(quoteLane.enabled?{...quoteSelectionMetrics(selectedTargets),collection_planner:'USEFUL_QUOTES_V1',useful_quote_lane:{status:quoteLane.status,diagnostics:quoteLane.diagnostics},legacy_rotating_plan:plan,
+      near_term_dense_candidate_count:null,ordinary_weekday_near_term_candidate_count:null,forced_checkin_candidate_count:null,
+      excluded_by_cooldown:quoteLane.diagnostics?.excluded['EXISTING_24H_REQUEST_COOLDOWN']??null,
+      excluded_by_cap:quoteLane.diagnostics?quoteLane.diagnostics.candidates-selectedTargets.length:null,excluded_by_property_diversity_cap:null,
+      winter_lane_budget_per_run:0,winter_lane_required_pages_per_day:0,winter_lane_active_dates:0,winter_lane_warm_dates:0,
+      winter_lane:{status:'REPLACED_BY_ACTUAL_PRICING_SCOPE',selected_count:0}}:{}),
+    selected_targets: selectedTargets,
     report_path: resolve(REPORT_DIR, `${runId}.md`), json_path: resolve(REPORT_DIR, `${runId}.json`), csv_path: resolve(REPORT_DIR, `${runId}.csv`), debug_artifact_path: debugPath
   };
 
   writeJson(out.json_path, out);
-  writeFileSync(out.csv_path, renderCsv(plan.selected), "utf8");
+  writeFileSync(out.csv_path, renderCsv(selectedTargets), "utf8");
   writeFileSync(out.report_path, renderReport(out), "utf8");
-  writeJson(resolve(debugPath, "rotating_plan.json"), plan);
+  writeJson(resolve(debugPath, "rotating_plan.json"), quoteLane.enabled?{legacyPlan:plan,actualTargets:selectedTargets,usefulQuoteLane:quoteLane.diagnostics,status:quoteLane.status}:plan);
 
   for (const [k, v] of Object.entries(out)) {
     if (typeof v === "object") continue;
