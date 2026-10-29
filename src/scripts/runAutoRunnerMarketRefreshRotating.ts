@@ -11,6 +11,7 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {createHash} from 'node:crypto';
+import {observeCollectorSource,bindCollectorProducerEvidence} from '../services/collectorProducerEvidence';
 import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelection';
 import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
@@ -283,6 +284,8 @@ async function run(): Promise<void> {
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const evidenceOn = isEvidenceSidecarEnabled(env);
   const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1'||env['ZMI_2P_QUALITY_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
+  // Record this run's source observations; never infer a past producer from a later checkout.
+  const producerStarted=rateCellsOn?observeCollectorSource():null;
   const bookingEvidence: BookingCaptureRef[] = [];
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
   let optionalJalanStatus='NOT_RUN';
@@ -446,6 +449,7 @@ async function run(): Promise<void> {
   const post = readState();
   const out = {
     run_id: runId, generated_at_jst: jst.iso, decision, dry_run: dryRun || !liveMode,
+    ...(producerStarted?{producer_observation:bindCollectorProducerEvidence(runId,producerStarted,observeCollectorSource())}:{}),
     crawl_volume_multiplier: multiplier,
     near_term_dense_days: nearTermDenseDays,
     forced_checkin_dates: forced.valid.join(","),
