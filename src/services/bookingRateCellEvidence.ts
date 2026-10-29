@@ -105,10 +105,11 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const rows=await page.locator('#hprt-table tr[data-block-id]').evaluateAll(es=>{
     const visible=es.filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0),clipped=visible.slice(0,200),names=new Map<string,{name:string;text:string}>();
     for(const e of clipped){const a=e.querySelector('[id^="room_type_id_"]');if(a){const id=a.id.slice('room_type_id_'.length);names.set(id,{name:(a as HTMLElement).innerText.slice(0,4001),text:((a.closest('th') as HTMLElement|null)?.innerText??'').slice(0,4001)});}}
-    return {overflow:visible.length>200,rows:clipped.map(e=>{const blockId=(e.getAttribute('data-block-id')??'').slice(0,200),id=blockId.split('_')[0]??'',room=names.get(id),get=(s:string)=>((e.querySelector(s) as HTMLElement|null)?.innerText??'').slice(0,4001);
+    // Keep this serialized browser callback self-contained: tsx injects a Node-only __name helper for named locals.
+    return {overflow:visible.length>200,rows:clipped.map(e=>{const blockId=(e.getAttribute('data-block-id')??'').slice(0,200),id=blockId.split('_')[0]??'',room=names.get(id);
       const btn=e.querySelector('.hprt-table-cell-conditions button[aria-controls]');
-      return {blockId,roomName:room?.name??'',roomText:room?.text??'',occupancyText:get('.hprt-table-cell-occupancy'),priceText:get('.hprt-table-cell-price'),conditionsText:get('.hprt-table-cell-conditions'),
-        priceRoleText:get('.hprt-table-cell-price .prco-wrapper'),
+      return {blockId,roomName:room?.name??'',roomText:room?.text??'',occupancyText:((e.querySelector('.hprt-table-cell-occupancy') as HTMLElement|null)?.innerText??'').slice(0,4001),priceText:((e.querySelector('.hprt-table-cell-price') as HTMLElement|null)?.innerText??'').slice(0,4001),conditionsText:((e.querySelector('.hprt-table-cell-conditions') as HTMLElement|null)?.innerText??'').slice(0,4001),
+        priceRoleText:((e.querySelector('.hprt-table-cell-price .prco-wrapper') as HTMLElement|null)?.innerText??'').slice(0,4001),
         taxDetails:Array.from(e.querySelectorAll('.hprt-table-cell-price .hptr-taxinfo-block')).filter(t=>t.getBoundingClientRect().width>0&&t.getBoundingClientRect().height>0).slice(0,6).map(t=>{
           const label=((t.querySelector('.hptr-taxinfo-label') as HTMLElement|null)?.innerText??'').trim(),all=(t as HTMLElement).innerText.trim();
           return {label:label.slice(0,51),details:(all.startsWith(label)&&label!==''?all.slice(label.length).trim():'').slice(0,1001)};
