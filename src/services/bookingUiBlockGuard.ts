@@ -1,4 +1,4 @@
-import type { Page, Response, Route, Request } from 'playwright';
+import type { Page, Response, Route } from 'playwright';
 import { classifyBlock, type BlockReason } from './crawlThrottlePolicy';
 
 /** Sticky, page-local detection only. It never retries, navigates or solves a challenge. */
@@ -9,14 +9,14 @@ export class BookingUiBlockGuard {
   private informationArmed = false;
   private finishPromise:Promise<void>|null = null;
   private disposePending = false;
-  private readonly informationRequestSeen = (request:Request):void => {
-    if(!request.isNavigationRequest())return;
+  // Information is read from the already loaded DOM. There is no accepted
+  // allowlist or extra network budget, including for GET/HEAD and analytics.
+  private readonly informationRequestSeen = ():void => {
     this.informationRequestRefused=true;this.stateVerified=false;
   };
-  private readonly navigationRoute = async (route:Route):Promise<void> => {
-    if(route.request().isNavigationRequest()){
-      this.informationRequestRefused=true;this.stateVerified=false;await route.abort('blockedbyclient').catch(()=>{});}
-    else await route.fallback();
+  private readonly informationRoute = async (route:Route):Promise<void> => {
+    this.informationRequestRefused=true;this.stateVerified=false;
+    await route.abort('blockedbyclient').catch(()=>{});
   };
   private readonly unexpectedPage = (other:Page):void => {
     if(other!==this.page){this.informationRequestRefused=true;this.stateVerified=false;void other.close().catch(()=>{});}
@@ -24,8 +24,8 @@ export class BookingUiBlockGuard {
   async armReadOnlyInformation():Promise<void>{
     if(this.informationArmed)return;
     const context=this.page.context();context.on('request',this.informationRequestSeen);
-    try{await context.route('**/*',this.navigationRoute);await this.page.route('**/*',this.navigationRoute);}
-    catch{this.stateVerified=false;context.off('request',this.informationRequestSeen);await context.unroute('**/*',this.navigationRoute).catch(()=>{});throw Error('INFORMATION_GUARD_ARM_FAILED');}
+    try{await context.route('**/*',this.informationRoute);await this.page.route('**/*',this.informationRoute);}
+    catch{this.stateVerified=false;context.off('request',this.informationRequestSeen);await context.unroute('**/*',this.informationRoute).catch(()=>{});throw Error('INFORMATION_GUARD_ARM_FAILED');}
     this.informationArmed=true;context.on('page',this.unexpectedPage);
     this.page.once('close',()=>{void this.finishReadOnlyInformation().catch(()=>{this.stateVerified=false;});});
   }
@@ -34,7 +34,7 @@ export class BookingUiBlockGuard {
     if(!this.informationArmed)return;
     if(!this.page.isClosed()){this.stateVerified=false;throw Error('INFORMATION_PAGE_NOT_CLOSED');}
     if(this.finishPromise)return this.finishPromise;
-    this.finishPromise=(async()=>{try{await this.page.context().unroute('**/*',this.navigationRoute);}catch{this.stateVerified=false;}
+    this.finishPromise=(async()=>{try{await this.page.context().unroute('**/*',this.informationRoute);}catch{this.stateVerified=false;}
       this.page.context().off('page',this.unexpectedPage);this.page.context().off('request',this.informationRequestSeen);if(this.disposePending)this.page.off('response',this.onResponse);
     })();return this.finishPromise;
   }

@@ -5,7 +5,7 @@ import type {BookingUiBlockGuard} from './bookingUiBlockGuard';
 const anonymousContexts=new WeakSet<BrowserContext>();
 export async function createAnonymousBookingCaptureContext(browser:Browser,userAgent:string){
  if(!userAgent||userAgent.length>700)throw Error('BOOKING_CONTEXT_OPTIONS');
- const context=await browser.newContext({userAgent,locale:'ja-JP'});anonymousContexts.add(context);return context;
+ const context=await browser.newContext({userAgent,locale:'ja-JP',serviceWorkers:'block'});anonymousContexts.add(context);return context;
 }
 export function bookingInformationTextSafe(text:string,max:number):boolean{
  if(typeof text!=='string'||text.length>max)return false;const s=text.normalize('NFKC'),phone=s.replace(/[()\s\u2010-\u2015\u2212\u30fc-]/gu,'');

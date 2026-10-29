@@ -174,7 +174,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   }catch{result=empty('CAPTURE_UNVERIFIED');}
   finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
-  if(guard.informationRequestRefused)return sealBookingRateCellCapture({...unsigned,cells:[],problems:[...new Set([...result.problems,'UNEXPECTED_NAVIGATION_REFUSED'])]});
+  if(guard.informationRequestRefused)return sealBookingRateCellCapture({...unsigned,cells:[],problems:[...new Set([...result.problems,'UNEXPECTED_INFORMATION_REQUEST_REFUSED'])]});
   if(guard.reason!==null||!guard.stateVerified)return sealBookingRateCellCapture({...unsigned,cells:[],blockReason:guard.reason,blockStateVerified:guard.stateVerified,problems:[...new Set([...result.problems,'UI_BLOCKED_OR_UNVERIFIED'])]});
   return result;
 }

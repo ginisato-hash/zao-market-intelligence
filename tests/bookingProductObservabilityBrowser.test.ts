@@ -17,7 +17,7 @@ it('member rates cannot become public merely because a fresh guest context obser
 it('an unbranded caller context stays legacy with no new room or tax interaction',async()=>{const f=await fixture('unbound-context');try{const cap=await capture(f);expect(cap.parserVersion).toBe('booking-rate-cell-v3');expect(await f.page.evaluate(()=>document.documentElement.dataset.roomClicks??null)).toBeNull();expect(await f.page.evaluate(()=>document.documentElement.dataset.taxClicks??null)).toBeNull();}finally{await f.context.close();}});
 it('v4 records another row failure locally while preserving the first row proof',async()=>{const f=await fixture('other-policy-fail');try{const cap=await capture(f);expect(cap.problems,JSON.stringify(cap)).toEqual([]);expect(cap.cells[1]!.rowProblems).toContain('RATE_POLICY_UNVERIFIED');expect(deriveBookingRateCell(cap,cap.cells[0]!).tupleAndProductBound).toBe(true);expect(deriveBookingRateCell(cap,cap.cells[1]!).tupleAndProductBound).toBe(false);}finally{await f.context.close();}});
 it('a room anchor referring to a different room or a reservation URL is never clicked',async()=>{const f=await fixture();try{await f.page.locator('#room_type_id_123').evaluate(e=>{e.setAttribute('aria-controls','RD999');e.setAttribute('href','/reserve');});const cap=await capture(f);expect(cap.cells[0]?.productFacts?.roomCapacity).toBeNull();expect(await f.page.evaluate(()=>document.documentElement.dataset.roomClicks??null)).toBeNull();expect(f.requests()).toBe(1);}finally{await f.context.close();}});
-it('unexpected document navigation is refused before it reaches the fixture server',async()=>{const f=await fixture();try{await f.page.locator('#room_type_id_123').evaluate(e=>e.setAttribute('onclick',"event.preventDefault();location.href='/reserve';"));const cap=await capture(f);expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('UNEXPECTED_NAVIGATION_REFUSED');expect(f.requests()).toBe(1);}finally{await f.context.close();}});
+it('unexpected document navigation is refused before it reaches the fixture server',async()=>{const f=await fixture();try{await f.page.locator('#room_type_id_123').evaluate(e=>e.setAttribute('onclick',"event.preventDefault();location.href='/reserve';"));const cap=await capture(f);expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('UNEXPECTED_INFORMATION_REQUEST_REFUSED');expect(f.requests()).toBe(1);}finally{await f.context.close();}});
 it('an opened wrong policy dialog stops the whole capture instead of contaminating a later row',async()=>{const f=await fixture('other-policy-fail');try{await f.page.locator(`[aria-controls='policyModal_${block}']`).evaluate(e=>e.setAttribute('onclick',"document.getElementById('OTHER').hidden=false;document.documentElement.dataset.policyClicks=1"));const cap=await capture(f);expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('CAPTURE_UNVERIFIED');expect(f.requests()).toBe(1);}finally{await f.context.close();}},15000);
 for(const text of ['09012345678','+819012345678','０９０（１２３４）５６７８','+1 415 555 2671','name@example.test','https://example.test/private','api_key=synthetic','Bearer synthetic','cookie=synthetic'])it(`sensitive tax text is not copied (${text.split(/[=:]/)[0]})`,async()=>{
  const f=await fixture();try{await f.page.locator('#tax123').evaluate((e,s)=>{e.firstChild!.textContent='すべての税金と料金が含まれています。'+s;},text);const cap=await capture(f);expect(cap.cells[0]?.productFacts?.taxTotal).toBeNull();expect(JSON.stringify(cap)).not.toContain(text);expect(f.requests()).toBe(1);}finally{await f.context.close();}
@@ -53,6 +53,45 @@ it('an initial popup navigation cannot escape the page-owned information guard',
 
 for(const method of ['GET','POST']as const)it(`an unknown child-frame document ${method} is blocked before network`,async()=>{
  const f=await fixture();try{await f.page.evaluate(m=>{const frame=document.createElement('iframe');frame.name='unapproved-target';frame.hidden=true;document.body.append(frame);const form=document.createElement('form');form.id='unexpected-form';form.action='/unexpected-frame';form.method=m;form.target=frame.name;document.body.append(form);},method);
- await f.page.locator('[aria-controls="tax123"]').evaluate(e=>e.setAttribute('onclick',e.getAttribute('onclick')+";document.getElementById('unexpected-form').submit()"));const cap=await capture(f);expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('UNEXPECTED_NAVIGATION_REFUSED');expect(f.requests()).toBe(1);
+ await f.page.locator('[aria-controls="tax123"]').evaluate(e=>e.setAttribute('onclick',e.getAttribute('onclick')+";document.getElementById('unexpected-form').submit()"));const cap=await capture(f);expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('UNEXPECTED_INFORMATION_REQUEST_REFUSED');expect(f.requests()).toBe(1);
+ }finally{await f.context.close();}
+});
+
+for(const phase of ['room','tax','policy']as const)for(const kind of ['fetch-post','xhr-post','beacon','fetch-get','fetch-head']as const)it(`an information ${phase} click cannot send a non-navigation ${kind}`,async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);
+ const control=phase==='room'?'#room_type_id_123':phase==='tax'?'[aria-controls="tax123"]':`[aria-controls="policyModal_${block}"]`;
+ const path='/unexpected-information-'+kind;
+ const script=kind==='xhr-post'?`{const x=new XMLHttpRequest();x.open('POST','${path}');x.send('synthetic');}`:kind==='beacon'?`navigator.sendBeacon('${path}','synthetic');`:`void fetch('${path}',{method:'${kind==='fetch-post'?'POST':kind==='fetch-head'?'HEAD':'GET'}'${kind==='fetch-post'?",body:'synthetic'":''}}).catch(()=>{});`;
+ try{
+  await f.page.locator(control).evaluate((e,s)=>e.setAttribute('onclick',e.getAttribute('onclick')+';'+s),script);
+  const denied=f.context.waitForEvent('requestfailed',r=>r.url().endsWith(path));
+  const cap=await capture(f,guard),request=await denied;
+  expect(request.isNavigationRequest()).toBe(false);expect(request.failure()?.errorText).toContain('ERR_BLOCKED_BY_CLIENT');
+  expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('UNEXPECTED_INFORMATION_REQUEST_REFUSED');
+  expect(guard.informationRequestRefused).toBe(true);expect(guard.stateVerified).toBe(false);expect(f.requests()).toBe(1);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
+for(const method of ['PUT','PATCH','DELETE']as const)it(`unapproved ${method} is denied without method-dependent fallback`,async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{
+  await f.page.locator('[aria-controls="tax123"]').evaluate((e,m)=>e.setAttribute('onclick',e.getAttribute('onclick')+`;void fetch('/unexpected-method',{method:'${m}',body:'synthetic'}).catch(()=>{});`),method);
+  const denied=f.context.waitForEvent('requestfailed',r=>r.url().endsWith('/unexpected-method'));
+  const cap=await capture(f,guard);await denied;expect(cap.cells).toHaveLength(0);expect(guard.informationRequestRefused).toBe(true);expect(guard.stateVerified).toBe(false);expect(f.requests()).toBe(1);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
+it('a late non-navigation POST stays blocked through page close and final-state recording',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{const cap=await capture(f,guard);expect(cap.cells).toHaveLength(1);
+  const request=f.context.waitForEvent('request',r=>r.url().endsWith('/late-post'));await f.page.evaluate(()=>{void fetch('/late-post',{method:'POST',body:'synthetic'}).catch(()=>{});});await request;
+  await f.page.close();await guard.finishReadOnlyInformation();expect(guard.informationRequestRefused).toBe(true);expect(guard.stateVerified).toBe(false);expect(f.requests()).toBe(1);
+ }finally{guard.dispose();await f.context.close();}
+});
+it('normal information access uses no extra network and releases the context guard only after page close',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{expect((await capture(f,guard)).cells).toHaveLength(1);expect(guard.stateVerified).toBe(true);
+  await f.page.close();await guard.finishReadOnlyInformation();const next=await f.context.newPage();let served=0;await next.route('**/*',r=>{served++;return r.fulfill({status:200,body:'next owned page'});});
+  await next.goto('https://synthetic.test/after-owner-close');expect(served).toBe(1);expect(guard.stateVerified).toBe(true);expect(guard.informationRequestRefused).toBe(false);await next.close();
+ }finally{guard.dispose();await f.context.close();}
+});
+it('the anonymous context blocks service workers rather than allowing a worker to bypass HTTP routing',async()=>{
+ const f=await fixture();try{const state=await f.page.evaluate(async()=>{try{const registration=await navigator.serviceWorker.register('/unapproved-worker.js');return registration===undefined?'BLOCKED_WITHOUT_REGISTRATION':'REGISTERED';}catch{return 'REFUSED';}});
+  expect(state).toBe('BLOCKED_WITHOUT_REGISTRATION');expect(f.context.serviceWorkers()).toHaveLength(0);expect(f.requests()).toBe(1);expect((await capture(f)).cells).toHaveLength(1);
  }finally{await f.context.close();}
 });
