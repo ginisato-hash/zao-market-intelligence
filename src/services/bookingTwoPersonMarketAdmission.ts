@@ -5,6 +5,7 @@ import {deriveBookingRateCell,type BookingRateCellCapture} from './bookingRateCe
 import {marketConditionKey,type PanelProduct,type TwoPersonObservation} from './marketTwoPersonCurve';
 import {digest,instant,type QualityEntry} from './marketRowPriceQuality';
 import type {HistoryRow} from './localHistorySchemaDesign';
+import {deriveBookingPrepayment} from './bookingPaymentTerms';
 export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdentity:{rowId:string;rowHash:string}|null;
  capture:BookingRateCellCapture;rawCaptureBytes:Buffer;independentRawCaptureSha256:string;pageFinalBlockReason:string|null;pageFinalBlockStateVerified:boolean;
  product:PanelProduct;standardProductProofVerified:boolean;ingestedAt:string}){
@@ -26,11 +27,11 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
  if(!hasExplicitAllMandatoryTotal(cell.priceText)||d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)return no('ALL_MANDATORY_TOTAL_NOT_PROVED');
  if(d.memberConditional||!/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText))return no('PUBLIC_PRICE_NOT_PROVED');
  if(d.meal!=='ROOM_ONLY'||!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))return no('CONDITIONS_NOT_KNOWN');
- const prepaid=/予約時に.*支払|事前に.*全額.*支払/u.test(cell.policyText??''),notPrepaid=/事前支払い不要|前払い不要/u.test(cell.policyText??'');
- if(prepaid===notPrepaid)return no('PREPAYMENT_UNKNOWN_OR_CONFLICT');
+ const prepayment=deriveBookingPrepayment(cell.policyText);
+ if(prepayment==='UNKNOWN')return no('PREPAYMENT_UNKNOWN_OR_CONFLICT');
  if(d.currentDisplayedJpy!==r.sourcePrimaryPrice||d.currentDisplayedJpy!==r.normalizedTotalPrice)return no('FIXED_PRODUCT_NOT_THE_CANONICAL_PRICE');
  const conditions={meal:'ROOM_ONLY' as const,cancellation:d.refund==='NON_REFUNDABLE'?'NON_REFUNDABLE' as const:'REFUNDABLE' as const,
-  prepayment:prepaid?'REQUIRED' as const:'NOT_REQUIRED' as const,discount:d.promotion==='EXPLICIT_PRICE_PAIR'?'PUBLIC_PROMO' as const:'PUBLIC' as const,tax:'ALL_MANDATORY_INCLUDED' as const};
+  prepayment,discount:d.promotion==='EXPLICIT_PRICE_PAIR'?'PUBLIC_PROMO' as const:'PUBLIC' as const,tax:'ALL_MANDATORY_INCLUDED' as const};
  const conditionsVersion='terms_'+digest(cell.policyText),conditionKey=marketConditionKey(conditions,conditionsVersion);
  if(conditionKey!==p.conditionKey)return no('CONDITIONS_CHANGED_NEW_SERIES_REQUIRED');
  const observation:TwoPersonObservation={rowId:r.rowId,rowHash:r.rowHash,propertyId:p.propertyId,sourcePropertyId:p.sourcePropertyId,source:'booking',productId:p.productId,ratePlanId:p.ratePlanId,conditionKey,conditionsVersion,
