@@ -1,4 +1,4 @@
-import {captureBookingProductFacts,usesFreshAnonymousBookingContext,rankBookingDiscoveryRows,readBookingMaterialRow,readBookingHeaderSnapshot,type BookingProductFacts} from './bookingProductObservability';
+import {captureBookingProductFacts,usesFreshAnonymousBookingContext,rankBookingDiscoveryRows,readBookingMaterialRow,readBookingHeaderSnapshot,readBookingPassiveStay,type BookingProductFacts} from './bookingProductObservability';
 // Bounded, selected-product evidence from the public page already loaded by the collector.
 // No booking selection/submission, price API, credentials or whole-page text export.
 import type { Page } from 'playwright';
@@ -93,14 +93,24 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const guard=externalGuard??new BookingUiBlockGuard(page);
   let result:BookingRateCellCapture;
   let captureStage='PAGE_PRECHECK';
+  let passiveHeader:Awaited<ReturnType<typeof readBookingHeaderSnapshot>>|null=null;
   try{
   await guard.requireClear();
   if(await page.locator('#hprt-table tr[data-block-id]').count()===0){if(detailed)problems.push('NO_RATE_TABLE_NO_INTERACTION');throw Error('NO_RATE_TABLE_NO_INTERACTION');}
   // No rate rows means no information interaction. Do not arm the context-wide
   // guard merely to discover that this prerequisite is absent.
+  if(detailed){
+    captureStage='PASSIVE_DATE_PRECHECK';
+    const passive=await readBookingPassiveStay(page);
+    if(!passive||passive.stay.checkin!==input.checkin||passive.stay.checkout!==input.checkout){problems.push('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');throw Error('PASSIVE_STAY_HEADER_UNPROVEN');}
+    passiveHeader=passive.header;displayedCheckin=passive.stay.checkin;displayedCheckout=passive.stay.checkout;displayedParty=passive.party;
+    await guard.requireClear();
+    if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(passiveHeader))throw Error('PASSIVE_STAY_CHANGED_BEFORE_INFORMATION');
+  }
   captureStage='INFORMATION_GUARD_ARM';
   if(detailed)await guard.armReadOnlyInformation();
   await guard.requireClear();
+  if(!detailed){
   captureStage='DATE_DETAILS';
   const dateButton=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container');
   let dateOpened=false;
@@ -114,6 +124,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   }catch{problems.push('DISPLAYED_DATE_OR_PARTY_UNVERIFIED');}
   finally{if(dateOpened&&await guard.checkpoint()&&await dateButton.getAttribute('aria-expanded',{timeout:3000}).catch(()=>null)==='true')await dateButton.click({timeout:3000}).catch(()=>{problems.push('DATE_PANEL_CLOSE_FAILED');});}
   if(problems.includes('DATE_PANEL_CLOSE_FAILED')||problems.includes('DISPLAYED_DATE_OR_PARTY_UNVERIFIED'))throw Error('NO_RATE_INTERACTION_AFTER_PANEL_FAILURE');
+  }
   await guard.requireClear();
   captureStage='RATE_ROWS';
   const rows=await page.locator('#hprt-table tr[data-block-id]').evaluateAll(es=>{
@@ -137,7 +148,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const selected=discovered.filter(r=>/^\d+_\d+_2_0_0$/u.test(r.blockId)
     &&(input.propertySlug!==K27_T04_REFERENCE.ownSlug||r.blockId.startsWith(K27_T04_REFERENCE.bookingRoomId+'_'))
     &&(fixedProducts===undefined||fixedProducts.some(p=>r.blockId===`${p.productId}_${p.ratePlanId}_2_0_0`))).slice(0,maxProducts),cells:BookingRateCell[]=[];
-  const material=new Map<string,Awaited<ReturnType<typeof readBookingMaterialRow>>>(),policyDomHashes=new Map<string,string>(),headerBefore=detailed?await readBookingHeaderSnapshot(page):null;
+  const material=new Map<string,Awaited<ReturnType<typeof readBookingMaterialRow>>>(),policyDomHashes=new Map<string,string>(),headerBefore=passiveHeader;
   for(const row of selected){
     await guard.requireClear();
     if(await page.locator('[role="dialog"]:visible').count()>0)throw Error('UNOWNED_INFORMATION_DIALOG_VISIBLE');
