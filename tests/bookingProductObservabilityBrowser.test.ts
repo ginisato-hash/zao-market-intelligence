@@ -12,6 +12,14 @@ async function fixture(mode:'normal'|'wrong-room'|'wrong-tax'|'challenge'|'membe
 }
 async function capture(f:Awaited<ReturnType<typeof fixture>>,guard?:BookingUiBlockGuard){return captureBookingRateCells(f.page,{propertySlug:'external',checkin:date,checkout:'2027-01-16',observedAt:'2026-10-30T00:00:00Z'},3,guard);}
 it('captures positive controlled facts without any quantity selection, login, additional navigation or network',async()=>{const f=await fixture();try{const cap=await capture(f);expect(cap.problems,JSON.stringify(cap)).toEqual([]);expect(cap.parserVersion).toBe('booking-rate-cell-v4');expect(cap.cells).toHaveLength(1);const d=deriveBookingRateCell(cap,cap.cells[0]!);expect(d.tupleAndProductBound).toBe(true);expect(readBookingProductFacts(cap,cap.cells[0]!,d)).toMatchObject({maximumAdults:2,publicPriceProved:true,allMandatoryText:'すべての税金と料金が含まれています。'});expect(await f.page.locator('select').inputValue()).toBe('0');expect(await f.page.locator('[role="dialog"]:visible').count()).toBe(0);expect(f.page.url()).toBe(url);expect(f.requests()).toBe(1);}finally{await f.context.close();}});
+it('a page without exact rate rows never arms information controls and retains an explicit missing-row reason',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');
+ try{await f.page.locator('#hprt-table').evaluate(e=>e.remove());const cap=await capture(f,guard);
+  expect(arm).not.toHaveBeenCalled();expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('NO_RATE_TABLE_NO_INTERACTION');
+  expect(cap.problems).toContain('CAPTURE_STAGE_PAGE_PRECHECK');expect(guard.stateVerified).toBe(true);expect(guard.informationRequestRefused).toBe(false);
+  expect(await f.page.locator('[data-testid="searchbox-dates-container"]').getAttribute('aria-expanded')).toBe('false');expect(f.requests()).toBe(1);
+ }finally{arm.mockRestore();await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
 for(const mode of ['wrong-room','wrong-tax','challenge']as const)it(`stops without policy or reservation interaction after ${mode}`,async()=>{const f=await fixture(mode);try{const cap=await capture(f);expect(cap.cells).toHaveLength(0);expect(await f.page.evaluate(()=>document.documentElement.dataset.policyClicks??null)).toBeNull();expect(f.requests()).toBe(1);}finally{await f.context.close();}},15000);
 it('member rates cannot become public merely because a fresh guest context observed them',async()=>{const f=await fixture('member');try{const cap=await capture(f),d=deriveBookingRateCell(cap,cap.cells[0]!);expect(readBookingProductFacts(cap,cap.cells[0]!,d).publicPriceProved).toBe(false);}finally{await f.context.close();}});
 it('an unbranded caller context stays legacy with no new room or tax interaction',async()=>{const f=await fixture('unbound-context');try{const cap=await capture(f);expect(cap.parserVersion).toBe('booking-rate-cell-v3');expect(await f.page.evaluate(()=>document.documentElement.dataset.roomClicks??null)).toBeNull();expect(await f.page.evaluate(()=>document.documentElement.dataset.taxClicks??null)).toBeNull();}finally{await f.context.close();}});
@@ -69,6 +77,10 @@ for(const phase of ['room','tax','policy']as const)for(const kind of ['fetch-pos
   expect(request.isNavigationRequest()).toBe(false);expect(request.failure()?.errorText).toContain('ERR_BLOCKED_BY_CLIENT');
   expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('UNEXPECTED_INFORMATION_REQUEST_REFUSED');
   expect(guard.informationRequestRefused).toBe(true);expect(guard.stateVerified).toBe(false);expect(f.requests()).toBe(1);
+  await expect.poll(()=>guard.informationDeniedRequest).not.toBeNull();
+  expect(guard.informationDeniedRequest).toMatchObject({method:kind==='fetch-get'?'GET':kind==='fetch-head'?'HEAD':'POST',navigation:false,abortOutcome:'SUCCEEDED'});
+  expect(Object.keys(guard.informationDeniedRequest!).sort()).toEqual(['abortOutcome','method','navigation','resourceType']);
+  expect(JSON.stringify(guard.informationDeniedRequest)).not.toContain('synthetic');
  }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
 });
 for(const method of ['PUT','PATCH','DELETE']as const)it(`unapproved ${method} is denied without method-dependent fallback`,async()=>{

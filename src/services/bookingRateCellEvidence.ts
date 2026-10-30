@@ -92,10 +92,16 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
   const guard=externalGuard??new BookingUiBlockGuard(page);
   let result:BookingRateCellCapture;
+  let captureStage='PAGE_PRECHECK';
   try{
+  await guard.requireClear();
+  if(await page.locator('#hprt-table tr[data-block-id]').count()===0){if(detailed)problems.push('NO_RATE_TABLE_NO_INTERACTION');throw Error('NO_RATE_TABLE_NO_INTERACTION');}
+  // No rate rows means no information interaction. Do not arm the context-wide
+  // guard merely to discover that this prerequisite is absent.
+  captureStage='INFORMATION_GUARD_ARM';
   if(detailed)await guard.armReadOnlyInformation();
   await guard.requireClear();
-  if(await page.locator('#hprt-table tr[data-block-id]').count()===0)throw Error('NO_RATE_TABLE_NO_INTERACTION');
+  captureStage='DATE_DETAILS';
   const dateButton=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container');
   let dateOpened=false;
   try{
@@ -109,6 +115,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   finally{if(dateOpened&&await guard.checkpoint()&&await dateButton.getAttribute('aria-expanded',{timeout:3000}).catch(()=>null)==='true')await dateButton.click({timeout:3000}).catch(()=>{problems.push('DATE_PANEL_CLOSE_FAILED');});}
   if(problems.includes('DATE_PANEL_CLOSE_FAILED')||problems.includes('DISPLAYED_DATE_OR_PARTY_UNVERIFIED'))throw Error('NO_RATE_INTERACTION_AFTER_PANEL_FAILURE');
   await guard.requireClear();
+  captureStage='RATE_ROWS';
   const rows=await page.locator('#hprt-table tr[data-block-id]').evaluateAll(es=>{
     const visible=es.filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0),clipped=visible.slice(0,200),names=new Map<string,{name:string;text:string}>();
     for(const e of clipped){const a=e.querySelector('[id^="room_type_id_"]');if(a){const id=a.id.slice('room_type_id_'.length);names.set(id,{name:(a as HTMLElement).innerText.slice(0,4001),text:((a.closest('th') as HTMLElement|null)?.innerText??'').slice(0,4001)});}}
@@ -136,9 +143,11 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     if(await page.locator('[role="dialog"]:visible').count()>0)throw Error('UNOWNED_INFORMATION_DIALOG_VISIBLE');
     if(detailed){const snapshot=await readBookingMaterialRow(page,row.blockId);if(!snapshot.rowVisible)throw Error('SELECTED_ROW_NOT_VISIBLE');material.set(row.blockId,snapshot);const {rowVisible,selectedValues,roomHref,roomControls,...fields}=snapshot;Object.assign(row,fields);}
     const rowProblems:string[]=[],problem=(reason:string)=>{(detailed?rowProblems:problems).push(reason);};
+    captureStage='ROOM_TAX_DETAILS';
     const productFacts=detailed?await captureBookingProductFacts(page,guard,{blockId:row.blockId,roomName:scrubExcerpt(row.roomName,200)}):undefined;
     let policyText:string|null=null,policyContainerId:string|null=null;
     const expectedControlId=`policyModal_${row.blockId}`;
+    captureStage='POLICY_DETAILS';
     const button=page.locator(`#hprt-table tr[data-block-id="${row.blockId}"] button[aria-controls="${expectedControlId}"]`);
     // Booking also has a hidden TEMPLATE with this ID. Only the visible controlled
     // container containing this dialog is evidence; a globally named dialog is not.
@@ -163,6 +172,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     if(problems.includes('POLICY_PANEL_CLOSE_FAILED'))break;
   }
   if(detailed){
+    captureStage='MATERIAL_RECHECK';
     if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(headerBefore))throw Error('SERVED_TUPLE_OR_LOGIN_STATE_CHANGED');
     const finalUrl=new URL(page.url());if(finalUrl.origin!==served.origin||finalUrl.pathname!==served.pathname||['checkin','checkout','group_adults','group_children','no_rooms','selected_currency'].some(k=>finalUrl.searchParams.get(k)!==served.searchParams.get(k)))throw Error('SERVED_TUPLE_CHANGED_AFTER_INFORMATION');
     for(const cell of cells){if(canonicalJson(await readBookingMaterialRow(page,cell.blockId))!==canonicalJson(material.get(cell.blockId)))throw Error('SELECTED_ROW_CHANGED_AFTER_INFORMATION');
@@ -171,7 +181,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   }
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
   result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
-  }catch{result=empty('CAPTURE_UNVERIFIED');}
+  }catch{if(detailed)problems.push('CAPTURE_STAGE_'+captureStage);result=empty('CAPTURE_UNVERIFIED');}
   finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
   if(guard.informationRequestRefused)return sealBookingRateCellCapture({...unsigned,cells:[],problems:[...new Set([...result.problems,'UNEXPECTED_INFORMATION_REQUEST_REFUSED'])]});
