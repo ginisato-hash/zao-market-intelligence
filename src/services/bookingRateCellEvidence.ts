@@ -101,7 +101,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   // guard merely to discover that this prerequisite is absent.
   if(detailed){
     captureStage='PASSIVE_DATE_PRECHECK';
-    const passive=await readBookingPassiveStay(page);
+    const passive=await readBookingPassiveStay(page,reason=>problems.push(reason+'_NO_INTERACTION'));
     if(!passive||passive.stay.checkin!==input.checkin||passive.stay.checkout!==input.checkout){problems.push('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');throw Error('PASSIVE_STAY_HEADER_UNPROVEN');}
     passiveHeader=passive.header;displayedCheckin=passive.stay.checkin;displayedCheckout=passive.stay.checkout;displayedParty=passive.party;
     await guard.requireClear();
