@@ -117,5 +117,39 @@ export async function readBookingMaterialRow(page:Page,blockId:string){
 }
 export async function readBookingHeaderSnapshot(page:Page){
  const date=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container'),party=page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/}),login=page.locator('header [data-testid="header-sign-in-button"],header a').filter({hasText:/^(?:ログイン|Sign in)$/u});
- return {dateText:await date.innerText({timeout:2000}),dateAria:await date.getAttribute('aria-label'),expanded:await date.getAttribute('aria-expanded'),party:await party.getAttribute('aria-label'),signedOutControlVisible:await login.count()===1&&await login.isVisible()};
+ const dateCount=await date.count(),partyCount=await party.count();if(dateCount!==1||partyCount!==1)throw Error('HEADER_CONTROL_NOT_UNIQUE');
+ return {dateCount,partyCount,dateVisible:await date.isVisible(),partyVisible:await party.isVisible(),dateText:await date.innerText({timeout:2000}),dateAria:await date.getAttribute('aria-label'),expanded:await date.getAttribute('aria-expanded'),party:await party.getAttribute('aria-label'),signedOutControlVisible:await login.count()===1&&await login.isVisible()};
+}
+
+// Only an explicitly year-bearing visible-control label proves the year. Never
+// fill it from the request URL, today's date or a month/day-only label.
+function dateLabelParts(raw:string){
+ const s=raw.normalize('NFKC').trim().replace(/\s+/gu,' ');
+ const jp=/^(?:チェックイン(?:日)?\s*[:：]?\s*)?(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(?:\s*\(([日月火水木金土])(?:曜日)?\))?\s*(?:[–—〜~−-]|から)\s*(?:チェックアウト(?:日)?\s*[:：]?\s*)?(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(?:\s*\(([日月火水木金土])(?:曜日)?\))?$/u.exec(s);
+ if(jp)return [{y:jp[1]?Number(jp[1]):null,m:Number(jp[2]),d:Number(jp[3]),w:jp[4]??null},{y:jp[5]?Number(jp[5]):null,m:Number(jp[6]),d:Number(jp[7]),w:jp[8]??null}];
+ const iso=/^(\d{4})-(\d{2})-(\d{2})\s*(?:[–—〜~]| - )\s*(\d{4})-(\d{2})-(\d{2})$/u.exec(s);
+ return iso?[{y:Number(iso[1]),m:Number(iso[2]),d:Number(iso[3]),w:null},{y:Number(iso[4]),m:Number(iso[5]),d:Number(iso[6]),w:null}]:null;
+}
+export function parseExplicitBookingStayLabels(dateText:string,dateAria:string|null):{checkin:string;checkout:string}|null{
+ const labels=[dateText,dateAria??''];if(labels.some(s=>!bookingInformationTextSafe(s,180)))return null;
+ const parsed=labels.map(dateLabelParts),full=parsed.filter((p):p is NonNullable<typeof p>=>p!==null&&p.every(d=>d.y!==null));
+ if(!full.length)return null;
+ const strings=full[0]!.map(d=>`${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`);
+ if(strings.some(s=>!/^\d{4}-\d{2}-\d{2}$/u.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)||Date.parse(strings[1]!)-Date.parse(strings[0]!)!==86400000)return null;
+ for(let i=0;i<labels.length;i++){
+  const parts=parsed[i];if(!parts){if(!['','Dates','日付','日付を選択'].includes(labels[i]!.normalize('NFKC').trim()))return null;continue;}
+  for(let j=0;j<2;j++){const d=parts[j]!,actual=new Date(strings[j]+'T00:00:00Z');
+   if(d.y!==null&&d.y!==actual.getUTCFullYear()||d.m!==actual.getUTCMonth()+1||d.d!==actual.getUTCDate()||d.w!==null&&d.w!=='日月火水木金土'[actual.getUTCDay()])return null;
+  }
+ }
+ return {checkin:strings[0]!,checkout:strings[1]!};
+}
+export async function readBookingPassiveStay(page:Page){
+ const date=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container'),party=page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/});
+ if(await date.count()!==1||await party.count()!==1||!await date.isVisible()||!await party.isVisible())return null;
+ const header=await readBookingHeaderSnapshot(page),stay=parseExplicitBookingStayLabels(header.dateText,header.dateAria);
+ if(!header.dateVisible||!header.partyVisible||header.expanded!=='false'||!stay||header.party===null||!bookingInformationTextSafe(header.party,200))return null;
+ const partyText=header.party.normalize('NFKC').trim().replace(/\s+/gu,' ');
+ if(!/^宿泊人数と部屋数[。:]?\s*(?:選択済みの内容[:]?\s*)?大人\s*2名\s*(?:[·・,、]\s*)?子供\s*0名\s*(?:[·・,、]\s*)?1部屋[。.]?$/u.test(partyText))return null;
+ return {header,stay,party:partyText};
 }
