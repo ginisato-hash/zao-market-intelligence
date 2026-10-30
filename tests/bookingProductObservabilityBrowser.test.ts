@@ -11,6 +11,39 @@ async function fixture(mode:'normal'|'wrong-room'|'wrong-tax'|'challenge'|'membe
  await page.route('**/*',route=>{requests++;return route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:productFactsFixtureHtml(mode)});});await page.goto(url);return {context,page,requests:()=>requests};
 }
 async function capture(f:Awaited<ReturnType<typeof fixture>>,guard?:BookingUiBlockGuard){return captureBookingRateCells(f.page,{propertySlug:'external',checkin:date,checkout:'2027-01-16',observedAt:'2026-10-30T00:00:00Z'},3,guard);}
+it('v4 proves explicit passive dates without clicking a datepicker capable of POST',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);
+ try{await f.page.locator('[data-testid="searchbox-dates-container"]').evaluate(e=>e.setAttribute('onclick',"document.documentElement.dataset.dateClicks='1';void fetch('/datepicker-post',{method:'POST',body:'synthetic'}).catch(()=>{});"));
+  const cap=await capture(f,guard);expect(cap.cells).toHaveLength(1);expect(cap.displayedCheckin).toBe(date);expect(deriveBookingRateCell(cap,cap.cells[0]! ).tupleAndProductBound).toBe(true);
+  expect(await f.page.locator('html').getAttribute('data-date-clicks')).toBeNull();expect(guard.informationRequestRefused).toBe(false);expect(f.requests()).toBe(1);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
+for(const mode of ['missing-year','conflicting-label','hidden-control','ambiguous-party','negated-party','alternative-party','conditional-party']as const)it('v4 '+mode+' remains empty without information interaction or global denial',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');
+ try{
+  const dateControl=f.page.locator('[data-testid="searchbox-dates-container"]');
+  if(mode==='missing-year')await dateControl.evaluate(e=>{e.setAttribute('aria-label','1月15日(金) — 1月16日(土)');});
+  if(mode==='conflicting-label')await dateControl.evaluate(e=>{e.textContent='2027年1月14日(木) — 2027年1月15日(金)';});
+  if(mode==='hidden-control')await dateControl.evaluate(e=>(e as HTMLElement).style.display='none');
+  if(mode==='ambiguous-party')await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人2名 子供0名 1部屋 または 大人3名'));
+  if(mode==='negated-party')await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人2名 子供0名 1部屋ではありません'));
+  if(mode==='alternative-party')await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人2名 子供0名 1部屋 または3名'));
+  if(mode==='conditional-party')await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人2名 子供0名 1部屋の場合'));
+  const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(cap.problems).toContain('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');expect(arm).not.toHaveBeenCalled();
+  expect(guard.informationRequestRefused).toBe(false);expect(guard.stateVerified).toBe(true);expect(f.requests()).toBe(1);expect(await f.page.locator('html').getAttribute('data-room-clicks')).toBeNull();
+ }finally{arm.mockRestore();await f.page.close();guard.dispose();await f.context.close();}
+});
+for(const target of ['date','party']as const)it('v4 rejects '+target+' control becoming hidden during information capture',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{
+  await f.page.locator('#room_type_id_123').evaluate((e,t)=>e.setAttribute('onclick',e.getAttribute('onclick')+`;document.querySelector('${t==='date'?'[data-testid="searchbox-dates-container"]':'#hp_availability_style_changes button[aria-label*="宿泊人数"]'}').style.display='none';`),target);
+  const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(cap.problems).toContain('CAPTURE_UNVERIFIED');expect(guard.informationRequestRefused).toBe(false);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
+it('v4 normalizes explicit fullwidth party digits without inferring missing counts',async()=>{
+ const f=await fixture();try{await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人２名 子供０名 １部屋'));
+  const cap=await capture(f);expect(cap.cells).toHaveLength(1);expect(deriveBookingRateCell(cap,cap.cells[0]!).tupleAndProductBound).toBe(true);
+ }finally{await f.context.close();}
+});
 it('captures positive controlled facts without any quantity selection, login, additional navigation or network',async()=>{const f=await fixture();try{const cap=await capture(f);expect(cap.problems,JSON.stringify(cap)).toEqual([]);expect(cap.parserVersion).toBe('booking-rate-cell-v4');expect(cap.cells).toHaveLength(1);const d=deriveBookingRateCell(cap,cap.cells[0]!);expect(d.tupleAndProductBound).toBe(true);expect(readBookingProductFacts(cap,cap.cells[0]!,d)).toMatchObject({maximumAdults:2,publicPriceProved:true,allMandatoryText:'すべての税金と料金が含まれています。'});expect(await f.page.locator('select').inputValue()).toBe('0');expect(await f.page.locator('[role="dialog"]:visible').count()).toBe(0);expect(f.page.url()).toBe(url);expect(f.requests()).toBe(1);}finally{await f.context.close();}});
 it('a page without exact rate rows never arms information controls and retains an explicit missing-row reason',async()=>{
  const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');
