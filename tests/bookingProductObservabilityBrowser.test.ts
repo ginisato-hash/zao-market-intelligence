@@ -30,7 +30,16 @@ for(const mode of ['missing-year','conflicting-label','hidden-control','ambiguou
   if(mode==='alternative-party')await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人2名 子供0名 1部屋 または3名'));
   if(mode==='conditional-party')await f.page.getByRole('button',{name:/宿泊人数と部屋数/}).evaluate(e=>e.setAttribute('aria-label','宿泊人数と部屋数。大人2名 子供0名 1部屋の場合'));
   const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(cap.problems).toContain('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');expect(arm).not.toHaveBeenCalled();
+  const denial=mode==='missing-year'?'PASSIVE_DATE_EXPLICIT_YEAR_MISSING':mode==='conflicting-label'?'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID':mode==='hidden-control'?'PASSIVE_DATE_CONTROL_NOT_VISIBLE':'PASSIVE_PARTY_LABEL_UNPROVEN';
+  expect(cap.problems).toContain(denial+'_NO_INTERACTION');
   expect(guard.informationRequestRefused).toBe(false);expect(guard.stateVerified).toBe(true);expect(f.requests()).toBe(1);expect(await f.page.locator('html').getAttribute('data-room-clicks')).toBeNull();
+ }finally{arm.mockRestore();await f.page.close();guard.dispose();await f.context.close();}
+});
+for(const expanded of [null,'true','unknown']as const)it('v4 records a closed denial for date aria-expanded='+String(expanded)+' without exporting the header',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');
+ try{await f.page.locator('[data-testid="searchbox-dates-container"]').evaluate((e,value)=>{if(value===null)e.removeAttribute('aria-expanded');else e.setAttribute('aria-expanded',value);},expanded);
+  const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(cap.problems).toContain('PASSIVE_DATE_CONTROL_NOT_CLOSED_NO_INTERACTION');expect(arm).not.toHaveBeenCalled();
+  expect(cap.displayedCheckin).toBeNull();expect(cap.displayedParty).toBe('');expect(f.requests()).toBe(1);expect(guard.stateVerified).toBe(true);
  }finally{arm.mockRestore();await f.page.close();guard.dispose();await f.context.close();}
 });
 for(const target of ['date','party']as const)it('v4 rejects '+target+' control becoming hidden during information capture',async()=>{

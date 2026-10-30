@@ -144,12 +144,25 @@ export function parseExplicitBookingStayLabels(dateText:string,dateAria:string|n
  }
  return {checkin:strings[0]!,checkout:strings[1]!};
 }
-export async function readBookingPassiveStay(page:Page){
+export type BookingPassiveStayDenial = 'PASSIVE_DATE_CONTROL_NOT_UNIQUE'|'PASSIVE_PARTY_CONTROL_NOT_UNIQUE'|'PASSIVE_DATE_CONTROL_NOT_VISIBLE'|'PASSIVE_PARTY_CONTROL_NOT_VISIBLE'|'PASSIVE_DATE_CONTROL_NOT_CLOSED'|'PASSIVE_DATE_EXPLICIT_YEAR_MISSING'|'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID'|'PASSIVE_PARTY_LABEL_UNPROVEN';
+// Closed diagnostic codes only: do not export DOM labels, URLs or page text.
+export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:BookingPassiveStayDenial)=>void){
+ const deny=(reason:BookingPassiveStayDenial)=>{recordDenial?.(reason);return null;};
  const date=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container'),party=page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/});
- if(await date.count()!==1||await party.count()!==1||!await date.isVisible()||!await party.isVisible())return null;
+ if(await date.count()!==1)return deny('PASSIVE_DATE_CONTROL_NOT_UNIQUE');
+ if(await party.count()!==1)return deny('PASSIVE_PARTY_CONTROL_NOT_UNIQUE');
+ if(!await date.isVisible())return deny('PASSIVE_DATE_CONTROL_NOT_VISIBLE');
+ if(!await party.isVisible())return deny('PASSIVE_PARTY_CONTROL_NOT_VISIBLE');
  const header=await readBookingHeaderSnapshot(page),stay=parseExplicitBookingStayLabels(header.dateText,header.dateAria);
- if(!header.dateVisible||!header.partyVisible||header.expanded!=='false'||!stay||header.party===null||!bookingInformationTextSafe(header.party,200))return null;
+ if(!header.dateVisible)return deny('PASSIVE_DATE_CONTROL_NOT_VISIBLE');
+ if(!header.partyVisible)return deny('PASSIVE_PARTY_CONTROL_NOT_VISIBLE');
+ if(header.expanded!=='false')return deny('PASSIVE_DATE_CONTROL_NOT_CLOSED');
+ if(!stay){
+  const full=[header.dateText,header.dateAria??''].some(label=>bookingInformationTextSafe(label,180)&&dateLabelParts(label)?.every(d=>d.y!==null));
+  return deny(full?'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID':'PASSIVE_DATE_EXPLICIT_YEAR_MISSING');
+ }
+ if(header.party===null||!bookingInformationTextSafe(header.party,200))return deny('PASSIVE_PARTY_LABEL_UNPROVEN');
  const partyText=header.party.normalize('NFKC').trim().replace(/\s+/gu,' ');
- if(!/^宿泊人数と部屋数[。:]?\s*(?:選択済みの内容[:]?\s*)?大人\s*2名\s*(?:[·・,、]\s*)?子供\s*0名\s*(?:[·・,、]\s*)?1部屋[。.]?$/u.test(partyText))return null;
+ if(!/^宿泊人数と部屋数[。:]?\s*(?:選択済みの内容[:]?\s*)?大人\s*2名\s*(?:[·・,、]\s*)?子供\s*0名\s*(?:[·・,、]\s*)?1部屋[。.]?$/u.test(partyText))return deny('PASSIVE_PARTY_LABEL_UNPROVEN');
  return {header,stay,party:partyText};
 }
