@@ -1,5 +1,5 @@
 {
-  "generated_at_jst": "2026-10-30T23:10:05+09:00",
+  "generated_at_jst": "2026-10-31T01:10:06+09:00",
   "latest_collected_at_jst": "2026-10-30T22:00:06+09:00",
   "history_rows_total": 78345,
   "latest_observation_rows": 7817,
@@ -69,7 +69,7 @@
     {
       "property": "miuraya",
       "coverage_30d": 1,
-      "coverage_90d": 1,
+      "coverage_90d": 0.9889,
       "status": "warning"
     },
     {
