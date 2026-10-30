@@ -6,6 +6,7 @@ export class BookingUiBlockGuard {
   reason: BlockReason = null;
   stateVerified = true;
   informationRequestRefused = false;
+  informationDeniedRequest:{method:string;resourceType:string;navigation:boolean;abortOutcome:'SUCCEEDED'|'FAILED'}|null=null;
   private informationArmed = false;
   private finishPromise:Promise<void>|null = null;
   private disposePending = false;
@@ -16,7 +17,13 @@ export class BookingUiBlockGuard {
   };
   private readonly informationRoute = async (route:Route):Promise<void> => {
     this.informationRequestRefused=true;this.stateVerified=false;
-    await route.abort('blockedbyclient').catch(()=>{});
+    const outcome=await route.abort('blockedbyclient').then(()=>'SUCCEEDED' as const,()=>'FAILED' as const);
+    // Closed diagnostics only. No URL, headers, request body, identifiers or free text.
+    try{const request=route.request(),method=request.method().toUpperCase(),resourceType=request.resourceType();
+      this.informationDeniedRequest??={method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(method)?method:'OTHER',
+        resourceType:['document','xhr','fetch','image','stylesheet','script','font','websocket'].includes(resourceType)?resourceType:'other',
+        navigation:request.isNavigationRequest(),abortOutcome:outcome};
+    }catch{/* Optional diagnostics must not interfere with the already attempted abort. */}
   };
   private readonly unexpectedPage = (other:Page):void => {
     if(other!==this.page){this.informationRequestRefused=true;this.stateVerified=false;void other.close().catch(()=>{});}

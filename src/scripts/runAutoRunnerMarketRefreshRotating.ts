@@ -197,6 +197,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
         await page.waitForTimeout(5_000);
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
+        // Baseline screenshots may load ordinary page resources. Take them before
+        // the information guard, which must remain strict through page close.
+        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
         if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
           try{
             const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
@@ -208,7 +211,6 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
 
           }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
         }
-        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
       finally {
         if(pageGuard)await pageGuard.checkpoint();
@@ -216,7 +218,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         if(pageGuard){
           await pageGuard.finishReadOnlyInformation();
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
-          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;}
+          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;}
           pageGuard.dispose();
         }
       }
