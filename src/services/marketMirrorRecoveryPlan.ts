@@ -8,12 +8,14 @@ import { hostname } from "node:os";
 import { historyRowFromCsvRecord } from "./localHistoryAppendValidationPolicy";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { mapHistoryRowToMarketSignalHistoryRow, parseCsvTable, REQUIRED_HISTORY_COLUMNS } from "./historyToDbSyncDryRun";
 import { applyRealSync } from "./historyToDbSyncRealRun";
 import { buildRowHash, buildRowId, HISTORY_CSV_HEADERS, renderHistoryCsv, shardMonthFromCheckin, type HistoryRow } from "./localHistorySchemaDesign";
 import { APPEND_LOCK_FILENAME, parseShardRows } from "./localHistoryRealAppend";
 import { encryptMirrorBackup, decryptMirrorBackup } from "./mirrorRecoveryEncryption";
 const hash = (text: string | Buffer): string => createHash("sha256").update(text).digest("hex");
+const databaseEntryPath = realpathSync(createRequire(import.meta.url).resolve("better-sqlite3"));
 function fail(reason: string): never { throw new Error(`MIRROR_RECOVERY_REFUSED(${reason})`); }
 const stamp = (p: string): string => { const s = statSync(p, { bigint: true }); return [s.dev, s.ino, s.size, s.mtimeNs].join("|"); };
 const REF = /^https:\/\/github\.com\/ginisato-hash\/zao-market-intelligence-private\/issues\/13#issuecomment-\d+$/u;
@@ -137,6 +139,7 @@ interface Context {
     prefixBytes: Map<string, number>;
     appendEligible: boolean;
     assertExecutionSource(): void;
+    executionRoot: string;
     sourceUnchanged(): void;
     legacyUnchanged(): void;
 }
@@ -144,7 +147,7 @@ const genuine = new WeakMap<object, Context>();
 // The execution checkout is deliberately immutable and separate from the
 // canonical history repository. History/BI commits may advance independently;
 // they never rebind the code release or a previously accepted plan.
-function bindIsolatedExecution(historyDir: string): { releaseGitSha: string; assert(): void } {
+function bindIsolatedExecution(historyDir: string): { root: string; releaseGitSha: string; assert(): void } {
     const modulePath = fileURLToPath(import.meta.url), moduleDir = dirname(modulePath);
     const git = (dir: string, args: string[]): string => execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", dir, ...args],
         { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000, maxBuffer: 128 * 1024 }).trim();
@@ -152,16 +155,25 @@ function bindIsolatedExecution(historyDir: string): { releaseGitSha: string; ass
         try { return realpathSync(git(historyDir, ["rev-parse", "--show-toplevel"])); }
         catch (e) {
             const error = e as { status?: number; stderr?: Buffer | string };
-            if (error.status === 128 && String(error.stderr).includes("not a git repository")) return null;
+            if (error.status === 128 && String(error.stderr).includes("not a git repository")) {
+                let parent = historyDir;
+                for (let depth = 0; depth < 64; depth++) {
+                    try { lstatSync(join(parent, ".git")); return fail("HISTORY_REPOSITORY_UNVERIFIED"); }
+                    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") return fail("HISTORY_REPOSITORY_UNVERIFIED"); }
+                    const next = dirname(parent); if (next === parent) return null; parent = next;
+                }
+            }
             return fail("HISTORY_REPOSITORY_UNVERIFIED");
         }
     };
     const identity = (path: string): string => { const s = lstatSync(path, { bigint: true }); return [s.dev, s.ino].join("|"); };
     const snapshot = () => {
-        const root = realpathSync(git(moduleDir, ["rev-parse", "--show-toplevel"])), historyRoot = dataRepo();
-        if (root === historyRoot) fail("ISOLATED_EXECUTION_CHECKOUT_REQUIRED");
+        const root = realpathSync(git(moduleDir, ["rev-parse", "--show-toplevel"]));
+        if (historyDir === root || historyDir.startsWith(root + "/")) fail("ISOLATED_EXECUTION_CHECKOUT_REQUIRED");
+        const historyRoot = dataRepo(); if (root === historyRoot) fail("ISOLATED_EXECUTION_CHECKOUT_REQUIRED");
         if (realpathSync(modulePath) !== modulePath || !modulePath.startsWith(root + "/")) fail("EXECUTION_SOURCE_CANONICAL_PATH");
         const dependencyPath = join(root, "node_modules"), dependency = existsSync(dependencyPath) ? realpathSync(dependencyPath) : null;
+        if (!dependency || !statSync(dependency).isDirectory() || !databaseEntryPath.startsWith(dependency + "/")) fail("EXECUTION_DEPENDENCY_BINDING");
         const status = git(root, ["status", "--porcelain", "-z", "--untracked-files=all"]);
         // A pre-existing dependency link is an installation input, not new code.
         // Bind its real target/inode; every other unknown or dirty path refuses.
@@ -169,14 +181,29 @@ function bindIsolatedExecution(historyDir: string): { releaseGitSha: string; ass
         const releaseGitSha = git(root, ["rev-parse", "HEAD"]);
         if (!/^[0-9a-f]{40}$/u.test(releaseGitSha)) fail("CODE_RELEASE_UNKNOWN");
         return { root, rootIdentity: identity(root), modulePath, moduleIdentity: identity(modulePath), moduleSha256: hash(readFileSync(modulePath)),
-            dependency, dependencyIdentity: dependency ? identity(dependency) : null, historyRoot, releaseGitSha };
+            dependency, dependencyIdentity: identity(dependency), databaseEntryPath, databaseEntryIdentity: identity(databaseEntryPath), historyRoot, releaseGitSha };
     };
     const initial = snapshot();
-    return { releaseGitSha: initial.releaseGitSha, assert(): void {
+    return { root: initial.root, releaseGitSha: initial.releaseGitSha, assert(): void {
         const current = snapshot();
         if (current.releaseGitSha !== initial.releaseGitSha) fail("APPEND_RELEASE_CHANGED");
         if (JSON.stringify(current) !== JSON.stringify(initial)) fail("EXECUTION_SOURCE_CHANGED");
     } };
+}
+function externalBackupPath(path: string, executionRoot: string): string {
+    const parts: string[] = []; let parent = resolve(path);
+    for (let depth = 0; depth < 64; depth++) {
+        try {
+            lstatSync(parent);
+            const canonical = resolve(realpathSync(parent), ...parts.slice().reverse());
+            if (canonical === executionRoot || canonical.startsWith(executionRoot + "/") || executionRoot.startsWith(canonical === "/" ? "/" : canonical + "/")) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
+            return canonical;
+        } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== "ENOENT") return fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
+        }
+        const next = dirname(parent); if (next === parent) break; parts.push(basename(parent)); parent = next;
+    }
+    return fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
 }
 interface SourceDbBinding { alias: string; canonical: string; device: bigint; inode: bigint; }
 function bindSourceDatabase(db: Database.Database): SourceDbBinding | null {
@@ -350,7 +377,7 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                     stage.close();
             } };
         assertSourceDatabaseBinding(db, sourceDbBinding);
-        genuine.set(result, { historyDir: dir, sourceDatabase: db, sourceDbBinding, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, prefixBytes, appendEligible: !resume, assertExecutionSource: execution.assert, sourceUnchanged,
+        genuine.set(result, { historyDir: dir, sourceDatabase: db, sourceDbBinding, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, prefixBytes, appendEligible: !resume, assertExecutionSource: execution.assert, executionRoot: execution.root, sourceUnchanged,
             legacyUnchanged(): void {
                 for (const [id, sha] of legacyRawHashes) {
                     const r = getRaw.get(id) as {
@@ -564,10 +591,12 @@ function stageLegacy(prepared: PreparedMirrorRecovery, ctx: Context): void {
 export function persistMirrorRecoveryPlan(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, backupDir: string, lock: MirrorRecoveryLock): void {
     const ctx = acceptance(prepared, a, "MIRROR_RECONCILIATION");
     requireLock(lock, ctx.historyDir);
+    const backupPath = externalBackupPath(backupDir, ctx.executionRoot);
     ctx.sourceUnchanged();
     ctx.legacyUnchanged();
-    mkdirSync(backupDir, { recursive: true });
-    const backup = realpathSync(backupDir);
+    mkdirSync(backupPath, { recursive: true });
+    const backup = realpathSync(backupPath);
+    if (backup !== backupPath) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
     if (backup === ctx.historyDir)
         fail("BACKUP_MUST_BE_SEPARATE");
     const path = join(backup, `recovery_plan_${prepared.plan.planSha256}.json`), body = JSON.stringify(prepared.plan);
@@ -607,6 +636,7 @@ export function readPersistedMirrorRecoveryPlan(backupDir: string, a: MirrorReco
 export function resumeMirrorRecovery(db: Database.Database, historyDir: string, backupDir: string, a: MirrorRecoveryAcceptance, key: Buffer, lock: MirrorRecoveryLock): PreparedMirrorRecovery {
     const dir = realpathSync(historyDir);
     requireLock(lock, dir);
+    backupDir = externalBackupPath(backupDir, bindIsolatedExecution(dir).root);
     const saved = readPersistedMirrorRecoveryPlan(backupDir, a);
     const originals = new Map<string, Buffer>(), expectedCurrent = new Map<string, string>();
     for (const pin of saved.pins) {
@@ -690,6 +720,7 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
 } {
     const ctx = acceptance(prepared, a, "MIRROR_RECONCILIATION");
     requireLock(lock, ctx.historyDir);
+    const backupPath = externalBackupPath(backupDir, ctx.executionRoot);
     ctx.sourceUnchanged();
     ctx.legacyUnchanged();
     if (ctx.sourceDatabase.readonly)
@@ -700,8 +731,9 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
         return { appended: 0, touchedShards: 0 };
     if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256)
         fail("DB_CHANGED");
-    mkdirSync(backupDir, { recursive: true });
-    const backup = realpathSync(backupDir);
+    mkdirSync(backupPath, { recursive: true });
+    const backup = realpathSync(backupPath);
+    if (backup !== backupPath) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
     if (backup === ctx.historyDir)
         fail("BACKUP_MUST_BE_SEPARATE");
     persistMirrorRecoveryPlan(prepared, a, backup, lock);
