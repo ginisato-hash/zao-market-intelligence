@@ -60,8 +60,10 @@ try{
  }
 }catch(e){if(mode==='history-data'||mode==='mid-transaction'||mode==='external-backup')throw e;console.log(JSON.stringify({refused:true,noOutput:output?!existsSync(output):null,reason:String(e.message).replaceAll(code,'[fixture]').replaceAll(data,'[fixture]')}));}finally{q?.close();p?.close();db.close();}
 `;
- const path=join(root,'child.mjs');writeFileSync(path,script.replaceAll('\\n','\n'));
- return JSON.parse(execFileSync(process.execPath,['--import',loader,path],{cwd:root,encoding:'utf8',timeout:30000,env:{PATH:process.env.PATH??'/usr/bin:/bin',TZ:'Asia/Tokyo'}}).trim());
+ const path=join(root,'child.mjs');writeFileSync(path,script);
+ try{return JSON.parse(execFileSync(process.execPath,['--import',loader,path],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:30000,env:{PATH:process.env.PATH??'/usr/bin:/bin',TZ:'Asia/Tokyo'}}).trim());}
+ catch(e){const error=e as {stderr?:string;message:string},details=String(error.stderr??error.message);writeFileSync(join(root,'child.stderr.log'),details);
+  const line=details.split('\n').find(s=>/^(?:Error|SyntaxError):|MIRROR_RECOVERY_REFUSED/u.test(s))??details.slice(-500);throw Error('FIXTURE_'+mode+': '+line.slice(0,500));}
 }
 it('separate execution survives canonical history append and real data-only Git commit',()=>expect(run('history-data')).toMatchObject({passed:true,historyRows:3,dataHeadChanged:true,codeHeadUnchanged:true,releaseUnchanged:true}));
 for(const mode of ['source-commit','test-commit','dependency-commit','unknown-commit','dirty-source','dirty-unknown','ancestor','non-descendant','module-replaced','module-alias','source-root-alias','dependency-alias','same-checkout','missing-dependency-initial','dangling-dependency-initial','file-dependency-initial','other-dependency-initial','same-checkout-broken','broken-history-git']as Mode[])it('refuses execution '+mode,()=>{const r=run(mode);expect(r.refused).toBe(true);expect(r.reason).toMatch(/EXECUTION_SOURCE|EXECUTION_DEPENDENCY|APPEND_RELEASE_CHANGED|ISOLATED_EXECUTION|HISTORY_REPOSITORY_UNVERIFIED/);});
