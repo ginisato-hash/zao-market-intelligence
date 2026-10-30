@@ -136,10 +136,48 @@ interface Context {
     dbHashes: Map<string, string>;
     prefixBytes: Map<string, number>;
     appendEligible: boolean;
+    assertExecutionSource(): void;
     sourceUnchanged(): void;
     legacyUnchanged(): void;
 }
 const genuine = new WeakMap<object, Context>();
+// The execution checkout is deliberately immutable and separate from the
+// canonical history repository. History/BI commits may advance independently;
+// they never rebind the code release or a previously accepted plan.
+function bindIsolatedExecution(historyDir: string): { releaseGitSha: string; assert(): void } {
+    const modulePath = fileURLToPath(import.meta.url), moduleDir = dirname(modulePath);
+    const git = (dir: string, args: string[]): string => execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", dir, ...args],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000, maxBuffer: 128 * 1024 }).trim();
+    const dataRepo = (): string | null => {
+        try { return realpathSync(git(historyDir, ["rev-parse", "--show-toplevel"])); }
+        catch (e) {
+            const error = e as { status?: number; stderr?: Buffer | string };
+            if (error.status === 128 && String(error.stderr).includes("not a git repository")) return null;
+            return fail("HISTORY_REPOSITORY_UNVERIFIED");
+        }
+    };
+    const identity = (path: string): string => { const s = lstatSync(path, { bigint: true }); return [s.dev, s.ino].join("|"); };
+    const snapshot = () => {
+        const root = realpathSync(git(moduleDir, ["rev-parse", "--show-toplevel"])), historyRoot = dataRepo();
+        if (root === historyRoot) fail("ISOLATED_EXECUTION_CHECKOUT_REQUIRED");
+        if (realpathSync(modulePath) !== modulePath || !modulePath.startsWith(root + "/")) fail("EXECUTION_SOURCE_CANONICAL_PATH");
+        const dependencyPath = join(root, "node_modules"), dependency = existsSync(dependencyPath) ? realpathSync(dependencyPath) : null;
+        const status = git(root, ["status", "--porcelain", "-z", "--untracked-files=all"]);
+        // A pre-existing dependency link is an installation input, not new code.
+        // Bind its real target/inode; every other unknown or dirty path refuses.
+        for (const row of status.split("\0")) if (row && !(row === "?? node_modules" && dependency !== null && lstatSync(dependencyPath).isSymbolicLink())) fail("EXECUTION_SOURCE_DIRTY");
+        const releaseGitSha = git(root, ["rev-parse", "HEAD"]);
+        if (!/^[0-9a-f]{40}$/u.test(releaseGitSha)) fail("CODE_RELEASE_UNKNOWN");
+        return { root, rootIdentity: identity(root), modulePath, moduleIdentity: identity(modulePath), moduleSha256: hash(readFileSync(modulePath)),
+            dependency, dependencyIdentity: dependency ? identity(dependency) : null, historyRoot, releaseGitSha };
+    };
+    const initial = snapshot();
+    return { releaseGitSha: initial.releaseGitSha, assert(): void {
+        const current = snapshot();
+        if (current.releaseGitSha !== initial.releaseGitSha) fail("APPEND_RELEASE_CHANGED");
+        if (JSON.stringify(current) !== JSON.stringify(initial)) fail("EXECUTION_SOURCE_CHANGED");
+    } };
+}
 interface SourceDbBinding { alias: string; canonical: string; device: bigint; inode: bigint; }
 function bindSourceDatabase(db: Database.Database): SourceDbBinding | null {
     try {
@@ -207,8 +245,8 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
 }): PreparedMirrorRecovery {
     if (pins.length === 0 || pins.length > 240 || new Set(pins.map(p => p.name)).size !== pins.length)
         fail("SHARD_BUDGET");
-    const sourceDbBinding = bindSourceDatabase(db);
-    const dir = realpathSync(historyDir), dbMap = resume?.originalDb ?? dbHashes(db), stage = new Database(":memory:");
+    const dir = realpathSync(historyDir), execution = bindIsolatedExecution(dir), sourceDbBinding = bindSourceDatabase(db);
+    const dbMap = resume?.originalDb ?? dbHashes(db), stage = new Database(":memory:");
     const inventory = (): string => readdirSync(dir).filter(n => /^zao_signals_\d{4}_\d{2}\.csv$/u.test(n)).sort().join("|");
     let expectedNames = pins.map(p => p.name).sort().join("|");
     if (inventory() !== expectedNames) {
@@ -262,11 +300,13 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
             stamps.set(path, before);
         }
         const sourceUnchanged = (): void => {
+            execution.assert();
             if (inventory() !== expectedNames)
                 fail("SOURCE_UNIVERSE_CHANGED");
             for (const [p, s] of stamps)
                 if (stamp(p) !== s)
                     fail("SOURCE_CHANGED");
+            execution.assert();
         };
         sourceUnchanged();
         const historySha = digestRows(stage.prepare("SELECT row_id,row_hash FROM history ORDER BY row_id COLLATE BINARY").iterate() as Iterable<{
@@ -298,9 +338,8 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
             row_hash: string;
         }>)
             union.set(r.row_id, r.row_hash);
-        const releaseGitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim();
-        if (!/^[0-9a-f]{40}$/u.test(releaseGitSha))
-            fail("CODE_RELEASE_UNKNOWN");
+        execution.assert();
+        const releaseGitSha = execution.releaseGitSha;
         const base = { kind: "ZMI_MIRROR_RECOVERY_PLAN_V1" as const, releaseGitSha, dbIdentitySha256: mapDigest(dbMap), historyIdentitySha256: historySha, unionIdentitySha256: mapDigest(union), historyRows: count, dbRows: dbMap.size,
             historyOnly: missing, historicalIdentityFormatExceptions: historicalIds, dbOnly: legacy.length, recoverableLegacyRows: legacy.length, legacyIdentitySha256: mapDigest(legacyPairs), legacySavedJsonSha256: mapDigest(legacyRawHashes), pins: [...pins].map(p => Object.freeze({ ...p })), originalSourceAuthenticity: "NOT_ESTABLISHED" as const };
         const plan = { ...base, planSha256: hash(JSON.stringify(base)) };
@@ -311,7 +350,7 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                     stage.close();
             } };
         assertSourceDatabaseBinding(db, sourceDbBinding);
-        genuine.set(result, { historyDir: dir, sourceDatabase: db, sourceDbBinding, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, prefixBytes, appendEligible: !resume, sourceUnchanged,
+        genuine.set(result, { historyDir: dir, sourceDatabase: db, sourceDbBinding, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, prefixBytes, appendEligible: !resume, assertExecutionSource: execution.assert, sourceUnchanged,
             legacyUnchanged(): void {
                 for (const [id, sha] of legacyRawHashes) {
                     const r = getRaw.get(id) as {
@@ -322,11 +361,13 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                 }
             },
             admitOwnPublication(path: string): void {
+                execution.assert();
                 const next = [...new Set([...expectedNames.split("|"), basename(path)])].sort().join("|");
                 if (inventory() !== next)
                     fail("SOURCE_UNIVERSE_CHANGED");
                 expectedNames = next;
                 stamps.set(path, stamp(path));
+                execution.assert();
             } });
         return Object.freeze(result);
     }
@@ -339,6 +380,7 @@ function acceptance(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptanc
     const ctx = genuine.get(prepared);
     if (!ctx || !a || a.purpose !== purpose || a.planSha256 !== prepared.plan.planSha256 || a.releaseGitSha !== prepared.plan.releaseGitSha || !/^[0-9a-f]{40}$/u.test(a.releaseGitSha) || !REF.test(a.tdAcceptanceRef) || !REF.test(a.ownerApprovalRef))
         return fail("EXPLICIT_ACCEPTANCE_REQUIRED");
+    ctx.assertExecutionSource();
     assertSourceDatabaseBinding(ctx.sourceDatabase, ctx.sourceDbBinding);
     // Once a recovery phase is accepted, do not reinterpret its prepared stage
     // as a new append-only plan. Existing persisted plans/receipts keep their identity.
@@ -368,6 +410,7 @@ export function extendPreparedMirrorRecoveryAppendOnly(prepared: PreparedMirrorR
     if (pins.map(p => p.name).sort().join("|") !== expected) fail("APPEND_PIN_UNIVERSE");
     const dir = ctx.historyDir, inventory = () => readdirSync(dir).filter(n => /^zao_signals_\d{4}_\d{2}\.csv$/u.test(n)).sort().join("|");
     const noWriter = () => {
+        ctx.assertExecutionSource();
         if (inventory() !== expected || existsSync(join(dir, APPEND_LOCK_FILENAME))) fail("APPEND_WRITER_OR_UNIVERSE");
         assertSourceDatabaseBinding(ctx.sourceDatabase, ctx.sourceDbBinding);
         if (ctx.sourceDbBinding && ["-wal", "-shm", "-journal"].some(s => existsSync(ctx.sourceDbBinding!.canonical + s))) fail("APPEND_DB_SIDECAR");
@@ -388,8 +431,7 @@ export function extendPreparedMirrorRecoveryAppendOnly(prepared: PreparedMirrorR
     noWriter();
     if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256) fail("APPEND_DB_CHANGED");
     ctx.legacyUnchanged();
-    const release = execFileSync("git", ["rev-parse", "HEAD"], { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim();
-    if (release !== prepared.plan.releaseGitSha) fail("APPEND_RELEASE_CHANGED");
+    ctx.assertExecutionSource();
     const images = new Map<string, { sha256: string; bytes: number }>(), rows: Record<string, string>[] = [];
     let totalBytes = 0;
     for (const pin of pins) {
@@ -414,13 +456,15 @@ export function extendPreparedMirrorRecoveryAppendOnly(prepared: PreparedMirrorR
         images.set(pin.name, { sha256: pin.sha256, bytes: raw.length });
     }
     const sourceUnchanged = () => {
+        ctx.assertExecutionSource();
         if (inventory() !== expected) fail("APPEND_WRITER_OR_UNIVERSE");
         for (const [name, image] of images) if (hash(read(join(dir, name))) !== image.sha256) fail("APPEND_SOURCE_CHANGED");
+        ctx.assertExecutionSource();
     };
     if (!rows.length && !newShardNames.length && pins.every(p => p.sha256 === oldPins.get(p.name)!.sha256 && p.rows === oldPins.get(p.name)!.rows)) {
         noWriter(); sourceUnchanged(); ctx.legacyUnchanged();
         if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256) fail("APPEND_DB_CHANGED");
-        if (execFileSync("git", ["rev-parse", "HEAD"], { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim() !== release) fail("APPEND_RELEASE_CHANGED");
+        ctx.assertExecutionSource();
         return { prepared, appendedRows: 0, oldRowsSemanticallyRevalidated: 0 };
     }
     let next: PreparedMirrorRecovery | undefined;
@@ -441,15 +485,17 @@ export function extendPreparedMirrorRecoveryAppendOnly(prepared: PreparedMirrorR
         next = Object.freeze({ plan, legacyRows: prepared.legacyRows, close: () => { if (genuine.delete(next!)) ctx.stage.close(); } });
         noWriter(); sourceUnchanged(); ctx.legacyUnchanged();
         if (mapDigest(dbHashes(ctx.sourceDatabase)) !== plan.dbIdentitySha256) fail("APPEND_DB_CHANGED");
-        if (execFileSync("git", ["rev-parse", "HEAD"], { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim() !== release) fail("APPEND_RELEASE_CHANGED");
+        ctx.assertExecutionSource();
     })();
     if (!next) return fail("APPEND_RAM_COMMIT_UNPROVEN");
     genuine.delete(prepared);
     genuine.set(next, { ...ctx, prefixBytes: new Map([...images].map(([n, p]) => [n, p.bytes])), sourceUnchanged,
         admitOwnPublication(path: string): void {
+            ctx.assertExecutionSource();
             // Accepted legacy publication may only target an already pinned shard.
             const name = basename(path); if (!images.has(name) || realpathSync(path) !== join(dir, name)) fail("APPEND_PUBLICATION_SCOPE");
             const raw = read(path); images.set(name, { sha256: hash(raw), bytes: raw.length });
+            ctx.assertExecutionSource();
         } });
     return { prepared: next, appendedRows: rows.length, oldRowsSemanticallyRevalidated: 0 };
 }
