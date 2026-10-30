@@ -18,6 +18,32 @@ it('v4 proves explicit passive dates without clicking a datepicker capable of PO
   expect(await f.page.locator('html').getAttribute('data-date-clicks')).toBeNull();expect(guard.informationRequestRefused).toBe(false);expect(f.requests()).toBe(1);
  }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
 });
+async function typedDates(f:Awaited<ReturnType<typeof fixture>>){await f.page.locator('[data-testid="searchbox-dates-container"]').evaluate(e=>{e.removeAttribute('aria-label');e.innerHTML='<span data-testid="date-display-field-start" aria-label="チェックイン日：2027年1月15日金曜日">1月15日(金)</span> — <span data-testid="date-display-field-end" aria-label="チェックアウト日：2027年1月16日土曜日">1月16日(土)</span>';e.setAttribute('onclick',"document.documentElement.dataset.dateClicks='1';void fetch('/date-post',{method:'POST',body:'synthetic'}).catch(()=>{});");});}
+it('v4 reads explicit years from visible same-control typed fields without opening the calendar',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{await typedDates(f);const cap=await capture(f,guard);expect(cap.cells).toHaveLength(1);expect(cap.displayedCheckin).toBe(date);expect(cap.displayedCheckout).toBe('2027-01-16');expect(await f.page.locator('html').getAttribute('data-date-clicks')).toBeNull();expect(f.requests()).toBe(1);expect(guard.informationRequestRefused).toBe(false);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
+for(const mode of ['hidden','duplicate','outside-control','one-year-missing','conflict']as const)it('typed field '+mode+' cannot prove the stay or trigger information interactions',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');try{await typedDates(f);const start=f.page.getByTestId('date-display-field-start');
+  if(mode==='hidden')await start.evaluate(e=>(e as HTMLElement).style.display='none');if(mode==='duplicate')await start.evaluate(e=>e.after(e.cloneNode(true)));if(mode==='outside-control')await start.evaluate(e=>document.body.append(e));
+  if(mode==='one-year-missing')await start.evaluate(e=>e.setAttribute('aria-label','1月15日(金)'));if(mode==='conflict')await start.evaluate(e=>e.setAttribute('aria-label','2027年1月14日木曜日'));
+  const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(arm).not.toHaveBeenCalled();expect(f.requests()).toBe(1);expect(guard.informationRequestRefused).toBe(false);
+  if(mode==='duplicate'||mode==='outside-control')expect(cap.problems).toContain('PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE_NO_INTERACTION');
+  if(mode==='conflict'){expect(cap.problems).toContain('PASSIVE_OUTER_DATE_NO_YEAR_TOKENS_NO_INTERACTION');expect(cap.problems).toContain('PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID_NO_INTERACTION');expect(cap.problems).not.toContain('PASSIVE_DATE_EXPLICIT_YEAR_MISSING_NO_INTERACTION');}
+ }finally{arm.mockRestore();await f.page.close();guard.dispose();await f.context.close();}
+});
+for(const conflict of [false,true])it('an explicit parent range '+(conflict?'refuses conflicting':'confirms partial')+' typed descendant labels',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{await typedDates(f);await f.page.locator('[data-testid="searchbox-dates-container"]').evaluate(e=>e.setAttribute('aria-label','2027年1月15日(金) — 2027年1月16日(土)'));
+  await f.page.getByTestId('date-display-field-start').evaluate((e,bad)=>e.setAttribute('aria-label',bad?'2028年1月15日':'1月15日(金)'),conflict);
+  await f.page.getByTestId('date-display-field-end').evaluate(e=>e.setAttribute('aria-label','1月16日(土)'));
+  const cap=await capture(f,guard);expect(cap.cells).toHaveLength(conflict?0:1);expect(f.requests()).toBe(1);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
+it('a typed field changing after an information click invalidates the capture',async()=>{
+ const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{await typedDates(f);await f.page.locator('#room_type_id_123').evaluate(e=>e.setAttribute('onclick',e.getAttribute('onclick')+";document.querySelector('[data-testid=\\\"date-display-field-start\\\"]').setAttribute('aria-label','2027年1月14日木曜日');"));
+  const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(await f.page.getByTestId('date-display-field-start').getAttribute('aria-label')).toBe('2027年1月14日木曜日');expect(f.requests()).toBe(1);
+ }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
+});
 for(const mode of ['missing-year','conflicting-label','hidden-control','ambiguous-party','negated-party','alternative-party','conditional-party']as const)it('v4 '+mode+' remains empty without information interaction or global denial',async()=>{
  const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');
  try{
