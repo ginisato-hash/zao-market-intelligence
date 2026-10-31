@@ -1,8 +1,8 @@
 import {readBookingProductFacts} from './bookingProductObservability';
 // Pure offline diagnostics, never an admission route. No price estimation, product substitution or authority.
 import {deriveBookingRateCell,type BookingRateCellCapture} from './bookingRateCellEvidence';
-import {deriveBookingPrepayment} from './bookingPaymentTerms';
-import {hasExplicitAllMandatoryTotal} from './bookingTwoPersonMarketAdmission';
+import {deriveBookingPrepayment,deriveBookingPrepaymentV2,bookingSemanticTermsV2} from './bookingPaymentTerms';
+import {hasExplicitAllMandatoryTotal,selectedBookingTotalV2} from './bookingTwoPersonMarketAdmission';
 import {digest} from './marketRowPriceQuality';
 
 /** A requested party, room name or bed count is not evidence of maximum adult capacity. */
@@ -18,22 +18,24 @@ function explicitAdultMaximum(roomText:string,roomName:string):number|null{
 export function diagnoseBookingFixedProductCapture(cap:BookingRateCellCapture){
  if(cap.cells.length>5||cap.cells.some(c=>[c.roomText,c.priceText,c.policyText??''].some(s=>s.length>4000)))throw Error('DIAGNOSTIC_CAPTURE_BUDGET');
  const cells=cap.cells.map(cell=>{
-  const d=deriveBookingRateCell(cap,cell),extra=readBookingProductFacts(cap,cell,d),maxAdults=extra.maximumAdults??explicitAdultMaximum(cell.roomText,cell.roomName),allMandatory=hasExplicitAllMandatoryTotal(cell.priceText+'。'+(extra.allMandatoryText??'')),prepayment=deriveBookingPrepayment(cell.policyText);
+  const d=deriveBookingRateCell(cap,cell),extra=readBookingProductFacts(cap,cell,d),maxAdults=extra.maximumAdults??explicitAdultMaximum(cell.roomText,cell.roomName),allMandatory=hasExplicitAllMandatoryTotal(cell.priceText+'。'+(extra.allMandatoryText??'')),prepayment=cap.parserVersion==='booking-rate-cell-v5'?deriveBookingPrepaymentV2(cell.policyText):deriveBookingPrepayment(cell.policyText);
+  const v2=cap.parserVersion==='booking-rate-cell-v5',total=v2?selectedBookingTotalV2(cell,d):null;
   const missing:string[]=[];
   if(d.roomId===null||d.ratePlanId===null)missing.push('EXACT_ROOM_RATE_ID');
-  if(maxAdults===null)missing.push('EXPLICIT_MAXIMUM_ADULTS');else if(maxAdults!==2)missing.push('MAXIMUM_ADULTS_NOT_TWO');
+  if(v2){if(maxAdults!==null&&maxAdults<2)missing.push('KNOWN_CAPACITY_CONTRADICTION');}else if(maxAdults===null)missing.push('EXPLICIT_MAXIMUM_ADULTS');else if(maxAdults!==2)missing.push('MAXIMUM_ADULTS_NOT_TWO');
   if(!d.tupleAndProductBound)missing.push(...d.reasons);
-  if(!allMandatory)missing.push('ALL_MANDATORY_TOTAL_NOT_PROVED');
-  if(d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)missing.push('LOCAL_TAX_PER_ADULT_NIGHT_NOT_PROVED');
-  const publicPrice=!d.memberConditional&&(extra.publicPriceProved||/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText));
+  if(v2?!total:!allMandatory)missing.push('ALL_MANDATORY_TOTAL_NOT_PROVED');
+  if(!v2&&(d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null))missing.push('LOCAL_TAX_PER_ADULT_NIGHT_NOT_PROVED');
+  const publicPrice=!d.memberConditional&&(extra.publicPriceProved||!v2&&/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText));
   if(!publicPrice)missing.push(d.memberConditional?'MEMBER_CONDITIONAL_PRICE':'PUBLIC_PRICE_NOT_PROVED');
   if(d.meal!=='ROOM_ONLY')missing.push('ROOM_ONLY_NOT_PROVED');
   if(!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))missing.push('CANCELLATION_NOT_PROVED');
   if(prepayment==='UNKNOWN')missing.push('PREPAYMENT_NOT_PROVED');
+  if(v2&&!bookingSemanticTermsV2(cell.policyText,d.refund))missing.push('MATERIAL_CONDITIONS_UNINTERPRETED');
   return {cellSha256:digest(cell),roomId:d.roomId,ratePlanId:d.ratePlanId,requestedAdults:2 as const,explicitMaxAdults:maxAdults,
    primitiveBound:d.tupleAndProductBound,primitiveReasons:d.reasons,currentDisplayedJpy:d.currentDisplayedJpy,
    oneRoomPriceConfirmed:!d.reasons.includes('ONE_ROOM_PRICE_NOT_CONFIRMED')&&d.currentDisplayedJpy!==null,
-   selectedPolicyCaptured:!d.reasons.includes('SELECTED_POLICY_NOT_CAPTURED'),taxBasis:d.tax,allMandatoryTotalProved:allMandatory,
+   selectedPolicyCaptured:!d.reasons.includes('SELECTED_POLICY_NOT_CAPTURED'),taxBasis:d.tax,allMandatoryTotalProved:v2?total!==null:allMandatory,
    localTaxTreatment:d.localTaxTreatment,localTaxPerAdultNightJpy:d.localTaxPerAdultNightJpy,
    memberConditional:d.memberConditional,publicPriceProved:publicPrice,meal:d.meal,cancellation:d.refund,prepayment,
    missingObservedFacts:[...new Set(missing)],firstMissingObservedFact:missing[0]??null,

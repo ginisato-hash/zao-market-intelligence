@@ -1,5 +1,6 @@
 import {readBookingGuardedCalendarStay,parseBookingSelectedCalendarEvidence,type BookingSelectedCalendarEvidence} from './bookingGuardedCalendarStay';
 import {captureBookingProductFacts,usesFreshAnonymousBookingContext,rankBookingDiscoveryRows,readBookingMaterialRow,readBookingHeaderSnapshot,readBookingPassiveStay,type BookingProductFacts} from './bookingProductObservability';
+import {BOOKING_ADOPTION_V2,BOOKING_ADOPTION_V2_DIGEST,bookingTaxInclusiveLabelV2,bookingServedTuple,bookingQuoteHasNightConflict,bookingVisiblePartyV2,readBookingCompositeStay,validateBookingStayBindingV2,type BookingStayBindingV2} from './bookingProductObservability';
 // Bounded, selected-product evidence from the public page already loaded by the collector.
 // No booking selection/submission, price API, credentials or whole-page text export.
 import type { Page } from 'playwright';
@@ -14,7 +15,8 @@ export interface BookingRateCell {
   productFacts?:BookingProductFacts;rowProblems?:string[];oneRoomOptionEnabled?:boolean;
 }
 export interface BookingRateCellCapture {
-  schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v2'|'booking-rate-cell-v3'|'booking-rate-cell-v4';propertySlug:string;observedAt:string;
+  schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v2'|'booking-rate-cell-v3'|'booking-rate-cell-v4'|'booking-rate-cell-v5';propertySlug:string;observedAt:string;
+  adoptionPolicy?:{version:typeof BOOKING_ADOPTION_V2;digest:string};stayBinding?:BookingStayBindingV2;
   request:{checkin:string;checkout:string;adults:2;children:0;rooms:1;currency:'JPY'};
   requestUrlMatches:boolean;displayedCheckin:string|null;displayedCheckout:string|null;displayedParty:string;
   selectedCalendarEvidence?:BookingSelectedCalendarEvidence;
@@ -24,17 +26,22 @@ const isoDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/u.test(s)&&Number.isFinite(Date.p
 const yen=(s:string)=>[...s.matchAll(/[￥¥]\s*([\d,]+)/gu)].map(m=>Number(m[1]!.replace(/,/gu,''))).filter(Number.isSafeInteger);
 export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRateCell){
   const reasons:string[]=[],m=/^(\d+)_(\d+)_(\d+)_(\d+)_(\d+)$/u.exec(cell.blockId);
-  if(cap.schema!=='ZMI_BOOKING_RATE_CELLS_V1'||!['booking-rate-cell-v2','booking-rate-cell-v3','booking-rate-cell-v4'].includes(cap.parserVersion))reasons.push('CAPTURE_SCHEMA_UNKNOWN');
+  const v2=cap.parserVersion==='booking-rate-cell-v5';
+  if(cap.schema!=='ZMI_BOOKING_RATE_CELLS_V1'||!['booking-rate-cell-v2','booking-rate-cell-v3','booking-rate-cell-v4','booking-rate-cell-v5'].includes(cap.parserVersion))reasons.push('CAPTURE_SCHEMA_UNKNOWN');
+  if(v2&&(cap.adoptionPolicy?.version!==BOOKING_ADOPTION_V2||cap.adoptionPolicy.digest!==BOOKING_ADOPTION_V2_DIGEST))reasons.push('ADOPTION_POLICY_BINDING');
+  if(v2&&(cap.request.adults!==2||cap.request.children!==0||cap.request.rooms!==1||cap.request.currency!=='JPY'||Date.parse(cap.request.checkout)-Date.parse(cap.request.checkin)!==86400000))reasons.push('V2_EXACT_REQUEST_TUPLE');
+  if(v2&&cap.stayBinding!==undefined&&(!validateBookingStayBindingV2(cap.stayBinding,cap.request,cap.propertySlug)||cap.stayBinding.visibleParty.normalize('NFKC').trim().replace(/\s+/gu,' ')!==cap.displayedParty.normalize('NFKC').trim().replace(/\s+/gu,' ')))reasons.push('V2_STAY_BINDING_INVALID');
   const {captureSha256,...unsigned}=cap;
   if(captureSha256!==createHash('sha256').update(canonicalJson(unsigned)).digest('hex'))reasons.push('CAPTURE_SEAL_INVALID');
   const ownCells=cap.cells.filter(c=>c.blockId===cell.blockId);
   if(ownCells.length!==1||canonicalJson(ownCells[0])!==canonicalJson(cell))reasons.push('CELL_NOT_UNIQUE_IN_CAPTURE');
   if(!m||Number(m[3])!==2||Number(m[4])!==0||Number(m[5])!==0)reasons.push('NOT_EXACT_TWO_ADULT_RATE_CELL');
-  if(!cap.requestUrlMatches||cap.displayedCheckin!==cap.request.checkin||cap.displayedCheckout!==cap.request.checkout
-    ||!/大人\s*2名.*子供\s*0名.*1部屋/u.test(cap.displayedParty))reasons.push('SERVED_TUPLE_NOT_CONFIRMED');
+  if(!cap.requestUrlMatches||(!(v2&&cap.stayBinding&&validateBookingStayBindingV2(cap.stayBinding,cap.request,cap.propertySlug))&&(cap.displayedCheckin!==cap.request.checkin||cap.displayedCheckout!==cap.request.checkout))
+    ||(v2?!bookingVisiblePartyV2(cap.displayedParty):!/大人\s*2名.*子供\s*0名.*1部屋/u.test(cap.displayedParty)))reasons.push('SERVED_TUPLE_NOT_CONFIRMED');
   if(cap.selectedCalendarEvidence!==undefined){const stay=parseBookingSelectedCalendarEvidence(cap.selectedCalendarEvidence);if(cap.parserVersion!=='booking-rate-cell-v4'||!stay||stay.checkin!==cap.displayedCheckin||stay.checkout!==cap.displayedCheckout||stay.checkin!==cap.request.checkin||stay.checkout!==cap.request.checkout||cap.request.adults!==2||cap.request.children!==0||cap.request.rooms!==1||cap.request.currency!=='JPY'||cap.requestUrlMatches!==true||typeof cap.displayedParty!=='string'||cap.displayedParty.normalize('NFKC').trim().replace(/\s+/gu,' ')!==cap.selectedCalendarEvidence.party.normalize('NFKC').trim().replace(/\s+/gu,' '))reasons.push('SELECTED_CALENDAR_EVIDENCE_INVALID');}
-  if(cap.parserVersion==='booking-rate-cell-v4'&&cell.oneRoomOptionEnabled!==true)reasons.push('ONE_ROOM_QUANTITY_NOT_SELECTABLE');
-  if(cap.parserVersion==='booking-rate-cell-v4'){if(!Array.isArray(cell.rowProblems)||cell.rowProblems.length>5)reasons.push('ROW_STATUS_UNVERIFIED');else if(cell.rowProblems.length)reasons.push(...cell.rowProblems);}
+  if((cap.parserVersion==='booking-rate-cell-v4'||v2)&&cell.oneRoomOptionEnabled!==true)reasons.push('ONE_ROOM_QUANTITY_NOT_SELECTABLE');
+  if(cap.parserVersion==='booking-rate-cell-v4'||v2){if(!Array.isArray(cell.rowProblems)||cell.rowProblems.length>5)reasons.push('ROW_STATUS_UNVERIFIED');else if(cell.rowProblems.length)reasons.push(...cell.rowProblems);}
+  if(v2&&bookingQuoteHasNightConflict(cell.priceText+' '+(cell.priceRoleText??'')))reasons.push('SELECTED_NIGHT_COUNT_CONFLICT');
   if(!cell.roomName||!cell.roomText.includes(cell.roomName)||!/人数:\s*2\b/u.test(cell.occupancyText))reasons.push('ROOM_OR_OCCUPANCY_UNBOUND');
   const roleText=cap.parserVersion!=='booking-rate-cell-v2'?cell.priceRoleText??'':cell.priceText;
   const pair=/元の料金\s*[￥¥]\s*([\d,]+)\s*現在の料金\s*[￥¥]\s*([\d,]+)/u.exec(roleText);
@@ -51,7 +58,7 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
     policy&&/一部返金可|partially refundable/iu.test(policy)?'PARTIAL_REFUNDABLE':null,
     policy&&/キャンセル無料|無料でキャンセル|free cancellation/iu.test(policy)?'CONDITIONAL_REFUNDABLE':null].filter((v):v is string=>v!==null);
   const refund=refundKinds.length===1?refundKinds[0]!:'UNKNOWN';
-  const tax=/税・手数料込/u.test(cell.priceText)?'DISPLAYED_TAX_FEES_INCLUDED' as const:'UNKNOWN' as const;
+  const tax=(v2?bookingTaxInclusiveLabelV2(cell.priceText):/税・手数料込/u.test(cell.priceText))?'DISPLAYED_TAX_FEES_INCLUDED' as const:'UNKNOWN' as const;
   const member=/ログインして.*会員限定料金|Genius|会員限定/u.test(cell.priceText);
   if(meal==='UNKNOWN')reasons.push('MEAL_UNKNOWN');if(refund==='UNKNOWN')reasons.push('CANCELLATION_UNKNOWN');if(tax==='UNKNOWN')reasons.push('TAX_BASIS_UNKNOWN');
   // An absent sale marker NEVER proves no discount. Preserve both explicit roles and the eligibility text.
@@ -82,18 +89,22 @@ export function sealBookingRateCellCapture(x:Omit<BookingRateCellCapture,'captur
   return {...body,captureSha256:createHash('sha256').update(canonicalJson(body)).digest('hex')};
 }
 /** Only date/policy information controls are used. Blocked pages receive no further interaction. */
-export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string},maxProducts=3,externalGuard?:BookingUiBlockGuard,fixedProducts?:readonly {productId:string;ratePlanId:string}[]):Promise<BookingRateCellCapture>{
+export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string;adoptionPolicy?:typeof BOOKING_ADOPTION_V2},maxProducts=3,externalGuard?:BookingUiBlockGuard,fixedProducts?:readonly {productId:string;ratePlanId:string}[]):Promise<BookingRateCellCapture>{
   if(!/^[a-z0-9-]+$/u.test(input.propertySlug)||!isoDate(input.checkin)||!isoDate(input.checkout)
     ||Date.parse(input.checkout)-Date.parse(input.checkin)!==86400000||!Number.isSafeInteger(maxProducts)||maxProducts<1||maxProducts>5||fixedProducts!==undefined&&(fixedProducts.length>5||fixedProducts.some(p=>!/^\d{1,20}$/u.test(p.productId)||!/^\d{1,20}$/u.test(p.ratePlanId))))throw Error('RATE_CELL_CAPTURE_SCOPE');
-  const detailed=usesFreshAnonymousBookingContext(page),version=detailed?'booking-rate-cell-v4' as const:'booking-rate-cell-v3' as const;
+  const detailed=usesFreshAnonymousBookingContext(page),v2=input.adoptionPolicy===BOOKING_ADOPTION_V2;
+  if(v2&&!detailed)throw Error('V2_FRESH_ANONYMOUS_CONTEXT_REQUIRED');
+  const version=v2?'booking-rate-cell-v5' as const:detailed?'booking-rate-cell-v4' as const:'booking-rate-cell-v3' as const;
+  const adoption=v2?{adoptionPolicy:{version:BOOKING_ADOPTION_V2,digest:BOOKING_ADOPTION_V2_DIGEST}}:{};
   const problems:string[]=[],request={checkin:input.checkin,checkout:input.checkout,adults:2 as const,children:0 as const,rooms:1 as const,currency:'JPY' as const};
   const served=new URL(page.url());
-  const requestUrlMatches=served.hostname==='www.booking.com'&&served.pathname===`/hotel/jp/${input.propertySlug}.ja.html`
+  const requestUrlMatches=v2?bookingServedTuple(page.url(),input.propertySlug,input.checkin,input.checkout)!==null:served.hostname==='www.booking.com'&&served.pathname===`/hotel/jp/${input.propertySlug}.ja.html`
     &&Object.entries({checkin:input.checkin,checkout:input.checkout,group_adults:'2',group_children:'0',no_rooms:'1',selected_currency:'JPY'}).every(([k,v])=>served.searchParams.get(k)===v);
-  let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='',selectedCalendarEvidence:BookingSelectedCalendarEvidence|undefined;
-  const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
+  let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='',selectedCalendarEvidence:BookingSelectedCalendarEvidence|undefined,stayBinding:BookingStayBindingV2|undefined;
+  const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,...adoption,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
-  const guard=externalGuard??new BookingUiBlockGuard(page);
+  const guard=externalGuard??new BookingUiBlockGuard(page,undefined,v2);
+  if(v2&&!guard.evidencePolicyV2)throw Error('V2_GUARD_POLICY_REQUIRED');
   let result:BookingRateCellCapture;
   let captureStage='PAGE_PRECHECK';
   let passiveHeader:Awaited<ReturnType<typeof readBookingHeaderSnapshot>>|null=null;
@@ -105,13 +116,14 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   if(detailed){
     captureStage='PASSIVE_DATE_PRECHECK';
     const passiveDenials:string[]=[];let passive=await readBookingPassiveStay(page,reason=>passiveDenials.push(reason+'_NO_INTERACTION'));
-    if(!passive&&passiveDenials.includes('PASSIVE_DATE_EXPLICIT_YEAR_MISSING_NO_INTERACTION')){
+    if(v2&&!passive){const composite=await readBookingCompositeStay(page,input);if(!composite)throw Error('COMPOSITE_STAY_UNPROVED');stayBinding=composite.binding;passiveHeader=composite.header;displayedParty=composite.party;}
+    if(!v2&&!passive&&passiveDenials.includes('PASSIVE_DATE_EXPLICIT_YEAR_MISSING_NO_INTERACTION')){
       captureStage='GUARDED_CALENDAR_DATE_PROOF';const calendar=await readBookingGuardedCalendarStay(page,guard,{checkin:input.checkin,checkout:input.checkout});
       if(calendar){passive=calendar;selectedCalendarEvidence=calendar.evidence;}
     }
-    if(!passive)problems.push(...passiveDenials);
-    if(!passive||passive.stay.checkin!==input.checkin||passive.stay.checkout!==input.checkout){problems.push('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');throw Error('PASSIVE_STAY_HEADER_UNPROVEN');}
-    passiveHeader=passive.header;displayedCheckin=passive.stay.checkin;displayedCheckout=passive.stay.checkout;displayedParty=passive.party;
+    if(!v2&&!passive)problems.push(...passiveDenials);
+    if(!v2&&(!passive||passive.stay.checkin!==input.checkin||passive.stay.checkout!==input.checkout)){problems.push('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');throw Error('PASSIVE_STAY_HEADER_UNPROVEN');}
+    if(passive){passiveHeader=passive.header;displayedCheckin=passive.stay.checkin;displayedCheckout=passive.stay.checkout;displayedParty=passive.party;}
     await guard.requireClear();
     if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(passiveHeader))throw Error('PASSIVE_STAY_CHANGED_BEFORE_INFORMATION');
   }
@@ -165,7 +177,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     if(detailed){const snapshot=await readBookingMaterialRow(page,row.blockId);if(!snapshot.rowVisible)throw Error('SELECTED_ROW_NOT_VISIBLE');material.set(row.blockId,snapshot);const {rowVisible,selectedValues,roomHref,roomControls,...fields}=snapshot;Object.assign(row,fields);}
     const rowProblems:string[]=[],problem=(reason:string)=>{(detailed?rowProblems:problems).push(reason);};
     captureStage='ROOM_TAX_DETAILS';
-    const productFacts=detailed?await captureBookingProductFacts(page,guard,{blockId:row.blockId,roomName:scrubExcerpt(row.roomName,200)}):undefined;
+    const productFacts=detailed?await captureBookingProductFacts(page,guard,{blockId:row.blockId,roomName:scrubExcerpt(row.roomName,200)},v2):undefined;
     let policyText:string|null=null,policyContainerId:string|null=null;
     const expectedControlId=`policyModal_${row.blockId}`;
     captureStage='POLICY_DETAILS';
@@ -186,7 +198,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
       const text=await dialog.innerText({timeout:3000});
       if(text.length>2400)problem('POLICY_TEXT_BUDGET_EXCEEDED');else policyText=scrubExcerpt(text,2400);
     }catch{problem('RATE_POLICY_UNVERIFIED');}
-    finally{if(opened&&!identified&&await guard.checkpoint())throw Error('POLICY_INFORMATION_UNBOUND_STOP');if(opened&&await guard.checkpoint()&&await dialog.isVisible()){await dialog.getByRole('button',{name:'閉じる',exact:true}).click({timeout:3000});if(await dialog.isVisible())throw Error('POLICY_PANEL_CLOSE_FAILED');}}
+    finally{if(opened&&!identified&&await guard.checkpoint()&&!v2)throw Error('POLICY_INFORMATION_UNBOUND_STOP');if(opened&&await guard.checkpoint()&&await dialog.isVisible()){await dialog.getByRole('button',{name:'閉じる',exact:true}).click({timeout:3000});if(await dialog.isVisible())throw Error('POLICY_PANEL_CLOSE_FAILED');}}
     await guard.requireClear();
     if(Object.values(row).some(v=>typeof v==='string'&&v.length>4000)){problems.push('RATE_CELL_TEXT_BUDGET_EXCEEDED');continue;}
     cells.push({...row,...(detailed?{productFacts:productFacts!,rowProblems}:{}),roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),priceRoleText:scrubExcerpt(row.priceRoleText,1600),taxDetails:row.taxDetails.map(t=>({label:scrubExcerpt(t.label,51),details:scrubExcerpt(t.details,1001)})),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyContainerId,policyText});
@@ -196,16 +208,16 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     captureStage='MATERIAL_RECHECK';
     if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(headerBefore))throw Error('SERVED_TUPLE_OR_LOGIN_STATE_CHANGED');
     const finalUrl=new URL(page.url());if(finalUrl.origin!==served.origin||finalUrl.pathname!==served.pathname||['checkin','checkout','group_adults','group_children','no_rooms','selected_currency'].some(k=>finalUrl.searchParams.get(k)!==served.searchParams.get(k)))throw Error('SERVED_TUPLE_CHANGED_AFTER_INFORMATION');
-    for(const cell of cells){if(canonicalJson(await readBookingMaterialRow(page,cell.blockId))!==canonicalJson(material.get(cell.blockId)))throw Error('SELECTED_ROW_CHANGED_AFTER_INFORMATION');
-      const expectedHash=policyDomHashes.get(cell.blockId);if(expectedHash){const dialog=page.locator(`[id="policyModal_${cell.blockId}"] [role="dialog"]`);if(await dialog.count()!==1||createHash('sha256').update(await dialog.textContent()??'').digest('hex')!==expectedHash)throw Error('POLICY_TERMS_CHANGED_AFTER_INFORMATION');}
+    for(const cell of cells){if(canonicalJson(await readBookingMaterialRow(page,cell.blockId))!==canonicalJson(material.get(cell.blockId))){if(v2)cell.rowProblems?.push('SELECTED_ROW_CHANGED_AFTER_INFORMATION');else throw Error('SELECTED_ROW_CHANGED_AFTER_INFORMATION');}
+      const expectedHash=policyDomHashes.get(cell.blockId);if(expectedHash){const dialog=page.locator(`[id="policyModal_${cell.blockId}"] [role="dialog"]`);if(await dialog.count()!==1||createHash('sha256').update(await dialog.textContent()??'').digest('hex')!==expectedHash){if(v2)cell.rowProblems?.push('POLICY_TERMS_CHANGED_AFTER_INFORMATION');else throw Error('POLICY_TERMS_CHANGED_AFTER_INFORMATION');}}
     }
   }
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
-  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),...(selectedCalendarEvidence?{selectedCalendarEvidence}:{}),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
+  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,...adoption,...(stayBinding?{stayBinding}:{}),propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),...(selectedCalendarEvidence?{selectedCalendarEvidence}:{}),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
   }catch{if(detailed)problems.push('CAPTURE_STAGE_'+captureStage);result=empty('CAPTURE_UNVERIFIED');}
   finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
-  if(guard.informationRequestRefused)return sealBookingRateCellCapture({...unsigned,cells:[],problems:[...new Set([...result.problems,'UNEXPECTED_INFORMATION_REQUEST_REFUSED'])]});
+  if(guard.informationRequestRefused&&!v2)return sealBookingRateCellCapture({...unsigned,cells:[],problems:[...new Set([...result.problems,'UNEXPECTED_INFORMATION_REQUEST_REFUSED'])]});
   if(guard.reason!==null||!guard.stateVerified)return sealBookingRateCellCapture({...unsigned,cells:[],blockReason:guard.reason,blockStateVerified:guard.stateVerified,problems:[...new Set([...result.problems,'UI_BLOCKED_OR_UNVERIFIED'])]});
   return result;
 }

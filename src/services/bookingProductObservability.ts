@@ -1,6 +1,10 @@
 // Observational facts only. No price authority, browser navigation, reservation selection or authentication.
 import type {Browser,BrowserContext,Page,Locator} from 'playwright';
-import {scrubExcerpt} from './marketEvidenceSidecar';
+import {scrubExcerpt,canonicalJson} from './marketEvidenceSidecar';
+import {createHash} from 'node:crypto';
+export function bookingTaxInclusiveLabelV2(text:string){return /税[・、と]手数料込|税込み?|すべての税金と料金が含まれ|tax(?:es)? (?:and |& )?(?:fees|charges) included/iu.test(text.normalize('NFKC'));}
+export const BOOKING_ADOPTION_V2='BOOKING_2P_ADOPTION_V2' as const;
+export const BOOKING_ADOPTION_V2_DIGEST=createHash('sha256').update('TD6545859658+TD6545970990:calendar-difference-no-literal-night-or-weekday;2adults/0children/1room/1night/JPY;composite-stay;capacity-auxiliary;selected-total;anonymous-selected-public;abort-verified-row-scope;semantic-conditions;matched-anchor-weight').digest('hex');
 import type {BookingUiBlockGuard} from './bookingUiBlockGuard';
 const anonymousContexts=new WeakSet<BrowserContext>();
 export async function createAnonymousBookingCaptureContext(browser:Browser,userAgent:string){
@@ -29,8 +33,9 @@ function capacityInformationText(text:string):string{
  return out.join('\n');
 }
 export interface BookingProductFacts {
- schema:'BOOKING_SELECTED_PRODUCT_FACTS_V1';blockId:string;
- anonymousPublicContext:{freshUnauthenticatedContext:true;signedOutControlVisible:true}|null;
+ schema:'BOOKING_SELECTED_PRODUCT_FACTS_V1'|'BOOKING_SELECTED_PRODUCT_FACTS_V2';blockId:string;
+ anonymousPublicContext:{freshUnauthenticatedContext:true;signedOutControlVisible:boolean;selectedRowPublicChecked?:true}|null;
+ passiveMaximumAdults?:number|null;
  roomCapacity:{controlId:string;containerId:string;roomId:string;roomName:string;maximumAdults:number;explicitText:string}|null;
  taxTotal:{controlId:string;containerId:string;explicitText:string}|null;
 }
@@ -50,10 +55,19 @@ export function rankBookingDiscoveryRows<T extends {blockId:string;roomName:stri
 }
 const token=(s:string|null):s is string=>typeof s==='string'&&/^[-A-Za-z0-9_:]{1,160}$/u.test(s);
 /** Additional information controls only; unsupported markup stays UNKNOWN rather than using party/bed count. */
-export async function captureBookingProductFacts(page:Page,guard:BookingUiBlockGuard,row:{blockId:string;roomName:string}):Promise<BookingProductFacts>{
+export async function captureBookingProductFacts(page:Page,guard:BookingUiBlockGuard,row:{blockId:string;roomName:string},v2=false):Promise<BookingProductFacts>{
  const out:BookingProductFacts={schema:'BOOKING_SELECTED_PRODUCT_FACTS_V1',blockId:row.blockId,anonymousPublicContext:null,roomCapacity:null,taxTotal:null};
  if(!anonymousContexts.has(page.context())||!/^\d+_\d+_2_0_0$/u.test(row.blockId))return out;
  await guard.requireClear();
+ if(v2){
+  const material=await readBookingMaterialRow(page,row.blockId);
+  if(!material.rowVisible||material.selectedValues.some(v=>v!=='0'))throw Error('PASSIVE_PRODUCT_ROW_UNVERIFIED');
+  out.schema='BOOKING_SELECTED_PRODUCT_FACTS_V2';
+  const maxima=[...material.roomText.normalize('NFKC').matchAll(/(?:最大宿泊人数|最大収容人数|大人の定員|定員)\s*[:：]?\s*(\d{1,2})\s*名/gu)].map(m=>Number(m[1]));
+  const known=[...new Set(maxima)];out.passiveMaximumAdults=known.includes(1)?1:known.length===1?known[0]!:null;
+  if(!/Genius|会員限定|ログイン(?:が必要|して)|member.only|sign.in.to/iu.test(material.priceText+' '+material.conditionsText))out.anonymousPublicContext={freshUnauthenticatedContext:true,signedOutControlVisible:false,selectedRowPublicChecked:true};
+  return out; // Capacity and redundant tax modals are not mandatory v2 evidence.
+ }
  const signedOut=page.locator('header [data-testid="header-sign-in-button"],header a').filter({hasText:/^(?:ログイン|Sign in)$/u});
  if(await signedOut.count()===1&&await signedOut.isVisible().catch(()=>false))out.anonymousPublicContext={freshUnauthenticatedContext:true,signedOutControlVisible:true};
  const roomId=row.blockId.split('_')[0]!,anchor=page.locator(`[id="room_type_id_${roomId}"]`);
@@ -90,6 +104,13 @@ export function usesFreshAnonymousBookingContext(page:Page):boolean{return typeo
 /** Sealed v4 row evidence only. It cannot reinterpret or enrich a historical v2/v3 capture. */
 export function readBookingProductFacts(cap:{parserVersion:string},cell:{blockId:string;roomName:string;productFacts?:BookingProductFacts},derived:{tupleAndProductBound:boolean;memberConditional:boolean;currentDisplayedJpy:number|null}){
  const no={maximumAdults:null as number|null,roomCapacityProved:false,publicPriceProved:false,allMandatoryText:null as string|null};
+ if(cap.parserVersion==='booking-rate-cell-v5'){
+  const f=cell.productFacts;
+  if(!f||f.schema!=='BOOKING_SELECTED_PRODUCT_FACTS_V2'||f.blockId!==cell.blockId)return no;
+  const n=f.passiveMaximumAdults;
+  return {maximumAdults:typeof n==='number'&&Number.isSafeInteger(n)&&n>=1&&n<=30?n:null,roomCapacityProved:typeof n==='number',
+   publicPriceProved:f.anonymousPublicContext?.freshUnauthenticatedContext===true&&f.anonymousPublicContext.selectedRowPublicChecked===true&&!derived.memberConditional&&derived.currentDisplayedJpy!==null,allMandatoryText:null};
+ }
  if(cap.parserVersion!=='booking-rate-cell-v4')return no;
  const f=cell.productFacts;if(!f||f.schema!=='BOOKING_SELECTED_PRODUCT_FACTS_V1'||f.blockId!==cell.blockId)return no;
  const r=f.roomCapacity,roomId=cell.blockId.split('_')[0];
@@ -182,6 +203,39 @@ export function parseExplicitBookingDateFields(dateText:string,dateAria:string|n
  const range=start+' — '+end,a=parseExplicitBookingStayLabels(dateText,range),b=parseExplicitBookingStayLabels(dateAria??'',range);
  return a&&b&&a.checkin===start&&a.checkout===end&&b.checkin===start&&b.checkout===end?a:null;
 }
+export interface BookingStayBindingV2 {
+ schema:'BOOKING_STAY_BINDING_V2';yearSource:'REQUEST_TUPLE_FINAL_SERVED_URL_AND_VISIBLE_CALENDAR_LABELS';
+ checkin:string;checkout:string;visibleDateText:string;visibleDateAria:string|null;visibleParty:string;
+ servedTupleSha256:string;headerBeforeSha256:string;headerAfterSha256:string;conditionsUnchanged:true;oneNightBasis:'CONFIRMED_CALENDAR_DATE_DIFFERENCE';
+}
+const headerHash=(x:unknown)=>createHash('sha256').update(canonicalJson(x)).digest('hex');
+export function bookingQuoteHasNightConflict(text:string){const n=text.normalize('NFKC');return /(?<!\d)(?:[2-9]|\d{2,})\s*泊(?!につき|当たり|あたり)/u.test(n);}
+export function bookingVisiblePartyV2(text:string){return /^(?:宿泊人数と部屋数[。:]?\s*(?:選択済みの内容[:]?\s*)?)?大人\s*2名\s*(?:[·・,、]\s*)?(?:子供\s*0名\s*(?:[·・,、]\s*)?)?1部屋[。.]?$/u.test(text.normalize('NFKC').trim().replace(/\s+/gu,' '));}
+export function bookingOneNightQuoteText(text:string){const n=text.normalize('NFKC');return /(?<![\d/／])1\s*泊(?!につき|当たり|あたり)/u.test(n)&&!/(?<!\d)(?:[2-9]|\d{2,})\s*泊/u.test(n);}
+export function bookingServedTuple(url:string,slug:string,checkin:string,checkout:string){
+ try{const u=new URL(url),want={checkin,checkout,group_adults:'2',group_children:'0',no_rooms:'1',selected_currency:'JPY'};
+  if(u.protocol!=='https:'||u.hostname!=='www.booking.com'||u.pathname!==`/hotel/jp/${slug}.ja.html`||Object.entries(want).some(([k,v])=>u.searchParams.getAll(k).length!==1||u.searchParams.get(k)!==v))return null;
+  return headerHash({propertySlug:slug,...want});
+ }catch{return null;}
+}
+/** Composite evidence has its own year source; never claims a year was displayed. */
+export function validateBookingStayBindingV2(b:BookingStayBindingV2,request:{checkin:string;checkout:string},slug:string){
+ if(!b||typeof b.visibleDateText!=='string'||typeof b.visibleParty!=='string'||b.visibleDateAria!==null&&typeof b.visibleDateAria!=='string'||b.schema!=='BOOKING_STAY_BINDING_V2'||b.yearSource!=='REQUEST_TUPLE_FINAL_SERVED_URL_AND_VISIBLE_CALENDAR_LABELS'||b.checkin!==request.checkin||b.checkout!==request.checkout||b.conditionsUnchanged!==true||b.oneNightBasis!=='CONFIRMED_CALENDAR_DATE_DIFFERENCE'
+  ||!/^[0-9a-f]{64}$/u.test(b.headerBeforeSha256)||b.headerBeforeSha256!==b.headerAfterSha256||b.servedTupleSha256!==bookingServedTuple(`https://www.booking.com/hotel/jp/${slug}.ja.html?checkin=${request.checkin}&checkout=${request.checkout}&group_adults=2&group_children=0&no_rooms=1&selected_currency=JPY`,slug,request.checkin,request.checkout))return false;
+ const full=request.checkin+' — '+request.checkout;
+ return !!(dateLabelParts(b.visibleDateText)||dateLabelParts(b.visibleDateAria??''))&&!!parseExplicitBookingStayLabels(b.visibleDateText,full)
+  &&!!parseExplicitBookingStayLabels(b.visibleDateAria??'',full)&&bookingVisiblePartyV2(b.visibleParty);
+}
+export async function readBookingCompositeStay(page:Page,input:{propertySlug:string;checkin:string;checkout:string}){
+ const header=await readBookingHeaderSnapshot(page),tuple=bookingServedTuple(page.url(),input.propertySlug,input.checkin,input.checkout);
+ if(!tuple||!header.dateVisible||!header.partyVisible||header.expanded!=='false'||header.party===null)return null;
+ // Any explicit child year or semantic date must agree; hidden values never supply it.
+ if(header.dateFields.some(f=>f.count>0)&&(!explicitDateField(header.dateFields[0]!,'start',input.checkin)||!explicitDateField(header.dateFields[1]!,'end',input.checkout)))return null;
+ const h=headerHash(header),binding:BookingStayBindingV2={schema:'BOOKING_STAY_BINDING_V2',yearSource:'REQUEST_TUPLE_FINAL_SERVED_URL_AND_VISIBLE_CALENDAR_LABELS',checkin:input.checkin,checkout:input.checkout,
+  visibleDateText:header.dateText,visibleDateAria:header.dateAria,visibleParty:header.party,servedTupleSha256:tuple,headerBeforeSha256:h,headerAfterSha256:h,conditionsUnchanged:true,oneNightBasis:'CONFIRMED_CALENDAR_DATE_DIFFERENCE'};
+ if(!validateBookingStayBindingV2(binding,input,input.propertySlug))return null;
+ return {header,party:header.party,binding};
+}
 export type BookingPassiveStayDenial = 'PASSIVE_DATE_CONTROL_NOT_UNIQUE'|'PASSIVE_PARTY_CONTROL_NOT_UNIQUE'|'PASSIVE_DATE_CONTROL_NOT_VISIBLE'|'PASSIVE_PARTY_CONTROL_NOT_VISIBLE'|'PASSIVE_DATE_CONTROL_NOT_CLOSED'|'PASSIVE_DATE_EXPLICIT_YEAR_MISSING'|'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID'|'PASSIVE_PARTY_LABEL_UNPROVEN'|'PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE'|'PASSIVE_TYPED_DATE_FIELDS_UNPROVEN'|'PASSIVE_OUTER_DATE_YEAR_TOKENS_PRESENT_FORMAT_UNPROVEN'|'PASSIVE_OUTER_DATE_NO_YEAR_TOKENS'|'PASSIVE_TYPED_TITLE_YEAR_WITNESS_PRESENT'|'PASSIVE_TYPED_TITLE_YEAR_WITNESS_ABSENT'|'PASSIVE_TYPED_TIME_WITNESS_PRESENT'|'PASSIVE_TYPED_TIME_WITNESS_ABSENT_OR_AMBIGUOUS';
 // Closed diagnostic codes only: do not export DOM labels, URLs or page text.
 export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:BookingPassiveStayDenial)=>void){
@@ -208,6 +262,6 @@ export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:Boo
  }
  if(header.party===null||!bookingInformationTextSafe(header.party,200))return deny('PASSIVE_PARTY_LABEL_UNPROVEN');
  const partyText=header.party.normalize('NFKC').trim().replace(/\s+/gu,' ');
- if(!/^宿泊人数と部屋数[。:]?\s*(?:選択済みの内容[:]?\s*)?大人\s*2名\s*(?:[·・,、]\s*)?子供\s*0名\s*(?:[·・,、]\s*)?1部屋[。.]?$/u.test(partyText))return deny('PASSIVE_PARTY_LABEL_UNPROVEN');
+ if(!/^(?:宿泊人数と部屋数[。:]?\s*(?:選択済みの内容[:]?\s*)?)?大人\s*2名\s*(?:[·・,、]\s*)?子供\s*0名\s*(?:[·・,、]\s*)?1部屋[。.]?$/u.test(partyText))return deny('PASSIVE_PARTY_LABEL_UNPROVEN');
  return {header,stay,party:partyText};
 }
