@@ -133,6 +133,7 @@ interface Context {
     sourceDatabase: Database.Database;
     sourceDbBinding: SourceDbBinding | null;
     legacyPublished: boolean;
+    preflightOwnPublication(paths: readonly string[]): void;
     admitOwnPublication(path: string): void;
     stage: Database.Database;
     dbHashes: Map<string, string>;
@@ -387,6 +388,13 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                         fail("LEGACY_SAVED_JSON_CHANGED");
                 }
             },
+            preflightOwnPublication(paths: readonly string[]): void {
+                sourceUnchanged();
+                for (const path of paths)
+                    if (dirname(path) !== dir || !stamps.has(path) || !existsSync(path) || lstatSync(path).isSymbolicLink() || realpathSync(path) !== path)
+                        fail("LEGACY_PUBLICATION_SCOPE_BEFORE_MUTATION");
+                execution.assert();
+            },
             admitOwnPublication(path: string): void {
                 execution.assert();
                 const next = [...new Set([...expectedNames.split("|"), basename(path)])].sort().join("|");
@@ -517,6 +525,13 @@ export function extendPreparedMirrorRecoveryAppendOnly(prepared: PreparedMirrorR
     if (!next) return fail("APPEND_RAM_COMMIT_UNPROVEN");
     genuine.delete(prepared);
     genuine.set(next, { ...ctx, prefixBytes: new Map([...images].map(([n, p]) => [n, p.bytes])), sourceUnchanged,
+        preflightOwnPublication(paths: readonly string[]): void {
+            sourceUnchanged();
+            for (const path of paths)
+                if (dirname(path) !== dir || !images.has(basename(path)) || !existsSync(path) || lstatSync(path).isSymbolicLink() || realpathSync(path) !== path)
+                    fail("LEGACY_PUBLICATION_SCOPE_BEFORE_MUTATION");
+            ctx.assertExecutionSource();
+        },
         admitOwnPublication(path: string): void {
             ctx.assertExecutionSource();
             // Accepted legacy publication may only target an already pinned shard.
@@ -731,18 +746,23 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
         return { appended: 0, touchedShards: 0 };
     if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256)
         fail("DB_CHANGED");
+    // This implementation publishes only already-pinned physical shards. Check
+    // ALL destinations before creating backup files or publishing the first one.
+    const groups = new Map<string, HistoryRow[]>();
+    const pinnedNames = new Set(prepared.plan.pins.map(p => p.name));
+    for (const row of prepared.legacyRows) {
+        if (!/^\d{4}_\d{2}$/u.test(row.shardMonth) || !pinnedNames.has(`zao_signals_${row.shardMonth}.csv`))
+            fail("LEGACY_PUBLICATION_SCOPE_BEFORE_MUTATION");
+        const list = groups.get(row.shardMonth) ?? [];
+        list.push(row); groups.set(row.shardMonth, list);
+    }
+    ctx.preflightOwnPublication([...groups.keys()].map(month => join(ctx.historyDir, `zao_signals_${month}.csv`)));
     mkdirSync(backupPath, { recursive: true });
     const backup = realpathSync(backupPath);
     if (backup !== backupPath) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
     if (backup === ctx.historyDir)
         fail("BACKUP_MUST_BE_SEPARATE");
     persistMirrorRecoveryPlan(prepared, a, backup, lock);
-    const groups = new Map<string, HistoryRow[]>();
-    for (const row of prepared.legacyRows) {
-        const list = groups.get(row.shardMonth) ?? [];
-        list.push(row);
-        groups.set(row.shardMonth, list);
-    }
     let appended = 0, touched = 0;
     for (const [month, rows] of groups) {
         if (!/^\d{4}_\d{2}$/u.test(month))

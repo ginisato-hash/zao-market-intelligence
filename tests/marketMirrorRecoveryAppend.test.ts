@@ -2,7 +2,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import Database from 'better-sqlite3';
 import {createHash} from 'node:crypto';
-import {mkdtempSync,readFileSync,writeFileSync,readdirSync,unlinkSync,renameSync,symlinkSync} from 'node:fs';
+import {mkdtempSync,readFileSync,writeFileSync,readdirSync,unlinkSync,renameSync,symlinkSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';import {fileURLToPath,pathToFileURL} from 'node:url';
 import {prepareMirrorRecovery,extendPreparedMirrorRecoveryAppendOnly,applyMirrorDatabaseRecovery,persistMirrorRecoveryPlan,publishRecoveredLegacyHistory,withMirrorRecoveryLock,type PreparedMirrorRecovery,type MirrorRecoveryAcceptance} from '../src/services/marketMirrorRecoveryPlan';
@@ -30,6 +30,27 @@ function fixture(existing:HistoryRow[]=[row(1)],fileDb=false,aliasDb=false){
  return {dir,path,db,pins,prepare,extend,append:(rows:HistoryRow[])=>writeFileSync(path,Buffer.concat([readFileSync(path),Buffer.from(renderHistoryCsv(rows).split('\n').slice(1).join('\n'))])),close:()=>{for(const p of handles)p.close();db.close();}};
 }
 describe('genuine prepared append-only advance',()=>{
+ it('refuses an absent legacy-only month before any backup or publication',()=>{
+  const x=fixture([row(1),row(5,'02')]),before=readFileSync(x.path),backup=join(x.dir,'backup');
+  try{expect(()=>x.prepare()).toThrow('LEGACY_TARGET_SHARD_NOT_PINNED');expect(readFileSync(x.path)).toEqual(before);expect(existsSync(backup)).toBe(false);expect(existsSync(join(x.dir,'zao_signals_2027_02.csv'))).toBe(false);}finally{x.close();}
+ });
+ it('does not partially publish an existing legacy month when a later month is unpinned',()=>{
+  const x=fixture([row(1),row(4),row(5,'02')]),before=readFileSync(x.path);
+  try{expect(()=>x.prepare()).toThrow('LEGACY_TARGET_SHARD_NOT_PINNED');expect(readFileSync(x.path)).toEqual(before);expect(existsSync(join(x.dir,'backup'))).toBe(false);}finally{x.close();}
+ });
+ it('supports multiple legacy months only when every physical target was pinned before extension',()=>{
+  const x=fixture([row(1),row(4),row(5,'02')]);writeFileSync(join(x.dir,'zao_signals_2027_02.csv'),renderHistoryCsv([]));const p=x.prepare();
+  try{x.append([row(3)]);const q=x.extend(p).prepared;
+   withMirrorRecoveryLock(x.dir,l=>{expect(publishRecoveredLegacyHistory(q,accept(q),join(x.dir,'backup'),Buffer.alloc(32,7),l)).toEqual({appended:2,touchedShards:2});expect(applyMirrorDatabaseRecovery(x.db,q,accept(q),AT,l)).toMatchObject({inserted:2,mirrorExact:true});});
+   expect(parseCsvTable(readFileSync(x.path,'utf8')).rows).toHaveLength(4);expect(parseCsvTable(readFileSync(join(x.dir,'zao_signals_2027_02.csv'),'utf8')).rows).toHaveLength(1);
+  }finally{x.close();}
+ });
+ it('checks all targets again before backup when one pinned legacy destination disappears',()=>{
+  const x=fixture([row(1),row(4),row(5,'02')]),second=join(x.dir,'zao_signals_2027_02.csv');writeFileSync(second,renderHistoryCsv([]));const p=x.prepare();
+  try{x.append([row(3)]);const q=x.extend(p).prepared,before=readFileSync(x.path);unlinkSync(second);
+   expect(()=>withMirrorRecoveryLock(x.dir,l=>publishRecoveredLegacyHistory(q,accept(q),join(x.dir,'backup'),Buffer.alloc(32,7),l))).toThrow();expect(readFileSync(x.path)).toEqual(before);expect(existsSync(join(x.dir,'backup'))).toBe(false);
+  }finally{x.close();}
+ });
  it('parses only the tail, matches a full preparation and invalidates only the old handle',()=>{
   const x=fixture(),p=x.prepare();let spy:{mockRestore():void}|undefined;
   try{x.append([row(3)]);const before=readFileSync(x.path);spy=vi.spyOn(historyPolicy,'historyRowFromCsvRecord');const r=x.extend(p);expect(spy).toHaveBeenCalledTimes(1);spy.mockRestore();spy=undefined;
