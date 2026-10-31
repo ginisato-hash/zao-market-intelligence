@@ -36,7 +36,7 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
  if(d.meal!=='ROOM_ONLY'||!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))return no('CONDITIONS_NOT_KNOWN');
  const prepayment=v2?deriveBookingPrepaymentV2(cell.policyText):deriveBookingPrepayment(cell.policyText);
  if(prepayment==='UNKNOWN')return no('PREPAYMENT_UNKNOWN_OR_CONFLICT');
- if(d.currentDisplayedJpy!==r.sourcePrimaryPrice||d.currentDisplayedJpy!==r.normalizedTotalPrice)return no('FIXED_PRODUCT_NOT_THE_CANONICAL_PRICE');
+ if(d.currentDisplayedJpy!==r.sourcePrimaryPrice||(v2?total!.comparisonTotalJpy:d.currentDisplayedJpy)!==r.normalizedTotalPrice)return no('FIXED_PRODUCT_NOT_THE_CANONICAL_PRICE');
  const conditions={meal:'ROOM_ONLY' as const,cancellation:d.refund==='NON_REFUNDABLE'?'NON_REFUNDABLE' as const:'REFUNDABLE' as const,
   prepayment,discount:d.promotion==='EXPLICIT_PRICE_PAIR'?'PUBLIC_PROMO' as const:'PUBLIC' as const,tax:'ALL_MANDATORY_INCLUDED' as const};
  const semantic=v2?bookingSemanticTermsV2(cell.policyText,d.refund):null;if(v2&&!semantic)return no('MATERIAL_CONDITIONS_UNINTERPRETED');

@@ -62,6 +62,7 @@ export class BookingUiBlockGuard {
     if(this.initialLoad){this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff();if(!this.initialLoadHandoffVerified){this.stateVerified=false;throw Error('INITIAL_LOAD_CHANGED_DURING_INFORMATION_ARM');}}
     this.informationPhase='ARMED_IDLE';
   }
+  failInformationCleanup():void{this.stateVerified=false;this.hardStop=true;}
   /** Closed diagnostic only; never changes request admission or guard state. */
   setInformationPhase(phase:InformationPhase):void{this.informationPhase=phase;}
   /** The normal collector calls this after page.close and before reading final guard state or opening another page. */
