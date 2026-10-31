@@ -30,6 +30,22 @@ function fixture(existing:HistoryRow[]=[row(1)],fileDb=false,aliasDb=false){
  return {dir,path,db,pins,prepare,extend,append:(rows:HistoryRow[])=>writeFileSync(path,Buffer.concat([readFileSync(path),Buffer.from(renderHistoryCsv(rows).split('\n').slice(1).join('\n'))])),close:()=>{for(const p of handles)p.close();db.close();}};
 }
 describe('genuine prepared append-only advance',()=>{
+ it('runs a critical guard after backup but before each canonical CSV rename',()=>{
+  const x=fixture([row(1),row(4)]),p=x.prepare();try{x.append([row(3)]);const q=x.extend(p).prepared,before=readFileSync(x.path);
+   expect(()=>withMirrorRecoveryLock(x.dir,l=>publishRecoveredLegacyHistory(q,accept(q),join(x.dir,'backup'),Buffer.alloc(32,7),l,()=>{throw Error('FIXTURE_GUARD_CHANGED');}))).toThrow('FIXTURE_GUARD_CHANGED');expect(readFileSync(x.path)).toEqual(before);expect(x.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({n:2});
+  }finally{x.close();}
+ });
+ it('offers a critical boundary for every planned month',()=>{
+  const x=fixture([row(1),row(4),row(5,'02')]);writeFileSync(join(x.dir,'zao_signals_2027_02.csv'),renderHistoryCsv([]));const p=x.prepare();
+  try{x.append([row(3)]);const q=x.extend(p).prepared,seen:string[]=[];withMirrorRecoveryLock(x.dir,l=>publishRecoveredLegacyHistory(q,accept(q),join(x.dir,'backup'),Buffer.alloc(32,7),l,point=>{expect(point.stage).toBe('CSV_RENAME');expect(existsSync(join(x.dir,'backup',point.shard+'.'+q.plan.planSha256+'.json'))).toBe(true);seen.push(point.shard);}));expect(seen.sort()).toEqual(['zao_signals_2027_01.csv','zao_signals_2027_02.csv']);
+  }finally{x.close();}
+ });
+ it('can refuse an SQL chunk without committing its schema or rows',()=>{
+  const x=fixture(),p=x.prepare();try{expect(()=>withMirrorRecoveryLock(x.dir,l=>applyMirrorDatabaseRecovery(x.db,p,accept(p),AT,l,()=>{throw Error('FIXTURE_LOCAL_GUARD');}))).toThrow('FIXTURE_LOCAL_GUARD');expect(x.db.prepare('SELECT COUNT(*) n FROM market_signal_history').get()).toEqual({n:1});expect(x.db.prepare("SELECT 1 FROM sqlite_master WHERE name='market_mirror_reconciliations'").get()).toBeUndefined();}finally{x.close();}
+ });
+ it('retains its append marker when canonical-connection closure is unverified',()=>{
+  const x=fixture(),path=join(x.dir,APPEND_LOCK_FILENAME);try{expect(()=>withMirrorRecoveryLock(x.dir,()=>0,undefined,()=>false)).toThrow('CANONICAL_CONNECTION_CLOSE_UNVERIFIED_LEGACY_LOCK_RETAINED');expect(readFileSync(path,'utf8')).toMatch(/^recovery_/);unlinkSync(path);}finally{x.close();}
+ });
  it('refuses an absent legacy-only month before any backup or publication',()=>{
   const x=fixture([row(1),row(5,'02')]),before=readFileSync(x.path),backup=join(x.dir,'backup');
   try{expect(()=>x.prepare()).toThrow('LEGACY_TARGET_SHARD_NOT_PINNED');expect(readFileSync(x.path)).toEqual(before);expect(existsSync(backup)).toBe(false);expect(existsSync(join(x.dir,'zao_signals_2027_02.csv'))).toBe(false);}finally{x.close();}

@@ -64,7 +64,7 @@ const ownedLocks = new WeakMap<object, {
 export function withMirrorRecoveryLock<T>(historyDir: string, work: (lock: MirrorRecoveryLock) => T, resume?: {
     planSha256: string;
     backupDir: string;
-}): T {
+}, canReleaseLegacyLock?: () => boolean): T {
     const dir = realpathSync(historyDir), path = join(dirname(dir), "locks", "history_writer.lock.sqlite");
     mkdirSync(dirname(path), { recursive: true });
     const db = new Database(path), token = Object.freeze({ historyDir: dir });
@@ -115,12 +115,16 @@ export function withMirrorRecoveryLock<T>(historyDir: string, work: (lock: Mirro
         return result;
     }
     finally {
+        let releaseLegacy = true;
+        try { if (canReleaseLegacyLock && !canReleaseLegacyLock()) releaseLegacy = false; }
+        catch { releaseLegacy = false; }
         ownedLocks.delete(token);
-        if (ownsLegacy && existsSync(legacyPath) && readFileSync(legacyPath, "utf8") === body)
+        if (releaseLegacy && ownsLegacy && existsSync(legacyPath) && readFileSync(legacyPath, "utf8") === body)
             unlinkSync(legacyPath);
         if (db.inTransaction)
             db.exec("ROLLBACK");
         db.close();
+        if (!releaseLegacy) fail("CANONICAL_CONNECTION_CLOSE_UNVERIFIED_LEGACY_LOCK_RETAINED");
     }
 }
 function requireLock(lock: MirrorRecoveryLock, dir: string): void {
@@ -729,7 +733,7 @@ export function resumeMirrorRecovery(db: Database.Database, historyDir: string, 
  * Successful per-file publication is retained if the later DB phase fails; no historical rows are deleted.
  * Each file is atomically published with encrypted original-byte backup and an immutable metadata receipt.
  */
-export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, backupDir: string, backupKey: Buffer, lock: MirrorRecoveryLock): {
+export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, backupDir: string, backupKey: Buffer, lock: MirrorRecoveryLock, criticalGuard?: (point: { stage: "CSV_RENAME"; shard: string }) => void): {
     appended: number;
     touchedShards: number;
 } {
@@ -812,6 +816,8 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
         ctx.sourceUnchanged();
         ctx.legacyUnchanged();
         requireLock(lock, ctx.historyDir);
+        criticalGuard?.({ stage: "CSV_RENAME", shard: name });
+        ctx.sourceUnchanged(); ctx.legacyUnchanged(); requireLock(lock, ctx.historyDir);
         renameSync(tmp, path);
         const directory = openSync(ctx.historyDir, "r");
         try {
@@ -833,7 +839,7 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
 /** Database phase only. Any legacy publication must finish under this genuine prepared context before applying.
  * Existing natural mirror guards are not weakened; this separate explicit recovery is bounded by its exact plan.
  */
-export function applyMirrorDatabaseRecovery(db: Database.Database, prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, at: string, lock: MirrorRecoveryLock): {
+export function applyMirrorDatabaseRecovery(db: Database.Database, prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, at: string, lock: MirrorRecoveryLock, localGuard?: () => void): {
     state: string;
     inserted: number;
     mirrorExact: boolean;
@@ -877,6 +883,7 @@ export function applyMirrorDatabaseRecovery(db: Database.Database, prepared: Pre
         const flush = (): void => {
             if (chunk.length === 0)
                 return;
+            localGuard?.();
             const r = applyRealSync({ db, runId: `recovery_${prepared.plan.planSha256.slice(0, 20)}_${batch++}`, generatedAtJst: at, reportPath: "EXPLICIT_MIRROR_RECOVERY", sourceHistoryFiles: prepared.plan.pins.map(p => p.name), rows: chunk });
             if (r.conflict_rows !== 0 || r.inserted_rows !== chunk.length)
                 fail("INSERT_READBACK_MISMATCH");
