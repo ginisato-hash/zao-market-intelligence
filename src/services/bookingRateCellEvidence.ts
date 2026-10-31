@@ -1,6 +1,6 @@
 import {readBookingGuardedCalendarStay,parseBookingSelectedCalendarEvidence,type BookingSelectedCalendarEvidence} from './bookingGuardedCalendarStay';
 import {captureBookingProductFacts,usesFreshAnonymousBookingContext,rankBookingDiscoveryRows,readBookingMaterialRow,readBookingHeaderSnapshot,readBookingPassiveStay,type BookingProductFacts} from './bookingProductObservability';
-import {BOOKING_ADOPTION_V2,BOOKING_ADOPTION_V2_DIGEST,bookingTaxInclusiveLabelV2,bookingServedTuple,bookingQuoteHasNightConflict,bookingVisiblePartyV2,readBookingCompositeStay,validateBookingStayBindingV2,type BookingStayBindingV2} from './bookingProductObservability';
+import {BOOKING_ADOPTION_V2,BOOKING_ADOPTION_V2_DIGEST,bookingOpaqueRateId,bookingSelectedQuotePartyConflict,bookingTaxInclusiveLabelV2,bookingServedTuple,bookingQuoteHasNightConflict,bookingVisiblePartyV2,readBookingCompositeStay,validateBookingStayBindingV2,type BookingStayBindingV2} from './bookingProductObservability';
 // Bounded, selected-product evidence from the public page already loaded by the collector.
 // No booking selection/submission, price API, credentials or whole-page text export.
 import type { Page } from 'playwright';
@@ -35,14 +35,15 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   if(captureSha256!==createHash('sha256').update(canonicalJson(unsigned)).digest('hex'))reasons.push('CAPTURE_SEAL_INVALID');
   const ownCells=cap.cells.filter(c=>c.blockId===cell.blockId);
   if(ownCells.length!==1||canonicalJson(ownCells[0])!==canonicalJson(cell))reasons.push('CELL_NOT_UNIQUE_IN_CAPTURE');
-  if(!m||Number(m[3])!==2||Number(m[4])!==0||Number(m[5])!==0)reasons.push('NOT_EXACT_TWO_ADULT_RATE_CELL');
+  if(!m||(v2?!bookingOpaqueRateId(cell.blockId):Number(m[3])!==2||Number(m[4])!==0||Number(m[5])!==0))reasons.push('NOT_EXACT_TWO_ADULT_RATE_CELL');
   if(!cap.requestUrlMatches||(!(v2&&cap.stayBinding&&validateBookingStayBindingV2(cap.stayBinding,cap.request,cap.propertySlug))&&(cap.displayedCheckin!==cap.request.checkin||cap.displayedCheckout!==cap.request.checkout))
     ||(v2?!bookingVisiblePartyV2(cap.displayedParty):!/大人\s*2名.*子供\s*0名.*1部屋/u.test(cap.displayedParty)))reasons.push('SERVED_TUPLE_NOT_CONFIRMED');
   if(cap.selectedCalendarEvidence!==undefined){const stay=parseBookingSelectedCalendarEvidence(cap.selectedCalendarEvidence);if(cap.parserVersion!=='booking-rate-cell-v4'||!stay||stay.checkin!==cap.displayedCheckin||stay.checkout!==cap.displayedCheckout||stay.checkin!==cap.request.checkin||stay.checkout!==cap.request.checkout||cap.request.adults!==2||cap.request.children!==0||cap.request.rooms!==1||cap.request.currency!=='JPY'||cap.requestUrlMatches!==true||typeof cap.displayedParty!=='string'||cap.displayedParty.normalize('NFKC').trim().replace(/\s+/gu,' ')!==cap.selectedCalendarEvidence.party.normalize('NFKC').trim().replace(/\s+/gu,' '))reasons.push('SELECTED_CALENDAR_EVIDENCE_INVALID');}
   if((cap.parserVersion==='booking-rate-cell-v4'||v2)&&cell.oneRoomOptionEnabled!==true)reasons.push('ONE_ROOM_QUANTITY_NOT_SELECTABLE');
   if(cap.parserVersion==='booking-rate-cell-v4'||v2){if(!Array.isArray(cell.rowProblems)||cell.rowProblems.length>5)reasons.push('ROW_STATUS_UNVERIFIED');else if(cell.rowProblems.length)reasons.push(...cell.rowProblems);}
   if(v2&&bookingQuoteHasNightConflict(cell.priceText+' '+(cell.priceRoleText??'')))reasons.push('SELECTED_NIGHT_COUNT_CONFLICT');
-  if(!cell.roomName||!cell.roomText.includes(cell.roomName)||!/人数:\s*2\b/u.test(cell.occupancyText))reasons.push('ROOM_OR_OCCUPANCY_UNBOUND');
+  if(v2&&bookingSelectedQuotePartyConflict(cell.priceText+' '+(cell.priceRoleText??'')))reasons.push('SELECTED_QUOTE_PARTY_CONFLICT');
+  if(!cell.roomName||!cell.roomText.includes(cell.roomName)||!v2&&!/人数:\s*2\b/u.test(cell.occupancyText))reasons.push('ROOM_OR_OCCUPANCY_UNBOUND');
   const roleText=cap.parserVersion!=='booking-rate-cell-v2'?cell.priceRoleText??'':cell.priceText;
   const pair=/元の料金\s*[￥¥]\s*([\d,]+)\s*現在の料金\s*[￥¥]\s*([\d,]+)/u.exec(roleText);
   const values=[...new Set(yen(roleText))],original=pair?Number(pair[1]!.replace(/,/gu,'')):null;
@@ -167,14 +168,14 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   if(rows.overflow)problems.push('RATE_ROW_BUDGET_EXCEEDED');
   // Keep distinct room/rate products; explicit refundable and non-refundable rows remain separate.
   const discovered=detailed&&fixedProducts===undefined?rankBookingDiscoveryRows(rows.rows):rows.rows;
-  const selected=discovered.filter(r=>/^\d+_\d+_2_0_0$/u.test(r.blockId)
+  const selected=discovered.filter(r=>(v2?bookingOpaqueRateId(r.blockId):/^\d+_\d+_2_0_0$/u.test(r.blockId))
     &&(input.propertySlug!==K27_T04_REFERENCE.ownSlug||r.blockId.startsWith(K27_T04_REFERENCE.bookingRoomId+'_'))
-    &&(fixedProducts===undefined||fixedProducts.some(p=>r.blockId===`${p.productId}_${p.ratePlanId}_2_0_0`))).slice(0,maxProducts),cells:BookingRateCell[]=[];
+    &&(fixedProducts===undefined||fixedProducts.some(p=>v2?r.blockId.split('_')[0]===p.productId&&r.blockId.split('_')[1]===p.ratePlanId:r.blockId===`${p.productId}_${p.ratePlanId}_2_0_0`))).slice(0,maxProducts),cells:BookingRateCell[]=[];
   const material=new Map<string,Awaited<ReturnType<typeof readBookingMaterialRow>>>(),policyDomHashes=new Map<string,string>(),headerBefore=passiveHeader;
   for(const row of selected){
     await guard.requireClear();
     if(await page.locator('[role="dialog"]:visible').count()>0)throw Error('UNOWNED_INFORMATION_DIALOG_VISIBLE');
-    if(detailed){const snapshot=await readBookingMaterialRow(page,row.blockId);if(!snapshot.rowVisible)throw Error('SELECTED_ROW_NOT_VISIBLE');material.set(row.blockId,snapshot);const {rowVisible,selectedValues,roomHref,roomControls,...fields}=snapshot;Object.assign(row,fields);}
+    if(detailed){const snapshot=await readBookingMaterialRow(page,row.blockId,v2);if(!snapshot.rowVisible)throw Error('SELECTED_ROW_NOT_VISIBLE');material.set(row.blockId,snapshot);const {rowVisible,selectedValues,roomHref,roomControls,...fields}=snapshot;Object.assign(row,fields);}
     const rowProblems:string[]=[],problem=(reason:string)=>{(detailed?rowProblems:problems).push(reason);};
     captureStage='ROOM_TAX_DETAILS';
     const productFacts=detailed?await captureBookingProductFacts(page,guard,{blockId:row.blockId,roomName:scrubExcerpt(row.roomName,200)},v2):undefined;
@@ -184,37 +185,39 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     const button=page.locator(`#hprt-table tr[data-block-id="${row.blockId}"] button[aria-controls="${expectedControlId}"]`);
     // Booking also has a hidden TEMPLATE with this ID. Only the visible controlled
     // container containing this dialog is evidence; a globally named dialog is not.
-    const dialog=page.locator(`[id="${expectedControlId}"]:visible`).getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true});
+    const owned=page.locator(`[id="${expectedControlId}"]:visible`),dialog=v2?page.locator(`[id="${expectedControlId}"][role="dialog"]:visible,[id="${expectedControlId}"]:visible [role="dialog"]:visible`):owned.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true});
     let opened=false,identified=false;
-    if(await page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true}).isVisible())throw Error('POLICY_PANEL_ALREADY_OPEN');
+    if(!v2&&await page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true}).isVisible())throw Error('POLICY_PANEL_ALREADY_OPEN');
     try{
       if(row.policyControlId!==expectedControlId)throw Error('POLICY_ID_INVALID');
-      if(await page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true}).isVisible())throw Error('POLICY_PANEL_ALREADY_OPEN');
+      if(!v2&&await page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true}).isVisible())throw Error('POLICY_PANEL_ALREADY_OPEN');
       await guard.requireClear();opened=true;await button.click({timeout:3000});await guard.requireClear();
       await dialog.waitFor({state:'visible',timeout:3000});
+      if(v2&&(await owned.count()!==1||await dialog.count()!==1))throw Error('POLICY_CONTAINER_NOT_UNIQUE');
       policyContainerId=await dialog.evaluate(e=>e.closest('[id^="policyModal_"]')?.id??null);
       if(policyContainerId!==expectedControlId)throw Error('POLICY_CONTAINER_MISMATCH');identified=true;
       if(detailed)policyDomHashes.set(row.blockId,createHash('sha256').update(await dialog.textContent()??'').digest('hex'));
       const text=await dialog.innerText({timeout:3000});
       if(text.length>2400)problem('POLICY_TEXT_BUDGET_EXCEEDED');else policyText=scrubExcerpt(text,2400);
     }catch{problem('RATE_POLICY_UNVERIFIED');}
-    finally{if(opened&&!identified&&await guard.checkpoint()&&!v2)throw Error('POLICY_INFORMATION_UNBOUND_STOP');if(opened&&await guard.checkpoint()&&await dialog.isVisible()){await dialog.getByRole('button',{name:'閉じる',exact:true}).click({timeout:3000});if(await dialog.isVisible())throw Error('POLICY_PANEL_CLOSE_FAILED');}}
+    finally{if(opened&&!identified&&await guard.checkpoint()&&!v2)throw Error('POLICY_INFORMATION_UNBOUND_STOP');if(opened&&identified&&await guard.checkpoint()){try{if(await dialog.isVisible()){const close=dialog.getByRole('button',{name:v2?/^(?:閉じる|Close)$/u:'閉じる',exact:true});if(v2&&await close.count()!==1)throw Error('POLICY_CLOSE_NOT_UNIQUE');await close.click({timeout:3000});if(v2){await dialog.waitFor({state:'hidden',timeout:3000});if(await page.locator('[role="dialog"]:visible').count()!==0)throw Error('POLICY_PANEL_CLOSE_FAILED');}else if(await dialog.isVisible())throw Error('POLICY_PANEL_CLOSE_FAILED');}}catch{if(v2)guard.failInformationCleanup();throw Error('POLICY_PANEL_CLOSE_FAILED');}}}
     await guard.requireClear();
     if(Object.values(row).some(v=>typeof v==='string'&&v.length>4000)){problems.push('RATE_CELL_TEXT_BUDGET_EXCEEDED');continue;}
     cells.push({...row,...(detailed?{productFacts:productFacts!,rowProblems}:{}),roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),priceRoleText:scrubExcerpt(row.priceRoleText,1600),taxDetails:row.taxDetails.map(t=>({label:scrubExcerpt(t.label,51),details:scrubExcerpt(t.details,1001)})),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyContainerId,policyText});
-    if(problems.includes('POLICY_PANEL_CLOSE_FAILED'))break;
+    if(problems.includes('POLICY_PANEL_CLOSE_FAILED')||v2&&opened&&!identified)break;
   }
   if(detailed){
     captureStage='MATERIAL_RECHECK';
     if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(headerBefore))throw Error('SERVED_TUPLE_OR_LOGIN_STATE_CHANGED');
     const finalUrl=new URL(page.url());if(finalUrl.origin!==served.origin||finalUrl.pathname!==served.pathname||['checkin','checkout','group_adults','group_children','no_rooms','selected_currency'].some(k=>finalUrl.searchParams.get(k)!==served.searchParams.get(k)))throw Error('SERVED_TUPLE_CHANGED_AFTER_INFORMATION');
-    for(const cell of cells){if(canonicalJson(await readBookingMaterialRow(page,cell.blockId))!==canonicalJson(material.get(cell.blockId))){if(v2)cell.rowProblems?.push('SELECTED_ROW_CHANGED_AFTER_INFORMATION');else throw Error('SELECTED_ROW_CHANGED_AFTER_INFORMATION');}
-      const expectedHash=policyDomHashes.get(cell.blockId);if(expectedHash){const dialog=page.locator(`[id="policyModal_${cell.blockId}"] [role="dialog"]`);if(await dialog.count()!==1||createHash('sha256').update(await dialog.textContent()??'').digest('hex')!==expectedHash){if(v2)cell.rowProblems?.push('POLICY_TERMS_CHANGED_AFTER_INFORMATION');else throw Error('POLICY_TERMS_CHANGED_AFTER_INFORMATION');}}
+    for(const cell of cells){if(canonicalJson(await readBookingMaterialRow(page,cell.blockId,v2))!==canonicalJson(material.get(cell.blockId))){if(v2)cell.rowProblems?.push('SELECTED_ROW_CHANGED_AFTER_INFORMATION');else throw Error('SELECTED_ROW_CHANGED_AFTER_INFORMATION');}
+      const expectedHash=policyDomHashes.get(cell.blockId);if(expectedHash){const dialog=v2?page.locator(`[id="policyModal_${cell.blockId}"][role="dialog"],[id="policyModal_${cell.blockId}"] [role="dialog"]`):page.locator(`[id="policyModal_${cell.blockId}"] [role="dialog"]`);if(await dialog.count()!==1||createHash('sha256').update(await dialog.textContent()??'').digest('hex')!==expectedHash){if(v2)cell.rowProblems?.push('POLICY_TERMS_CHANGED_AFTER_INFORMATION');else throw Error('POLICY_TERMS_CHANGED_AFTER_INFORMATION');}}
     }
   }
+  if(v2&&await page.locator('[role="dialog"]:visible').count()!==0){guard.failInformationCleanup();throw Error('POLICY_PANEL_CLOSE_FAILED');}
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
   result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,...adoption,...(stayBinding?{stayBinding}:{}),propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),...(selectedCalendarEvidence?{selectedCalendarEvidence}:{}),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
-  }catch{if(detailed)problems.push('CAPTURE_STAGE_'+captureStage);result=empty('CAPTURE_UNVERIFIED');}
+  }catch(error){if(detailed){problems.push('CAPTURE_STAGE_'+captureStage);if(v2)problems.push(error instanceof Error&&error.message==='POLICY_PANEL_CLOSE_FAILED'?'POLICY_CLOSE_UNVERIFIED':error instanceof Error&&error.name==='TimeoutError'?'DOM_OPERATION_TIMEOUT':error instanceof Error&&error.message.includes('strict mode violation')?'DOM_LOCATOR_AMBIGUOUS':'CAPTURE_OPERATION_UNVERIFIED');}result=empty('CAPTURE_UNVERIFIED');}
   finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
   if(guard.informationRequestRefused&&!v2)return sealBookingRateCellCapture({...unsigned,cells:[],problems:[...new Set([...result.problems,'UNEXPECTED_INFORMATION_REQUEST_REFUSED'])]});

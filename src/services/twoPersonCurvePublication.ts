@@ -6,7 +6,7 @@ import {z} from 'zod';
 import {readBoundedStableFile} from './boundedStableFile';
 import {digest,instant,sealQualityLedger,type QualityEntry} from './marketRowPriceQuality';
 import {validatePanel,type MarketPanel,type CurveQualityPolicy,type CurveReference} from './marketTwoPersonCurve';
-import {buildCurveFromCanonicalAdmissions,type CanonicalTwoPersonAdmission} from './twoPersonCurveFromAdmissions';
+import {buildCurveFromCanonicalAdmissions,type CanonicalTwoPersonAdmission,type PendingProductExclusion} from './twoPersonCurveFromAdmissions';
 import {validateRmsQuoteRequest,type RmsQuoteRequest} from './rmsQuoteRequest';
 const hash=z.string().regex(/^[0-9a-f]{64}$/u),time=z.string().datetime({offset:true});
 const run=z.string().regex(/^auto_runner_market_refresh_rotating_\d{8}_\d{6}$/u);
@@ -21,14 +21,14 @@ const configSchema=z.object({schema:z.literal('ZMI_2P_CURVE_CONFIG_V1'),panel:z.
 interface State {
  runId:string;root:string;directory:string;receiptRoot:string;config:CurvePublicationConfig;configSha:string;producerCode:string;
  request:RmsQuoteRequest;clock:()=>Date;assertSource:()=>void;started:number;fd:number;pointerBytes:Buffer|null;
- catalogBytes:Buffer|null;refs:AdmissionRef[];pending:Map<string,PendingAttempt>;closed:boolean;
+ catalogBytes:Buffer|null;refs:AdmissionRef[];pending:Map<string,PendingAttempt>;excludedPending:PendingProductExclusion[];closed:boolean;
 }
 interface PendingAttempt {sourceProductSha256:string;stayDate:string;attemptedAt:string;runId:string;requestSha256:string}
 const pendingSchema=z.object({sourceProductSha256:hash,stayDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),attemptedAt:time,runId:run,requestSha256:hash}).strict();
 const productKey=(p:{propertyId:string;sourcePropertyId:string;source:string;productId:string;ratePlanId:string;conditionKey:string})=>digest([p.propertyId,p.sourcePropertyId,p.source,p.productId,p.ratePlanId,p.conditionKey]);
 function pendingKey(p:PendingAttempt){return digest([p.sourceProductSha256,p.stayDate]);}
-function blockedSince(s:State){const dates=new Map<string,string>();for(const p of s.pending.values()){const old=dates.get(p.stayDate);if(!old||instant(p.attemptedAt)<instant(old))dates.set(p.stayDate,p.attemptedAt);}return dates;}
-function guard(s:State,now:string){const dates=blockedSince(s),body={schema:'ZMI_2P_CURVE_GUARD_V2',runId:s.runId,updatedAt:now,blockedStayDates:[...dates.keys()].sort(),blockedSince:Object.fromEntries([...dates].sort(([a],[b])=>a.localeCompare(b))),pending:[...s.pending.values()].sort((a,b)=>pendingKey(a).localeCompare(pendingKey(b)))};return {...body,guardSha256:digest(body)};}
+function blockedSince(s:State){const dates=new Map<string,string>();for(const p of s.pending.values()){if(s.excludedPending.some(x=>digest(x)===digest(p)))continue;const old=dates.get(p.stayDate);if(!old||instant(p.attemptedAt)<instant(old))dates.set(p.stayDate,p.attemptedAt);}return dates;}
+function guard(s:State,now:string){const dates=blockedSince(s),body={schema:'ZMI_2P_CURVE_GUARD_V3',runId:s.runId,updatedAt:now,blockedStayDates:[...dates.keys()].sort(),blockedSince:Object.fromEntries([...dates].sort(([a],[b])=>a.localeCompare(b))),pending:[...s.pending.values()].sort((a,b)=>pendingKey(a).localeCompare(pendingKey(b))),excludedPending:s.excludedPending.filter(x=>[...s.pending.values()].some(p=>digest(p)===digest(x))).sort((a,b)=>digest(a).localeCompare(digest(b)))};return {...body,guardSha256:digest(body)};}
 export interface CurvePublicationSession {readonly kind:'ZMI_2P_PUBLICATION_SESSION_V1'}
 const sessions=new WeakMap<object,State>();
 const rawHash=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
@@ -91,35 +91,40 @@ export function startCurvePublication(input:{runId:string;root:string;configByte
  const root=resolve(input.root);if(root!==input.root||realpathSync(root)!==root)throw Error('PUBLICATION_ROOT');
  const receiptRoot=join(root,'.data/history-quality');if(realpathSync(receiptRoot)!==receiptRoot)throw Error('ADMISSION_ROOT');
  const clock=input.clock??(()=>new Date()),started=clock().getTime();input.assertSource();
+ if(!Number.isFinite(instant(config.reference.asOf))||instant(config.reference.asOf)>started)throw Error('PUBLICATION_FUTURE_ANCHOR');
  if(!Number.isFinite(started)||started<instant(input.request.createdAt)||started>=instant(input.request.expiresAt))throw Error('PUBLICATION_REQUEST_TIME');
  const request=validateRmsQuoteRequest(JSON.parse(JSON.stringify(input.request)),new Date(started).toISOString(),input.request.source);
  const directory=join(root,'.data/market-2p',input.expectedConfigSha256);
  for(const path of [join(root,'.data/market-2p'),directory]){mkdirSync(path,{recursive:true,mode:0o700});if(realpathSync(path)!==path)throw Error('PUBLICATION_DIRECTORY_SYMLINK');}
  const fd=openSync(join(directory,'publisher.lock'),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
- const s:State={runId:input.runId,root,directory,receiptRoot,config,configSha:input.expectedConfigSha256,producerCode:input.producerCodeSha256,request,clock,assertSource:input.assertSource,started,fd,pointerBytes:null,catalogBytes:null,refs:[],pending:new Map(),closed:false};
+ const s:State={runId:input.runId,root,directory,receiptRoot,config,configSha:input.expectedConfigSha256,producerCode:input.producerCodeSha256,request,clock,assertSource:input.assertSource,started,fd,pointerBytes:null,catalogBytes:null,refs:[],pending:new Map(),excludedPending:[],closed:false};
  try{
   writeFileSync(fd,JSON.stringify({runId:s.runId,startedAt:new Date(started).toISOString()})+'\n');fsyncSync(fd);fsyncDirectory(directory);
   s.pointerBytes=readOptional(join(directory,'current.json'),512*1024);const old=s.pointerBytes?checkedPointer(s.pointerBytes,s.configSha):null;
   if(old?.status==='READY'){
    const sha=hash.parse(old.inputManifestSha256),manifestBytes=readBoundedStableFile(join(directory,'inputs_'+sha+'.json'),256*1024);
    const manifest=JSON.parse(manifestBytes.toString('utf8')),{inputManifestSha256,...body}=manifest;
-   if(inputManifestSha256!==sha||digest(body)!==sha||manifest.schema!=='ZMI_2P_CURVE_INPUT_MANIFEST_V1'||manifest.configSha256!==s.configSha||manifest.asOf!==old.generatedAt
+   if(inputManifestSha256!==sha||digest(body)!==sha||!['ZMI_2P_CURVE_INPUT_MANIFEST_V1','ZMI_2P_CURVE_INPUT_MANIFEST_V2'].includes(manifest.schema)||manifest.configSha256!==s.configSha||manifest.asOf!==old.generatedAt
     ||!Array.isArray(manifest.admissions)||manifest.admissions.length>500)throw Error('PRIOR_INPUT_MANIFEST');
+   const excluded=manifest.schema==='ZMI_2P_CURVE_INPUT_MANIFEST_V2'?manifest.pendingExclusions.map((p:unknown)=>pendingSchema.parse(p)):[];
+   if(manifest.schema==='ZMI_2P_CURVE_INPUT_MANIFEST_V2'&&digest(excluded)!==manifest.pendingExclusionSetSha256)throw Error('PRIOR_EXCLUSION_MANIFEST');
    const refs=manifest.admissions.map((r:unknown)=>refSchema.parse(r)),budget={bytes:0};
    const artifactBytes=readBoundedStableFile(join(directory,String(old.artifactBasename)),4*1024*1024);
    if(rawHash(artifactBytes)!==old.rawSha256)throw Error('PRIOR_CURVE_RAW_HASH');
    const artifact=JSON.parse(artifactBytes.toString('utf8'));
    const rebuilt=buildCurveFromCanonicalAdmissions({panel:config.panel,policy:config.policy,reference:config.reference,asOf:String(old.generatedAt),
-    stayDates:artifact.curves.map((c:{stayDate:string})=>c.stayDate),admissions:refs.map((r:AdmissionRef)=>readReceipt(s,r,budget)),quarantined:config.quarantined,acceptedProducerCodeSha256:new Set(config.acceptedProducerCodes)});
+    pendingExclusions:excluded,stayDates:artifact.curves.map((c:{stayDate:string})=>c.stayDate),admissions:refs.map((r:AdmissionRef)=>readReceipt(s,r,budget)),quarantined:config.quarantined,acceptedProducerCodeSha256:new Set(config.acceptedProducerCodes)});
    if(digest(artifact)!==digest(rebuilt)||old.curveSha256!==rebuilt.curveSha256||old.canonicalAdmissionSetSha256!==rebuilt.canonicalAdmissionSetSha256||old.producerSetSha256!==rebuilt.producerSetSha256)throw Error('PRIOR_CURVE_PROVENANCE_DRIFT');
+   s.excludedPending=excluded;
   }
   if(old?.guard){const g=old.guard as Record<string,unknown>,{guardSha256,...body}=g;
-   if(g.schema!=='ZMI_2P_CURVE_GUARD_V2'||guardSha256!==digest(body)||!Array.isArray(g.pending)||g.pending.length>1000)throw Error('PRIOR_GUARD_UNVERIFIED');
+   if(!['ZMI_2P_CURVE_GUARD_V2','ZMI_2P_CURVE_GUARD_V3'].includes(String(g.schema))||guardSha256!==digest(body)||!Array.isArray(g.pending)||g.pending.length>1000)throw Error('PRIOR_GUARD_UNVERIFIED');
    for(const value of g.pending){const p=pendingSchema.parse(value),key=pendingKey(p);
     if(new Date(p.stayDate+'T00:00:00Z').toISOString().slice(0,10)!==p.stayDate||instant(p.attemptedAt)>started||s.pending.has(key)
      ||!config.panel.products.some(product=>productKey(product)===p.sourceProductSha256))throw Error('PRIOR_GUARD_TIME_OR_PRODUCT');
     s.pending.set(key,p);
    }
+   if(g.schema==='ZMI_2P_CURVE_GUARD_V3'){if(!Array.isArray(g.excludedPending)||g.excludedPending.some((p:unknown)=>!s.excludedPending.some(x=>digest(x)===digest(p))||!s.pending.has(pendingKey(pendingSchema.parse(p)))))throw Error('PRIOR_GUARD_EXCLUSION_BINDING');s.excludedPending=g.excludedPending as PendingProductExclusion[];}else s.excludedPending=[];
    const dates=blockedSince(s);
    if(digest(Object.fromEntries([...dates].sort(([a],[b])=>a.localeCompare(b))))!==digest(g.blockedSince)||digest([...dates.keys()].sort())!==digest(g.blockedStayDates))throw Error('PRIOR_GUARD_DATES');
    // A pending attempt can expire only once every older quote is outside the quality maximum source age.
@@ -161,13 +166,18 @@ export function finishCurvePublication(session:CurvePublicationSession,admission
  if(retained.length>300)throw Error('ADMISSION_CATALOG_BUDGET');
  const all=new Map(s.config.anchorAdmissions.map(r=>[r.runId,r]));for(const r of retained){const a=all.get(r.runId);if(a&&digest(a)!==digest(r))throw Error('ANCHOR_ADMISSION_CONFLICT');all.set(r.runId,r);}
  const budget={bytes:0},admissions=[...all.values()].map(r=>readReceipt(s,r,budget));
+ for(const [key,p] of s.pending){
+  const proved=[...receipt.facts,...receipt.invalidations].some(r=>r.stayDate===p.stayDate&&productKey(r)===p.sourceProductSha256&&instant(r.observedAt)>=instant(p.attemptedAt)&&instant(r.observedAt)<=instant(now));
+  if(proved)s.pending.delete(key);
+ }
+ s.excludedPending=[...s.pending.values()].sort((a,b)=>digest(a).localeCompare(digest(b)));
  const curve=buildCurveFromCanonicalAdmissions({panel:s.config.panel,policy:s.config.policy,reference:s.config.reference,asOf:now,
-  stayDates:s.request.needs.map(n=>n.stayDate),admissions,quarantined:s.config.quarantined,acceptedProducerCodeSha256:new Set(s.config.acceptedProducerCodes)});
+  pendingExclusions:s.excludedPending,stayDates:s.request.needs.map(n=>n.stayDate),admissions,quarantined:s.config.quarantined,acceptedProducerCodeSha256:new Set(s.config.acceptedProducerCodes)});
  const artifactBasename='curve_'+curve.curveSha256+'.json',artifactBytes=Buffer.from(JSON.stringify(curve)+'\n'),artifactPath=join(s.directory,artifactBasename);
  if(artifactBytes.length>4*1024*1024)throw Error('CURVE_ARTIFACT_BUDGET');
  if(present(artifactPath)){if(!readBoundedStableFile(artifactPath,4*1024*1024).equals(artifactBytes))throw Error('CURVE_ARTIFACT_CONFLICT');}
  else{const fd=openSync(artifactPath,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o400);try{writeFileSync(fd,artifactBytes);fsyncSync(fd);}finally{closeSync(fd);}fsyncDirectory(s.directory);}
- const inputBody={schema:'ZMI_2P_CURVE_INPUT_MANIFEST_V1',configSha256:s.configSha,asOf:now,admissions:[...all.values()].sort((a,b)=>a.runId.localeCompare(b.runId))};
+ const inputBody={schema:'ZMI_2P_CURVE_INPUT_MANIFEST_V2',pendingExclusions:s.excludedPending,pendingExclusionSetSha256:digest(s.excludedPending),configSha256:s.configSha,asOf:now,admissions:[...all.values()].sort((a,b)=>a.runId.localeCompare(b.runId))};
  const inputManifestSha256=digest(inputBody),inputBytes=Buffer.from(JSON.stringify({...inputBody,inputManifestSha256})+'\n'),inputPath=join(s.directory,'inputs_'+inputManifestSha256+'.json');
  if(inputBytes.length>256*1024)throw Error('INPUT_MANIFEST_BUDGET');
  if(present(inputPath)){if(!readBoundedStableFile(inputPath,256*1024).equals(inputBytes))throw Error('INPUT_MANIFEST_CONFLICT');}
@@ -175,10 +185,6 @@ export function finishCurvePublication(session:CurvePublicationSession,admission
  const catalogBody={schema:'ZMI_2P_ADMISSION_CATALOG_V1',configSha256:s.configSha,updatedAt:now,refs:retained};
  const catalogBytes=Buffer.from(JSON.stringify({...catalogBody,catalogSha256:digest(catalogBody)})+'\n');
  replace(s,'admissions.json',s.catalogBytes,catalogBytes,256*1024);s.catalogBytes=catalogBytes;
- for(const [key,p] of s.pending){
-  const proved=[...receipt.facts,...receipt.invalidations].some(r=>r.stayDate===p.stayDate&&productKey(r)===p.sourceProductSha256&&instant(r.observedAt)>=instant(p.attemptedAt)&&instant(r.observedAt)<=instant(now));
-  if(proved)s.pending.delete(key);
- }
  const nextGuard=guard(s,now);
  pointer(s,{schema:'ZMI_2P_CURVE_PUBLICATION_V1',status:'READY',generatedAt:now,artifactBasename,rawSha256:rawHash(artifactBytes),curveSha256:curve.curveSha256,
   canonicalAdmissionSetSha256:curve.canonicalAdmissionSetSha256,inputManifestSha256,producerSetSha256:curve.producerSetSha256,configSha256:s.configSha,guard:nextGuard});

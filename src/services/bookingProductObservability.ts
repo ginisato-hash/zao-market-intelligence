@@ -2,9 +2,17 @@
 import type {Browser,BrowserContext,Page,Locator} from 'playwright';
 import {scrubExcerpt,canonicalJson} from './marketEvidenceSidecar';
 import {createHash} from 'node:crypto';
+export const bookingOpaqueRateId=(id:string)=>/^\d{1,20}_\d{1,20}_\d{1,20}_\d{1,20}_\d{1,20}$/u.test(id);
+export function bookingSelectedQuotePartyConflict(text:string){
+ const n=text.normalize('NFKC'),different=(re:RegExp,want:number)=>[...n.matchAll(re)].some(m=>!/(?:up to|max(?:imum)?(?: occupancy)?|capacity|sleeps|定員|最大宿泊人数|最大収容人数)\s*[:：]?\s*$/iu.test(n.slice(0,m.index))&&Number(m[1])!==want);
+ return different(/大人\s*[:：]?\s*(\d+)\s*(?:名|人)/gu,2)||different(/(?:子供|子ども|子様|お子様|お子さま)\s*[:：]?\s*(\d+)\s*(?:名|人)/gu,0)
+  ||different(/\b(\d+)\s*adults?\b/giu,2)||different(/\badults?\s*:\s*(\d+)\b/giu,2)
+  ||different(/\b(\d+)\s*(?:children|child)\b/giu,0)||different(/\b(?:children|child)\s*:\s*(\d+)\b/giu,0)
+  ||different(/\b(?:for|price for)\s+(\d+)\s*rooms?\b/giu,1)||different(/\brooms?\s*:\s*(\d+)\b/giu,1)||different(/(?:客室数|部屋数)\s*[:：]\s*(\d+)/gu,1);
+}
 export function bookingTaxInclusiveLabelV2(text:string){return /税[・、と]手数料込|税込み?|すべての税金と料金が含まれ|tax(?:es)? (?:and |& )?(?:fees|charges) included/iu.test(text.normalize('NFKC'));}
 export const BOOKING_ADOPTION_V2='BOOKING_2P_ADOPTION_V2' as const;
-export const BOOKING_ADOPTION_V2_DIGEST=createHash('sha256').update('TD6545859658+TD6545970990:calendar-difference-no-literal-night-or-weekday;2adults/0children/1room/1night/JPY;composite-stay;capacity-auxiliary;selected-total;anonymous-selected-public;abort-verified-row-scope;semantic-conditions;matched-anchor-weight').digest('hex');
+export const BOOKING_ADOPTION_V2_DIGEST=createHash('sha256').update('TD6545859658+TD6545970990:calendar-difference-no-literal-night-or-weekday;opaque-rate-tokens-selected-visible-party;controlled-policy-dom-close;2adults/0children/1room/1night/JPY;composite-stay;capacity-auxiliary;selected-total;anonymous-selected-public;abort-verified-row-scope;semantic-conditions;matched-anchor-weight').digest('hex');
 import type {BookingUiBlockGuard} from './bookingUiBlockGuard';
 const anonymousContexts=new WeakSet<BrowserContext>();
 export async function createAnonymousBookingCaptureContext(browser:Browser,userAgent:string){
@@ -57,13 +65,13 @@ const token=(s:string|null):s is string=>typeof s==='string'&&/^[-A-Za-z0-9_:]{1
 /** Additional information controls only; unsupported markup stays UNKNOWN rather than using party/bed count. */
 export async function captureBookingProductFacts(page:Page,guard:BookingUiBlockGuard,row:{blockId:string;roomName:string},v2=false):Promise<BookingProductFacts>{
  const out:BookingProductFacts={schema:'BOOKING_SELECTED_PRODUCT_FACTS_V1',blockId:row.blockId,anonymousPublicContext:null,roomCapacity:null,taxTotal:null};
- if(!anonymousContexts.has(page.context())||!/^\d+_\d+_2_0_0$/u.test(row.blockId))return out;
+ if(!anonymousContexts.has(page.context())||!(v2?bookingOpaqueRateId(row.blockId):/^\d+_\d+_2_0_0$/u.test(row.blockId)))return out;
  await guard.requireClear();
  if(v2){
-  const material=await readBookingMaterialRow(page,row.blockId);
+  const material=await readBookingMaterialRow(page,row.blockId,v2);
   if(!material.rowVisible||material.selectedValues.some(v=>v!=='0'))throw Error('PASSIVE_PRODUCT_ROW_UNVERIFIED');
   out.schema='BOOKING_SELECTED_PRODUCT_FACTS_V2';
-  const maxima=[...material.roomText.normalize('NFKC').matchAll(/(?:最大宿泊人数|最大収容人数|大人の定員|定員)\s*[:：]?\s*(\d{1,2})\s*名/gu)].map(m=>Number(m[1]));
+  const maxima=[...(material.roomText+'。'+material.occupancyText).normalize('NFKC').matchAll(/(?:最大宿泊人数|最大収容人数|大人の定員|定員)\s*[:：]?\s*(?:大人\s*)?(\d{1,2})\s*名/gu)].map(m=>Number(m[1]));
   const known=[...new Set(maxima)];out.passiveMaximumAdults=known.includes(1)?1:known.length===1?known[0]!:null;
   if(!/Genius|会員限定|ログイン(?:が必要|して)|member.only|sign.in.to/iu.test(material.priceText+' '+material.conditionsText))out.anonymousPublicContext={freshUnauthenticatedContext:true,signedOutControlVisible:false,selectedRowPublicChecked:true};
   return out; // Capacity and redundant tax modals are not mandatory v2 evidence.
@@ -119,8 +127,8 @@ export function readBookingProductFacts(cap:{parserVersion:string},cell:{blockId
  const t=f.taxTotal,taxOk=!!t&&token(t.controlId)&&t.containerId===t.controlId&&typeof t.explicitText==='string'&&bookingInformationTextSafe(t.explicitText,1000);
  return {maximumAdults:roomOk?r!.maximumAdults:null,roomCapacityProved:roomOk,publicPriceProved:publicOk,allMandatoryText:taxOk?t!.explicitText:null};
 }
-export async function readBookingMaterialRow(page:Page,blockId:string){
- if(!/^\d+_\d+_2_0_0$/u.test(blockId))throw Error('MATERIAL_ROW_ID');
+export async function readBookingMaterialRow(page:Page,blockId:string,v2=false){
+ if(!(v2?bookingOpaqueRateId(blockId):/^\d+_\d+_2_0_0$/u.test(blockId)))throw Error('MATERIAL_ROW_ID');
  const row=page.locator(`#hprt-table tr[data-block-id="${blockId}"]`);if(await row.count()!==1)throw Error('MATERIAL_ROW_NOT_UNIQUE');
  return row.evaluate((e,id)=>{
   const anchors=Array.from(document.querySelectorAll('[id="room_type_id_'+id+'"]')).filter(a=>a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0);
