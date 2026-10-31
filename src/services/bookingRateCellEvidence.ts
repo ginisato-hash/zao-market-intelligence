@@ -1,3 +1,4 @@
+import {readBookingGuardedCalendarStay,parseBookingSelectedCalendarEvidence,type BookingSelectedCalendarEvidence} from './bookingGuardedCalendarStay';
 import {captureBookingProductFacts,usesFreshAnonymousBookingContext,rankBookingDiscoveryRows,readBookingMaterialRow,readBookingHeaderSnapshot,readBookingPassiveStay,type BookingProductFacts} from './bookingProductObservability';
 // Bounded, selected-product evidence from the public page already loaded by the collector.
 // No booking selection/submission, price API, credentials or whole-page text export.
@@ -16,6 +17,7 @@ export interface BookingRateCellCapture {
   schema:'ZMI_BOOKING_RATE_CELLS_V1';parserVersion:'booking-rate-cell-v2'|'booking-rate-cell-v3'|'booking-rate-cell-v4';propertySlug:string;observedAt:string;
   request:{checkin:string;checkout:string;adults:2;children:0;rooms:1;currency:'JPY'};
   requestUrlMatches:boolean;displayedCheckin:string|null;displayedCheckout:string|null;displayedParty:string;
+  selectedCalendarEvidence?:BookingSelectedCalendarEvidence;
   cells:BookingRateCell[];problems:string[];blockReason:BlockReason;blockStateVerified:boolean;captureSha256:string;
 }
 const isoDate=(s:string)=>/^\d{4}-\d{2}-\d{2}$/u.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -30,6 +32,7 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   if(!m||Number(m[3])!==2||Number(m[4])!==0||Number(m[5])!==0)reasons.push('NOT_EXACT_TWO_ADULT_RATE_CELL');
   if(!cap.requestUrlMatches||cap.displayedCheckin!==cap.request.checkin||cap.displayedCheckout!==cap.request.checkout
     ||!/大人\s*2名.*子供\s*0名.*1部屋/u.test(cap.displayedParty))reasons.push('SERVED_TUPLE_NOT_CONFIRMED');
+  if(cap.selectedCalendarEvidence!==undefined){const stay=parseBookingSelectedCalendarEvidence(cap.selectedCalendarEvidence);if(cap.parserVersion!=='booking-rate-cell-v4'||!stay||stay.checkin!==cap.displayedCheckin||stay.checkout!==cap.displayedCheckout||stay.checkin!==cap.request.checkin||stay.checkout!==cap.request.checkout||cap.request.adults!==2||cap.request.children!==0||cap.request.rooms!==1||cap.request.currency!=='JPY'||cap.requestUrlMatches!==true||typeof cap.displayedParty!=='string'||cap.displayedParty.normalize('NFKC').trim().replace(/\s+/gu,' ')!==cap.selectedCalendarEvidence.party.normalize('NFKC').trim().replace(/\s+/gu,' '))reasons.push('SELECTED_CALENDAR_EVIDENCE_INVALID');}
   if(cap.parserVersion==='booking-rate-cell-v4'&&cell.oneRoomOptionEnabled!==true)reasons.push('ONE_ROOM_QUANTITY_NOT_SELECTABLE');
   if(cap.parserVersion==='booking-rate-cell-v4'){if(!Array.isArray(cell.rowProblems)||cell.rowProblems.length>5)reasons.push('ROW_STATUS_UNVERIFIED');else if(cell.rowProblems.length)reasons.push(...cell.rowProblems);}
   if(!cell.roomName||!cell.roomText.includes(cell.roomName)||!/人数:\s*2\b/u.test(cell.occupancyText))reasons.push('ROOM_OR_OCCUPANCY_UNBOUND');
@@ -87,7 +90,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const served=new URL(page.url());
   const requestUrlMatches=served.hostname==='www.booking.com'&&served.pathname===`/hotel/jp/${input.propertySlug}.ja.html`
     &&Object.entries({checkin:input.checkin,checkout:input.checkout,group_adults:'2',group_children:'0',no_rooms:'1',selected_currency:'JPY'}).every(([k,v])=>served.searchParams.get(k)===v);
-  let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='';
+  let displayedCheckin:string|null=null,displayedCheckout:string|null=null,displayedParty='',selectedCalendarEvidence:BookingSelectedCalendarEvidence|undefined;
   const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
   const guard=externalGuard??new BookingUiBlockGuard(page);
@@ -101,7 +104,12 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   // guard merely to discover that this prerequisite is absent.
   if(detailed){
     captureStage='PASSIVE_DATE_PRECHECK';
-    const passive=await readBookingPassiveStay(page,reason=>problems.push(reason+'_NO_INTERACTION'));
+    const passiveDenials:string[]=[];let passive=await readBookingPassiveStay(page,reason=>passiveDenials.push(reason+'_NO_INTERACTION'));
+    if(!passive&&passiveDenials.includes('PASSIVE_DATE_EXPLICIT_YEAR_MISSING_NO_INTERACTION')){
+      captureStage='GUARDED_CALENDAR_DATE_PROOF';const calendar=await readBookingGuardedCalendarStay(page,guard,{checkin:input.checkin,checkout:input.checkout});
+      if(calendar){passive=calendar;selectedCalendarEvidence=calendar.evidence;}
+    }
+    if(!passive)problems.push(...passiveDenials);
     if(!passive||passive.stay.checkin!==input.checkin||passive.stay.checkout!==input.checkout){problems.push('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');throw Error('PASSIVE_STAY_HEADER_UNPROVEN');}
     passiveHeader=passive.header;displayedCheckin=passive.stay.checkin;displayedCheckout=passive.stay.checkout;displayedParty=passive.party;
     await guard.requireClear();
@@ -191,7 +199,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     }
   }
   if(!cells.length)problems.push('NO_EXACT_RATE_CELL_CAPTURED');
-  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
+  result=sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:scrubExcerpt(displayedParty,200),...(selectedCalendarEvidence?{selectedCalendarEvidence}:{}),cells,problems:[...new Set(problems)],blockReason:null,blockStateVerified:true});
   }catch{if(detailed)problems.push('CAPTURE_STAGE_'+captureStage);result=empty('CAPTURE_UNVERIFIED');}
   finally{await guard.checkpoint();if(!externalGuard)guard.dispose();}
   const {captureSha256,...unsigned}=result;
