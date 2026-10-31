@@ -5,6 +5,8 @@ import {recordTwoPersonMarketAdmission,readAcceptedTwoPersonPanel} from '../src/
 import {selectFixedTwoPersonSignals} from '../src/services/bookingFixedProductSelection';
 import {marketConditionKey} from '../src/services/marketTwoPersonCurve';import {digest} from '../src/services/marketRowPriceQuality';
 import type {HistoryRow} from '../src/services/localHistorySchemaDesign';import type {BookingRenderedDomSignals} from '../src/services/bookingRenderedDomProbe';
+import {BOOKING_ADOPTION_V2,BOOKING_ADOPTION_V2_DIGEST} from '../src/services/bookingProductObservability';
+import {bookingSemanticTermsV2} from '../src/services/bookingPaymentTerms';
 const terms='お食事は含まれておりません。返金不可。予約時に全額を支払い。';
 function fixture(){
  const cell:BookingRateCell={blockId:'123_456_2_0_0',roomName:'ダブルルーム',roomText:'ダブルルーム ダブルベッド1台',occupancyText:'人数: 2',priceText:'￥20,000 税・手数料込。すべての税金と料金が含まれています。一般公開料金',priceRoleText:'￥20,000',taxDetails:[{label:'込',details:'1名/1泊につき¥150の入湯税'}],conditionsText:'返金不可',oneRoomOptionText:'1 (￥20,000)',policyControlId:'policyModal_123_456_2_0_0',policyContainerId:'policyModal_123_456_2_0_0',policyText:terms};
@@ -52,3 +54,12 @@ it('disabled or unknown quantity-one availability cannot become a public availab
 it('v4 cannot use a price-block positive declaration when its controlled tax information is UNKNOWN',()=>{
  const f=v4Fixture();f.capture.cells[0]!.priceText+='。すべての税金と料金が含まれています。';f.capture.cells[0]!.productFacts!.taxTotal!.explicitText='税の内訳は現在確認できません';f.capture=sealBookingRateCellCapture(f.capture);f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).reason).toBe('SELECTED_TOTAL_TAX_INFORMATION_NOT_PROVED');
 });
+function v5Fixture(capacity:number|null=null){const f=v4Fixture(),cell=f.capture.cells[0]!;
+ f.capture=sealBookingRateCellCapture({...f.capture,parserVersion:'booking-rate-cell-v5',adoptionPolicy:{version:BOOKING_ADOPTION_V2,digest:BOOKING_ADOPTION_V2_DIGEST},cells:[{...cell,priceText:'1泊 大人2名 ￥20,000 税・手数料込',priceRoleText:'1泊 大人2名 ￥20,000',taxDetails:[],productFacts:{schema:'BOOKING_SELECTED_PRODUCT_FACTS_V2',blockId:cell.blockId,passiveMaximumAdults:capacity,anonymousPublicContext:{freshUnauthenticatedContext:true,signedOutControlVisible:false,selectedRowPublicChecked:true},roomCapacity:null,taxTotal:null}}]});
+ const conditions={meal:'ROOM_ONLY' as const,cancellation:'NON_REFUNDABLE' as const,prepayment:'REQUIRED' as const,discount:'PUBLIC' as const,tax:'ALL_MANDATORY_INCLUDED' as const};
+ const product={...f.product,standardProduct:{...f.product.standardProduct,maxAdults:capacity},conditionKey:marketConditionKey(conditions,'terms2_'+digest(bookingSemanticTermsV2(terms,'NON_REFUNDABLE')))};
+ f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');return {...f,product};
+}
+for(const capacity of [null,3])it('v2 admits actual2P price with auxiliary capacity '+capacity+' and row-inclusive tax',()=>{const f=v5Fixture(capacity);expect(admitCanonicalBookingTwoPerson(f).status).toBe('VERIFIED_CANONICAL_TWO_PERSON_FACT');expect(admitCanonicalBookingTwoPerson(f).observation?.totalJpy).toBe(20000);});
+it('v2 rejects known capacity1 instead of treating it as a missing auxiliary attribute',()=>{expect(admitCanonicalBookingTwoPerson(v5Fixture(1)).observation).toBeNull();});
+it('v2 does not invent anonymity for a historical or missing context',()=>{const f=v5Fixture();f.capture.cells[0]!.productFacts!.anonymousPublicContext=null;f.capture=sealBookingRateCellCapture(f.capture);f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).reason).toBe('PUBLIC_PRICE_NOT_PROVED');});

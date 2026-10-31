@@ -188,7 +188,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
       const initialLoad=rateCellSink!==undefined?observeBookingInitialLoad(page):null;
-      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page,initialLoad!):null;
+      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page,initialLoad!,true):null;
       let rateCellRecord:Record<string,unknown>|null=null;
       let fixedCapture:Awaited<ReturnType<typeof captureBookingRateCells>>|null=null;
       let initialLoadReadiness:Awaited<ReturnType<NonNullable<typeof initialLoad>['waitForFreshQuiet']>>|null=null;
@@ -207,7 +207,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
           // Passive DOM prechecks precede the single fresh wait at the actual
           // information-arm boundary. The observer stays through route install.
           try{
-            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
+            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString(),adoptionPolicy:'BOOKING_2P_ADOPTION_V2'},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
             fixedCapture=capture;
             uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
@@ -246,7 +246,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
       const block = uiBlock ?? classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
-      if(uiStateUnverified){await sleep(backoffDelayMs(backoffAttempt));break;}
+      if(pageGuard?.hardStop||block!==null){await sleep(backoffDelayMs(backoffAttempt));break;} // Actual restriction, abort/guard/cleanup failure stops; page-local insufficient evidence does not.
       if (block !== null) {
         consecutiveBlocks += 1;
         await sleep(backoffDelayMs(backoffAttempt));

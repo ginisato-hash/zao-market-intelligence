@@ -9,7 +9,7 @@ const weighted=(a:readonly {v:number;w:number}[])=>{const rows=[...a].sort((a,b)
 export interface PanelProduct {
  propertyId:string;sourcePropertyId:string;source:'booking'|'jalan'|'rakuten';productId:string;ratePlanId:string;conditionKey:string;
  groupId:string|null;weight:number;
- standardProduct:{kind:'DOUBLE'|'TWIN';maxAdults:2;evidenceSha256:string};
+ standardProduct:{kind:'DOUBLE'|'TWIN';maxAdults:number|null;evidenceSha256:string};
 }
 export interface MarketPanel {version:string;region:string;category:string;ownPropertyIds:string[];products:PanelProduct[];panelSha256:string}
 export interface TwoPersonObservation extends RowIdentity {
@@ -42,7 +42,7 @@ export function validatePanel(p:MarketPanel){
  const keys=new Set<string>(),propertyWeights=new Map<string,number>();
  for(const r of p.products){if(!token(r.propertyId)||!token(r.sourcePropertyId)||!['booking','jalan','rakuten'].includes(r.source)||!token(r.productId)||!token(r.ratePlanId)||!hashOk(r.conditionKey)
   ||r.groupId!==null&&!token(r.groupId)||!Number.isFinite(r.weight)||r.weight<=0||r.weight>1||!r.standardProduct||!['DOUBLE','TWIN'].includes(r.standardProduct.kind)
-  ||r.standardProduct.maxAdults!==2||!hashOk(r.standardProduct.evidenceSha256)||p.ownPropertyIds.includes(r.propertyId)||['xi-raku','japanese-hostel-miuraya','kiraku','330695'].includes(r.sourcePropertyId)||keys.has(key(r)))throw Error('PANEL_PRODUCT_OR_SELF');
+  ||r.standardProduct.maxAdults!==null&&(!Number.isSafeInteger(r.standardProduct.maxAdults)||r.standardProduct.maxAdults<2||r.standardProduct.maxAdults>30)||!hashOk(r.standardProduct.evidenceSha256)||p.ownPropertyIds.includes(r.propertyId)||['xi-raku','japanese-hostel-miuraya','kiraku','330695'].includes(r.sourcePropertyId)||keys.has(key(r)))throw Error('PANEL_PRODUCT_OR_SELF');
   // Multiple sources/plans of a property cannot acquire additional votes. Its configured total weight stays one.
   keys.add(key(r));propertyWeights.set(r.propertyId,(propertyWeights.get(r.propertyId)??0)+r.weight);
  }
