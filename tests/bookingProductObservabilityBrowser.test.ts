@@ -22,7 +22,8 @@ async function typedDates(f:Awaited<ReturnType<typeof fixture>>){await f.page.lo
 async function extraDates(f:Awaited<ReturnType<typeof fixture>>,kind:string){await typedDates(f);await f.page.getByTestId('searchbox-dates-container').evaluate((e,mode)=>{
  const fields=Array.from(e.querySelectorAll('[data-testid^="date-display-field-"]'));
  fields.forEach((field,i)=>{field.removeAttribute('aria-label');const iso=i===0?'2027-01-15':'2027-01-16',text=i===0?'1月15日(金)':'1月16日(土)';
-  if(mode==='title')field.setAttribute('title',iso);
+  if(mode==='title'||mode==='opacity-field-title'||mode==='aria-hidden-field-title'){field.setAttribute('title',iso);
+   if(mode==='opacity-field-title')(field as HTMLElement).style.opacity='0';if(mode==='aria-hidden-field-title'){const wrapper=document.createElement('span');wrapper.setAttribute('aria-hidden','true');field.before(wrapper);wrapper.append(field);}}
   else if(mode==='semantic-self'){const t=document.createElement('time');t.setAttribute('data-testid',field.getAttribute('data-testid')!);t.setAttribute('datetime',iso);t.textContent=text;field.replaceWith(t);}
   else if(mode==='hidden-state'){field.innerHTML=text+'<input type="hidden" value="'+iso+'">';}
   else if(mode==='generic-data'){field.setAttribute('data-date',iso);}
@@ -35,7 +36,7 @@ for(const kind of ['title','semantic','semantic-self'])it('v4 uses role-bound '+
  const f=await fixture(),guard=new BookingUiBlockGuard(f.page);try{await extraDates(f,kind);const cap=await capture(f,guard);expect(cap.cells).toHaveLength(1);expect(cap.displayedCheckin).toBe(date);expect(cap.displayedCheckout).toBe('2027-01-16');expect(await f.page.locator('html').getAttribute('data-date-clicks')).toBeNull();expect(f.requests()).toBe(1);expect(guard.informationRequestRefused).toBe(false);
  }finally{await f.page.close();await guard.finishReadOnlyInformation();guard.dispose();await f.context.close();}
 });
-for(const kind of ['hidden-time','opacity-time','duplicate-time','outside-time','hidden-state','generic-data','timestamp'])it('v4 refuses '+kind+' as a selected-year witness',async()=>{
+for(const kind of ['hidden-time','opacity-time','duplicate-time','outside-time','hidden-state','generic-data','timestamp','opacity-field-title','aria-hidden-field-title'])it('v4 refuses '+kind+' as a selected-year witness',async()=>{
  const f=await fixture(),guard=new BookingUiBlockGuard(f.page),arm=vi.spyOn(guard,'armReadOnlyInformation');try{await extraDates(f,kind);const cap=await capture(f,guard);expect(cap.cells).toEqual([]);expect(arm).not.toHaveBeenCalled();expect(f.requests()).toBe(1);expect(guard.informationRequestRefused).toBe(false);
  }finally{arm.mockRestore();await f.page.close();guard.dispose();await f.context.close();}
 });

@@ -119,7 +119,7 @@ export async function readBookingHeaderSnapshot(page:Page){
  const date=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container'),party=page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/}),login=page.locator('header [data-testid="header-sign-in-button"],header a').filter({hasText:/^(?:ログイン|Sign in)$/u});
  const dateCount=await date.count(),partyCount=await party.count();if(dateCount!==1||partyCount!==1)throw Error('HEADER_CONTROL_NOT_UNIQUE');
  const dateFields=[];
- for(const id of ['date-display-field-start','date-display-field-end']as const){const f=date.getByTestId(id),count=await f.count(),visible=count===1&&await f.isVisible();
+ for(const id of ['date-display-field-start','date-display-field-end']as const){const f=date.getByTestId(id),count=await f.count(),visible=count===1&&await f.isVisible()&&await f.evaluate(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.closest('[aria-hidden="true"], [hidden]')===null);
   const times=visible?await f.evaluate(e=>[e,...e.querySelectorAll('time[datetime]')].filter(t=>t.matches('time[datetime]')&&t.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&t.getBoundingClientRect().width>0&&t.getBoundingClientRect().height>0&&t.closest('[aria-hidden="true"], [hidden]')===null).slice(0,3).map(t=>({value:t.getAttribute('datetime')?.slice(0,41)??'',text:(t as HTMLElement).innerText.slice(0,181)}))):[];
   dateFields.push({id,count,visible,text:visible?(await f.innerText({timeout:2000})).slice(0,181):'',aria:visible?(await f.getAttribute('aria-label'))?.slice(0,181)??null:null,
    title:visible?(await f.getAttribute('title'))?.slice(0,181)??null:null,times});
