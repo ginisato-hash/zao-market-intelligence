@@ -1,7 +1,7 @@
 // Synthetic public-page fixtures only; no live provider or business-policy approval.
 import{beforeAll,afterAll,it,expect}from'vitest';import{chromium,type Browser}from'playwright';
 import{productFactsFixtureHtml}from'./fixtures/bookingProductFactsPage';
-import{readBookingHeaderSnapshot,readBookingCompositeStay,createAnonymousBookingCaptureContext,BOOKING_ADOPTION_V2,bookingOneNightQuoteText,bookingServedTuple,validateBookingStayBindingV2}from'../src/services/bookingProductObservability';
+import{readBookingHeaderSnapshot,readBookingCompositeStay,createAnonymousBookingCaptureContext,BOOKING_ADOPTION_V2,bookingOneNightQuoteText,bookingServedTuple,bookingSelectedQuotePartyConflict,validateBookingStayBindingV2}from'../src/services/bookingProductObservability';
 import{BookingUiBlockGuard}from'../src/services/bookingUiBlockGuard';
 import{captureBookingRateCells,deriveBookingRateCell,sealBookingRateCellCapture}from'../src/services/bookingRateCellEvidence';
 import{selectedBookingTotalV2}from'../src/services/bookingTwoPersonMarketAdmission';
@@ -13,6 +13,13 @@ async function run(mode:string='normal'){
  const context=await createAnonymousBookingCaptureContext(browser,'synthetic'),page=await context.newPage();let external=0;
  let html=productFactsFixtureHtml(mode==='member'?'member':'normal').replace("aria-label='2027年1月15日(金) — 2027年1月16日(土)'",'').replace('>Dates</button>','><span data-testid="date-display-field-start">1月15日(金)</span> — <span data-testid="date-display-field-end">1月16日(土)</span></button>');
  if(mode==='duplicateFullYear')html=productFactsFixtureHtml('normal');
+ if(mode==='opaqueTokens'||mode==='quotePartyConflict')html=html.replaceAll('123_456_2_0_0','123_456_3_0_7').replace('人数: 2','最大宿泊人数：大人3名').replace('ツインルーム</a>21㎡','ツインルーム</a>21㎡ 定員3名');
+ if(mode==='quotePartyConflict')html=html.replace('1泊 大人2名','1泊 大人3名');
+ if(mode==='delayedPolicyClose')html=html.replace("document.getElementById('policyModal_123_456_2_0_0').hidden=true","setTimeout(()=>document.getElementById('policyModal_123_456_2_0_0').hidden=true,75)");
+ if(mode==='policyTitle')html=html.replace('食事およびキャンセルポリシーと前払いポリシーに関する詳細','この選択料金の条件');
+ if(mode==='replacementPolicy')html=html.replace("document.getElementById('policyModal_123_456_2_0_0').hidden=true","document.getElementById('policyModal_123_456_2_0_0').hidden=true;const extra=document.createElement('div');extra.setAttribute('role','dialog');extra.textContent='unverified';document.body.append(extra)");
+ if(mode==='movedPolicy')html=html.replace("document.getElementById('policyModal_123_456_2_0_0').hidden=true","document.getElementById('policyModal_123_456_2_0_0').id='moved-unverified'");
+ if(mode==='uncloseablePolicy')html=html.replace("document.getElementById('policyModal_123_456_2_0_0').hidden=true","void 0");
  if(mode==='noNightWeekday')html=html.replace(/1泊 大人2名 /gu,'').replace(/\([金土]\)/gu,'');
  if(mode==='noChildLiteral')html=html.replace('子供0名 · ','');
  if(mode==='unrelatedNight')html=html.replace("<table id='hprt-table'>","<table id='hprt-table'><caption>他のプランは2泊以上</caption>");
@@ -74,3 +81,14 @@ it.each(['taxEnglish','taxShort'])('v2 shared inclusive tax predicate reaches se
 it('normal NR trigger and booking payment timing remain separate positive facts',()=>{const common='キャンセル、変更、ノーショーの場合、宿泊料金の合計が請求されます。';expect(bookingSemanticTermsV2('返金不可。'+common+'宿泊料金の全額が予約時に請求されます。','NON_REFUNDABLE')).toMatchObject({cancellation:'ANYTIME_NON_REFUNDABLE',prepayment:'FULL_AT_BOOKING'});});
 
 it('full-year V5 capture still refuses duplicated final served tuple',async()=>{const x=await run('duplicateFullYear');expect(x.cap.requestUrlMatches).toBe(false);expect(x.cap.cells).toHaveLength(0);expect(x.cap.problems).toContain('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');});
+
+it.each(['opaqueTokens','delayedPolicyClose','policyTitle'])('v5 retains independently proved selected2P quote (%s)',async mode=>{const x=await run(mode);expect(x.cap.cells).toHaveLength(1);expect(x.derived[0]?.tupleAndProductBound,JSON.stringify(x.cap)).toBe(true);expect(x.hardStop).toBe(false);expect(x.external).toBe(1);});
+it('opaque rate tokens never override an explicit selected quote party contradiction',async()=>{const x=await run('quotePartyConflict');expect(x.cap.cells).toHaveLength(1);expect(x.derived[0]?.reasons).toContain('SELECTED_QUOTE_PARTY_CONFLICT');expect(x.derived[0]?.tupleAndProductBound).toBe(false);});
+it('an uncloseable owned policy is a genuine cleanup stop',async()=>{const x=await run('uncloseablePolicy');expect(x.hardStop).toBe(true);expect(x.cap.blockStateVerified).toBe(false);expect(x.derived.filter(d=>d.tupleAndProductBound)).toHaveLength(0);});
+
+it.each(['3 adults','Adults: 3','2 children','Children: 1','for 2 rooms','Rooms: 2','大人3人','お子様1名'])('selected quote explicit party contradiction is refused without requiring redundant positive labels (%s)',text=>{expect(bookingSelectedQuotePartyConflict(text)).toBe(true);});
+it.each(['2 adults 0 children 1 room','大人2名 子供0名','taxes and fees included'])('matching or unspecified selected party stays usable (%s)',text=>{expect(bookingSelectedQuotePartyConflict(text)).toBe(false);});
+
+it.each(['replacementPolicy','movedPolicy'])('policy close cannot claim success when a visible dialog is replaced or moved (%s)',async mode=>{const x=await run(mode);expect(x.hardStop).toBe(true);expect(x.cap.cells).toHaveLength(0);expect(x.cap.problems).toContain('POLICY_CLOSE_UNVERIFIED');});
+
+it.each(['Only 2 rooms left','残り2部屋','up to 3 adults','Maximum occupancy: 3 adults','定員3名'])('inventory and auxiliary capacity are not selected quote party (%s)',text=>{expect(bookingSelectedQuotePartyConflict(text)).toBe(false);});
