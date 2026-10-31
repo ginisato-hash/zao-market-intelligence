@@ -122,7 +122,7 @@ export async function readBookingHeaderSnapshot(page:Page){
  for(const id of ['date-display-field-start','date-display-field-end']as const){const f=date.getByTestId(id),count=await f.count(),visible=count===1&&await f.isVisible()&&await f.evaluate(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.closest('[aria-hidden="true"], [hidden]')===null);
   const times=visible?await f.evaluate(e=>[e,...e.querySelectorAll('time[datetime]')].filter(t=>t.matches('time[datetime]')&&t.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&t.getBoundingClientRect().width>0&&t.getBoundingClientRect().height>0&&t.closest('[aria-hidden="true"], [hidden]')===null).slice(0,3).map(t=>({value:t.getAttribute('datetime')?.slice(0,41)??'',text:(t as HTMLElement).innerText.slice(0,181)}))):[];
   dateFields.push({id,count,visible,text:visible?(await f.innerText({timeout:2000})).slice(0,181):'',aria:visible?(await f.getAttribute('aria-label'))?.slice(0,181)??null:null,
-   title:visible?(await f.getAttribute('title'))?.slice(0,181)??null:null,times});
+   title:visible?(await f.getAttribute('title'))?.slice(0,181)??null:null,times,unapprovedEmbeddedState:visible?await f.evaluate(e=>e.hasAttribute('data-date')||e.querySelector('input,select,[data-date]')!==null):true});
  }
  return {dateCount,partyCount,dateVisible:await date.isVisible(),partyVisible:await party.isVisible(),dateText:await date.innerText({timeout:2000}),dateAria:await date.getAttribute('aria-label'),expanded:await date.getAttribute('aria-expanded'),party:await party.getAttribute('aria-label'),signedOutControlVisible:await login.count()===1&&await login.isVisible(),dateFields};
 }
@@ -130,7 +130,7 @@ export async function readBookingHeaderSnapshot(page:Page){
 // Only an explicitly year-bearing visible-control label proves the year. Never
 // fill it from the request URL, today's date or a month/day-only label.
 function dateLabelParts(raw:string){
- const normalized=raw.normalize('NFKC').trim().replace(/\s+/gu,' ').replace(/日([日月火水木金土])曜日/gu,'日($1)');
+ const normalized=raw.normalize('NFKC').trim().replace(/^日付を選択\s+/u,'').replace(/\s+/gu,' ').replace(/日([日月火水木金土])曜日/gu,'日($1)');
  const s=normalized.startsWith('チェックイン')?normalized.replace(/、\s*(?=チェックアウト)/u,' — '):normalized;
  const jp=/^(?:チェックイン(?:日)?\s*[:：]?\s*)?(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(?:\s*\(([日月火水木金土])(?:曜日)?\))?\s*(?:[–—〜~−-]|から)\s*(?:チェックアウト(?:日)?\s*[:：]?\s*)?(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(?:\s*\(([日月火水木金土])(?:曜日)?\))?$/u.exec(s);
  if(jp)return [{y:jp[1]?Number(jp[1]):null,m:Number(jp[2]),d:Number(jp[3]),w:jp[4]??null},{y:jp[5]?Number(jp[5]):null,m:Number(jp[6]),d:Number(jp[7]),w:jp[8]??null}];
