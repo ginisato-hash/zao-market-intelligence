@@ -27,3 +27,28 @@ it('rejects negated or contradictory all-tax declarations in the selected price 
   expect(hasExplicitAllMandatoryTotal(priceText)).toBe(false);expect(admitCanonicalBookingTwoPerson(f).observation).toBeNull();
  }
 });
+function v4Fixture(){const f=fixture(),cell=f.capture.cells[0]!;f.capture=sealBookingRateCellCapture({...f.capture,parserVersion:'booking-rate-cell-v4',cells:[{...cell,priceText:'￥20,000 税・手数料込',rowProblems:[],oneRoomOptionEnabled:true,productFacts:{schema:'BOOKING_SELECTED_PRODUCT_FACTS_V1',blockId:cell.blockId,anonymousPublicContext:{freshUnauthenticatedContext:true,signedOutControlVisible:true},roomCapacity:{roomId:'123',roomName:cell.roomName,controlId:'RD123',containerId:'RD123',maximumAdults:2,explicitText:'最大宿泊人数：2名'},taxTotal:{controlId:'tax123',containerId:'tax123',explicitText:'すべての税金と料金が含まれています。'}}}]});f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');return f;}
+it('v4 uses positive controlled room/tax information and fresh anonymous guest offer instead of nonexistent literal public-price wording',()=>{const f=v4Fixture();expect(admitCanonicalBookingTwoPerson(f),admitCanonicalBookingTwoPerson(f).reason).toMatchObject({status:'VERIFIED_CANONICAL_TWO_PERSON_FACT'});});
+for(const fault of ['room-capacity','different-room','missing-capacity','anonymous-unknown','sign-in-unknown','tax-exclusion','tax-control','member','own-policy-failed','global-page-problem']as const)it(`v4 never guesses missing product facts or promotes conditional prices: ${fault}`,()=>{
+ const f=v4Fixture(),cell=f.capture.cells[0]!,facts=cell.productFacts!;
+ if(fault==='room-capacity')facts.roomCapacity={...facts.roomCapacity!,maximumAdults:3,explicitText:'最大宿泊人数：3名'};
+ if(fault==='different-room')facts.roomCapacity!.roomId='999';if(fault==='missing-capacity')facts.roomCapacity=null;if(fault==='anonymous-unknown')facts.anonymousPublicContext=null;
+ if(fault==='sign-in-unknown')(facts.anonymousPublicContext as unknown as {signedOutControlVisible:boolean}).signedOutControlVisible=false;
+ if(fault==='tax-exclusion')facts.taxTotal!.explicitText='すべての税金と料金が含まれています。入湯税は別途支払。';if(fault==='tax-control')facts.taxTotal!.containerId='OTHER';if(fault==='member')cell.priceText+=' Genius 会員限定料金';if(fault==='own-policy-failed')cell.rowProblems=['RATE_POLICY_UNVERIFIED'];if(fault==='global-page-problem')f.capture.problems=['DISPLAYED_DATE_OR_PARTY_UNVERIFIED'];
+ f.capture=sealBookingRateCellCapture(f.capture);f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).observation).toBeNull();
+});
+it('a different row policy failure does not contaminate the fully proved fixed row; its failure never becomes a hotel sold-out fact',()=>{
+ const f=v4Fixture();f.capture=sealBookingRateCellCapture({...f.capture,cells:[...f.capture.cells,{...f.capture.cells[0]!,blockId:'999_456_2_0_0',policyText:null,rowProblems:['RATE_POLICY_UNVERIFIED']}]});f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).status).toBe('VERIFIED_CANONICAL_TWO_PERSON_FACT');
+});
+
+it('prefix extra-charge and excluded-item headings contradict an affirmative gross total',()=>{
+ for(const text of ['すべての税金と料金が含まれています。別途500円のサービス料金がかかります。','すべての税金と料金が含まれています。含まれないもの：清掃料金500円','すべての税金と料金が含まれています。Additional charge JPY500']){
+  expect(hasExplicitAllMandatoryTotal(text)).toBe(false);const f=v4Fixture();f.capture.cells[0]!.productFacts!.taxTotal!.explicitText=text;f.capture=sealBookingRateCellCapture(f.capture);f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).reason).toBe('SELECTED_TOTAL_TAX_INFORMATION_NOT_PROVED');
+ }
+});
+
+it('disabled or unknown quantity-one availability cannot become a public available v4 offer',()=>{for(const value of [false,undefined]){const f=v4Fixture();if(value===undefined)delete f.capture.cells[0]!.oneRoomOptionEnabled;else f.capture.cells[0]!.oneRoomOptionEnabled=value;f.capture=sealBookingRateCellCapture(f.capture);f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).observation).toBeNull();}});
+
+it('v4 cannot use a price-block positive declaration when its controlled tax information is UNKNOWN',()=>{
+ const f=v4Fixture();f.capture.cells[0]!.priceText+='。すべての税金と料金が含まれています。';f.capture.cells[0]!.productFacts!.taxTotal!.explicitText='税の内訳は現在確認できません';f.capture=sealBookingRateCellCapture(f.capture);f.rawCaptureBytes=Buffer.from(JSON.stringify(f.capture));f.independentRawCaptureSha256=createHash('sha256').update(f.rawCaptureBytes).digest('hex');expect(admitCanonicalBookingTwoPerson(f).reason).toBe('SELECTED_TOTAL_TAX_INFORMATION_NOT_PROVED');
+});
