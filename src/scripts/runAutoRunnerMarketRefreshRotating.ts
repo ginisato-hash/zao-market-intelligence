@@ -16,6 +16,7 @@ import {observeCollectorSource,bindCollectorProducerEvidence} from '../services/
 import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelection';
 import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
+import {observeBookingInitialLoad} from '../services/bookingInitialLoadBarrier';
 import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollection} from '../services/bookingPrimaryCollection';
 import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
 import {readCaptureTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
@@ -187,8 +188,10 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
       const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page):null;
+      const initialLoad=rateCellSink!==undefined?observeBookingInitialLoad(page):null;
       let rateCellRecord:Record<string,unknown>|null=null;
       let fixedCapture:Awaited<ReturnType<typeof captureBookingRateCells>>|null=null;
+      let initialLoadReadiness:Awaited<ReturnType<NonNullable<typeof initialLoad>['waitForFreshQuiet']>>|null=null;
       const fixedProducts=panel?.products.filter(p=>p.sourcePropertyId===t.property_slug&&p.source==='booking');
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
@@ -201,6 +204,12 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         // the information guard, which must remain strict through page close.
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
         if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
+          // Passive initial loading may include timer/lazyload traffic. Require
+          // fresh quiet after the screenshot, within a fixed absolute budget.
+          // The unchanged ALL-HTTP guard is still armed before every info click.
+          initialLoadReadiness=await initialLoad!.waitForFreshQuiet();initialLoad!.dispose();
+          if(initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION',marketPriceEligible:false};
+          if(initialLoadReadiness.status==='QUIET_BEFORE_INFORMATION'){
           try{
             const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
             fixedCapture=capture;
@@ -210,15 +219,17 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
             rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,httpStatus,parserVersion:capture.parserVersion,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
 
           }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
+          }
         }
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
       finally {
+        initialLoad?.dispose();
         if(pageGuard)await pageGuard.checkpoint();
         await page.close().catch(() => undefined);
         if(pageGuard){
           await pageGuard.finishReadOnlyInformation();
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
-          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;}
+          if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;}
           pageGuard.dispose();
         }
       }
