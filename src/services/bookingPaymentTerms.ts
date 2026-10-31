@@ -32,3 +32,7 @@ export function bookingSemanticTermsV2(text:string|null,refund:string){
  if(!clauses.some(c=>/(?:\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{2}-\d{2}|\d+日前)/u.test(c))||!clauses.some(c=>/全額|100\s*%|\d+\s*%|[¥￥]\s*[\d,]+/u.test(c)))return null;
  return {version:'BOOKING_SEMANTIC_TERMS_V2',meal:'ROOM_ONLY',cancellation:clauses.map(c=>c.replace(/無料でキャンセル|キャンセル無料/gu,'無料キャンセル').replace(/\s/gu,'')).sort(),prepayment:timing};
 }
+
+/** In-page stability retains every observed clause, including meals and exceptions.
+ * Comparison-series identity still uses bookingSemanticTermsV2 separately. */
+export function bookingPolicyObservationKey(text:string){return text.normalize('NFKC').replace(/\s+/gu,' ').trim();}

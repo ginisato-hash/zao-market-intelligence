@@ -221,12 +221,12 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       finally {
         initialLoad?.dispose();
         if(pageGuard)await pageGuard.checkpoint();
-        await page.close().catch(() => undefined);
+        if(pageGuard)await pageGuard.closeReadOnlyInformationPage().catch(()=>undefined);else await page.close().catch(() => undefined);
         if(pageGuard){
           await pageGuard.finishReadOnlyInformation();
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
           initialLoadReadiness=pageGuard.initialLoadReadiness;
-          if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['initialLoadReadinessPhase']=initialLoadReadiness?'IMMEDIATELY_BEFORE_INFORMATION_ARM':null;rateCellRecord['initialLoadHandoffVerified']=pageGuard.initialLoadHandoffVerified;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;rateCellRecord['observedDeniedRequestPhase']=pageGuard.observedDeniedRequestPhase;}
+          if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['initialLoadReadinessPhase']=initialLoadReadiness?'IMMEDIATELY_BEFORE_INFORMATION_ARM':null;rateCellRecord['initialLoadHandoffVerified']=pageGuard.initialLoadHandoffVerified;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;rateCellRecord['observedDeniedRequestPhase']=pageGuard.observedDeniedRequestPhase;rateCellRecord['informationFailureCode']=pageGuard.informationFailureCode;}
           pageGuard.dispose();
         }
       }
