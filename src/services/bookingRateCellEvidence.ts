@@ -32,7 +32,7 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   if(!m||Number(m[3])!==2||Number(m[4])!==0||Number(m[5])!==0)reasons.push('NOT_EXACT_TWO_ADULT_RATE_CELL');
   if(!cap.requestUrlMatches||cap.displayedCheckin!==cap.request.checkin||cap.displayedCheckout!==cap.request.checkout
     ||!/大人\s*2名.*子供\s*0名.*1部屋/u.test(cap.displayedParty))reasons.push('SERVED_TUPLE_NOT_CONFIRMED');
-  if(cap.selectedCalendarEvidence!==undefined){const stay=parseBookingSelectedCalendarEvidence(cap.selectedCalendarEvidence);if(cap.parserVersion!=='booking-rate-cell-v4'||!stay||stay.checkin!==cap.displayedCheckin||stay.checkout!==cap.displayedCheckout)reasons.push('SELECTED_CALENDAR_EVIDENCE_INVALID');}
+  if(cap.selectedCalendarEvidence!==undefined){const stay=parseBookingSelectedCalendarEvidence(cap.selectedCalendarEvidence);if(cap.parserVersion!=='booking-rate-cell-v4'||!stay||stay.checkin!==cap.displayedCheckin||stay.checkout!==cap.displayedCheckout||stay.checkin!==cap.request.checkin||stay.checkout!==cap.request.checkout||cap.request.adults!==2||cap.request.children!==0||cap.request.rooms!==1||cap.request.currency!=='JPY'||cap.requestUrlMatches!==true||typeof cap.displayedParty!=='string'||cap.displayedParty.normalize('NFKC').trim().replace(/\s+/gu,' ')!==cap.selectedCalendarEvidence.party.normalize('NFKC').trim().replace(/\s+/gu,' '))reasons.push('SELECTED_CALENDAR_EVIDENCE_INVALID');}
   if(cap.parserVersion==='booking-rate-cell-v4'&&cell.oneRoomOptionEnabled!==true)reasons.push('ONE_ROOM_QUANTITY_NOT_SELECTABLE');
   if(cap.parserVersion==='booking-rate-cell-v4'){if(!Array.isArray(cell.rowProblems)||cell.rowProblems.length>5)reasons.push('ROW_STATUS_UNVERIFIED');else if(cell.rowProblems.length)reasons.push(...cell.rowProblems);}
   if(!cell.roomName||!cell.roomText.includes(cell.roomName)||!/人数:\s*2\b/u.test(cell.occupancyText))reasons.push('ROOM_OR_OCCUPANCY_UNBOUND');
@@ -106,7 +106,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     captureStage='PASSIVE_DATE_PRECHECK';
     const passiveDenials:string[]=[];let passive=await readBookingPassiveStay(page,reason=>passiveDenials.push(reason+'_NO_INTERACTION'));
     if(!passive&&passiveDenials.includes('PASSIVE_DATE_EXPLICIT_YEAR_MISSING_NO_INTERACTION')){
-      captureStage='GUARDED_CALENDAR_DATE_PROOF';const calendar=await readBookingGuardedCalendarStay(page,guard);
+      captureStage='GUARDED_CALENDAR_DATE_PROOF';const calendar=await readBookingGuardedCalendarStay(page,guard,{checkin:input.checkin,checkout:input.checkout});
       if(calendar){passive=calendar;selectedCalendarEvidence=calendar.evidence;}
     }
     if(!passive)problems.push(...passiveDenials);
