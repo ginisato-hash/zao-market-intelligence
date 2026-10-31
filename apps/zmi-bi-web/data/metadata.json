@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-10-31T11:10:05+09:00",
-  "latest_collected_at_jst": "2026-10-31T10:00:06+09:00",
-  "history_rows_total": 78513,
-  "latest_observation_rows": 7908,
-  "unified_rows": 3942,
-  "unified_rows_before_retention": 5694,
+  "generated_at_jst": "2026-10-31T13:38:38+09:00",
+  "latest_collected_at_jst": "2026-10-31T13:35:05+09:00",
+  "history_rows_total": 79063,
+  "latest_observation_rows": 7930,
+  "unified_rows": 3953,
+  "unified_rows_before_retention": 5712,
   "distinct_properties": 28,
-  "distinct_checkins": 220,
+  "distinct_checkins": 221,
   "sources_included": [
     "booking",
     "jalan",
@@ -36,25 +36,25 @@
     "2027-05_early"
   ],
   "dropped_past_period_keys_count": 7,
-  "dropped_past_rows_count": 1752,
+  "dropped_past_rows_count": 1759,
   "availability_breakdown": {
-    "total": 3942,
-    "available": 2839,
+    "total": 3953,
+    "available": 2844,
     "sold_out": 500,
     "not_found": 0,
-    "excluded": 603,
-    "ota_unavailable_rate": 0.1497,
-    "data_missing_rate": 0.153,
-    "data_reliability_rate": 0.847
+    "excluded": 609,
+    "ota_unavailable_rate": 0.1495,
+    "data_missing_rate": 0.1541,
+    "data_reliability_rate": 0.8459
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 7091,
+  "price_movement_rows": 7113,
   "dp_pressure_rows": 286,
-  "price_movement_own_property_rows": 10522,
-  "price_movement_latest_collected_at_jst": "2026-10-31T10:00:06+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-10-31T10:00:06+09:00",
+  "price_movement_own_property_rows": 10576,
+  "price_movement_latest_collected_at_jst": "2026-10-31T13:35:05+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-10-31T13:35:05+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 18540,
+  "own_miuraya_price": 38036,
   "own_kiraku_price": 66456,
   "own_property_price_status": [
     {
@@ -100,8 +100,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -15768,
-  "priority_competitor_vs_own_price_gap": -15768,
-  "priority_competitor_price_changes_count": 275,
-  "own_property_price_changes_count": 173
+  "competitor_vs_own_price_gap": -25516,
+  "priority_competitor_vs_own_price_gap": -25516,
+  "priority_competitor_price_changes_count": 277,
+  "own_property_price_changes_count": 172
 }
