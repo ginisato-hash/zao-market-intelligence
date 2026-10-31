@@ -67,7 +67,9 @@ export async function readBookingGuardedCalendarStay(page:Page,guard:BookingUiBl
  let opened=false,identified=false,selected:BookingSelectedCalendarEvidence['selected']=[];
  try{
   if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(header))throw Error('CALENDAR_HEADER_CHANGED_BEFORE_CLICK');
-  opened=true;await button.click({timeout:2000});await guard.requireClear();
+  if(canonicalJson(await availabilityMaterial(page))!==beforeMaterial)throw Error('CALENDAR_AVAILABILITY_CHANGED_BEFORE_CLICK');
+  opened=true;guard.setInformationPhase('CALENDAR_OPEN');await button.click({timeout:2000});await guard.requireClear();
+  guard.setInformationPhase('CALENDAR_READ');
   if(await button.getAttribute('aria-expanded')!=='true'||await calendar.count()!==1||!await calendar.isVisible()||await page.locator('[data-testid="searchbox-datepicker-calendar"]:visible').count()!==1)throw Error('CONTROLLED_CALENDAR_NOT_UNIQUE');identified=true;
   selected=await calendar.evaluate(root=>{
    if(!root.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})||root.closest('[hidden],[aria-hidden="true"]'))throw Error('CALENDAR_NOT_VISIBLE');
@@ -88,8 +90,9 @@ export async function readBookingGuardedCalendarStay(page:Page,guard:BookingUiBl
   if(opened&&!identified&&await guard.checkpoint())throw Error('CALENDAR_INFORMATION_UNBOUND_STOP');
   if(opened&&identified&&await guard.checkpoint()){
    if(await button.getAttribute('aria-expanded')!=='true')throw Error('CALENDAR_STATE_CHANGED');
-   await button.click({timeout:2000});await guard.requireClear();
+   guard.setInformationPhase('CALENDAR_CLOSE');await button.click({timeout:2000});await guard.requireClear();
    if(await button.getAttribute('aria-expanded')!=='false'||await calendar.isVisible())throw Error('CALENDAR_CLOSE_UNVERIFIED');
+   guard.setInformationPhase('CALENDAR_CLOSED');
   }
  }
  await guard.requireClear();if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(header))throw Error('CALENDAR_HEADER_CHANGED_AFTER_CLOSE');
