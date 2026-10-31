@@ -2,18 +2,20 @@
 // Source capture is bounded to pinned monthly shards; DB-only history is retained for separate reviewed recovery.
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { closeSync, existsSync, fsyncSync, fstatSync, readSync, constants, linkSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve, isAbsolute } from "node:path";
 import { hostname } from "node:os";
 import { historyRowFromCsvRecord } from "./localHistoryAppendValidationPolicy";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { mapHistoryRowToMarketSignalHistoryRow, parseCsvTable, REQUIRED_HISTORY_COLUMNS } from "./historyToDbSyncDryRun";
 import { applyRealSync } from "./historyToDbSyncRealRun";
 import { buildRowHash, buildRowId, HISTORY_CSV_HEADERS, renderHistoryCsv, shardMonthFromCheckin, type HistoryRow } from "./localHistorySchemaDesign";
 import { APPEND_LOCK_FILENAME, parseShardRows } from "./localHistoryRealAppend";
 import { encryptMirrorBackup, decryptMirrorBackup } from "./mirrorRecoveryEncryption";
 const hash = (text: string | Buffer): string => createHash("sha256").update(text).digest("hex");
+const databaseEntryPath = realpathSync(createRequire(import.meta.url).resolve("better-sqlite3"));
 function fail(reason: string): never { throw new Error(`MIRROR_RECOVERY_REFUSED(${reason})`); }
 const stamp = (p: string): string => { const s = statSync(p, { bigint: true }); return [s.dev, s.ino, s.size, s.mtimeNs].join("|"); };
 const REF = /^https:\/\/github\.com\/ginisato-hash\/zao-market-intelligence-private\/issues\/13#issuecomment-\d+$/u;
@@ -62,7 +64,7 @@ const ownedLocks = new WeakMap<object, {
 export function withMirrorRecoveryLock<T>(historyDir: string, work: (lock: MirrorRecoveryLock) => T, resume?: {
     planSha256: string;
     backupDir: string;
-}): T {
+}, canReleaseLegacyLock?: () => boolean): T {
     const dir = realpathSync(historyDir), path = join(dirname(dir), "locks", "history_writer.lock.sqlite");
     mkdirSync(dirname(path), { recursive: true });
     const db = new Database(path), token = Object.freeze({ historyDir: dir });
@@ -113,12 +115,16 @@ export function withMirrorRecoveryLock<T>(historyDir: string, work: (lock: Mirro
         return result;
     }
     finally {
+        let releaseLegacy = true;
+        try { if (canReleaseLegacyLock && !canReleaseLegacyLock()) releaseLegacy = false; }
+        catch { releaseLegacy = false; }
         ownedLocks.delete(token);
-        if (ownsLegacy && existsSync(legacyPath) && readFileSync(legacyPath, "utf8") === body)
+        if (releaseLegacy && ownsLegacy && existsSync(legacyPath) && readFileSync(legacyPath, "utf8") === body)
             unlinkSync(legacyPath);
         if (db.inTransaction)
             db.exec("ROLLBACK");
         db.close();
+        if (!releaseLegacy) fail("CANONICAL_CONNECTION_CLOSE_UNVERIFIED_LEGACY_LOCK_RETAINED");
     }
 }
 function requireLock(lock: MirrorRecoveryLock, dir: string): void {
@@ -129,14 +135,98 @@ function requireLock(lock: MirrorRecoveryLock, dir: string): void {
 interface Context {
     historyDir: string;
     sourceDatabase: Database.Database;
+    sourceDbBinding: SourceDbBinding | null;
     legacyPublished: boolean;
+    preflightOwnPublication(paths: readonly string[]): void;
     admitOwnPublication(path: string): void;
     stage: Database.Database;
     dbHashes: Map<string, string>;
+    prefixBytes: Map<string, number>;
+    appendEligible: boolean;
+    assertExecutionSource(): void;
+    executionRoot: string;
     sourceUnchanged(): void;
     legacyUnchanged(): void;
 }
 const genuine = new WeakMap<object, Context>();
+// The execution checkout is deliberately immutable and separate from the
+// canonical history repository. History/BI commits may advance independently;
+// they never rebind the code release or a previously accepted plan.
+function bindIsolatedExecution(historyDir: string): { root: string; releaseGitSha: string; assert(): void } {
+    const modulePath = fileURLToPath(import.meta.url), moduleDir = dirname(modulePath);
+    const git = (dir: string, args: string[]): string => execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", dir, ...args],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000, maxBuffer: 128 * 1024 }).trim();
+    const dataRepo = (): string | null => {
+        try { return realpathSync(git(historyDir, ["rev-parse", "--show-toplevel"])); }
+        catch (e) {
+            const error = e as { status?: number; stderr?: Buffer | string };
+            if (error.status === 128 && String(error.stderr).includes("not a git repository")) {
+                let parent = historyDir;
+                for (let depth = 0; depth < 64; depth++) {
+                    try { lstatSync(join(parent, ".git")); return fail("HISTORY_REPOSITORY_UNVERIFIED"); }
+                    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") return fail("HISTORY_REPOSITORY_UNVERIFIED"); }
+                    const next = dirname(parent); if (next === parent) return null; parent = next;
+                }
+            }
+            return fail("HISTORY_REPOSITORY_UNVERIFIED");
+        }
+    };
+    const identity = (path: string): string => { const s = lstatSync(path, { bigint: true }); return [s.dev, s.ino].join("|"); };
+    const snapshot = () => {
+        const root = realpathSync(git(moduleDir, ["rev-parse", "--show-toplevel"]));
+        if (historyDir === root || historyDir.startsWith(root + "/")) fail("ISOLATED_EXECUTION_CHECKOUT_REQUIRED");
+        const historyRoot = dataRepo(); if (root === historyRoot) fail("ISOLATED_EXECUTION_CHECKOUT_REQUIRED");
+        if (realpathSync(modulePath) !== modulePath || !modulePath.startsWith(root + "/")) fail("EXECUTION_SOURCE_CANONICAL_PATH");
+        const dependencyPath = join(root, "node_modules"), dependency = existsSync(dependencyPath) ? realpathSync(dependencyPath) : null;
+        if (!dependency || !statSync(dependency).isDirectory() || !databaseEntryPath.startsWith(dependency + "/")) fail("EXECUTION_DEPENDENCY_BINDING");
+        const status = git(root, ["status", "--porcelain", "-z", "--untracked-files=all"]);
+        // A pre-existing dependency link is an installation input, not new code.
+        // Bind its real target/inode; every other unknown or dirty path refuses.
+        for (const row of status.split("\0")) if (row && !(row === "?? node_modules" && dependency !== null && lstatSync(dependencyPath).isSymbolicLink())) fail("EXECUTION_SOURCE_DIRTY");
+        const releaseGitSha = git(root, ["rev-parse", "HEAD"]);
+        if (!/^[0-9a-f]{40}$/u.test(releaseGitSha)) fail("CODE_RELEASE_UNKNOWN");
+        return { root, rootIdentity: identity(root), modulePath, moduleIdentity: identity(modulePath), moduleSha256: hash(readFileSync(modulePath)),
+            dependency, dependencyIdentity: identity(dependency), databaseEntryPath, databaseEntryIdentity: identity(databaseEntryPath), historyRoot, releaseGitSha };
+    };
+    const initial = snapshot();
+    return { root: initial.root, releaseGitSha: initial.releaseGitSha, assert(): void {
+        const current = snapshot();
+        if (current.releaseGitSha !== initial.releaseGitSha) fail("APPEND_RELEASE_CHANGED");
+        if (JSON.stringify(current) !== JSON.stringify(initial)) fail("EXECUTION_SOURCE_CHANGED");
+    } };
+}
+function externalBackupPath(path: string, executionRoot: string): string {
+    const parts: string[] = []; let parent = resolve(path);
+    for (let depth = 0; depth < 64; depth++) {
+        try {
+            lstatSync(parent);
+            const canonical = resolve(realpathSync(parent), ...parts.slice().reverse());
+            if (canonical === executionRoot || canonical.startsWith(executionRoot + "/") || executionRoot.startsWith(canonical === "/" ? "/" : canonical + "/")) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
+            return canonical;
+        } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== "ENOENT") return fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
+        }
+        const next = dirname(parent); if (next === parent) break; parts.push(basename(parent)); parent = next;
+    }
+    return fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
+}
+interface SourceDbBinding { alias: string; canonical: string; device: bigint; inode: bigint; }
+function bindSourceDatabase(db: Database.Database): SourceDbBinding | null {
+    try {
+        if (db.name === ":memory:") return null;
+        const main = (db.pragma("database_list") as Array<{ name: string; file: string }>).filter(r => r.name === "main");
+        if (main.length !== 1 || !main[0]!.file || !isAbsolute(main[0]!.file)) fail("SOURCE_DATABASE_BINDING");
+        const alias = resolve(db.name), canonical = realpathSync(main[0]!.file);
+        if (realpathSync(alias) !== canonical) fail("SOURCE_DATABASE_BINDING");
+        const s = statSync(canonical, { bigint: true });
+        return { alias, canonical, device: s.dev, inode: s.ino };
+    } catch { return fail("SOURCE_DATABASE_BINDING"); }
+}
+function assertSourceDatabaseBinding(db: Database.Database, binding: SourceDbBinding | null): void {
+    const current = bindSourceDatabase(db);
+    if (binding === null ? current !== null : current === null || current.alias !== binding.alias || current.canonical !== binding.canonical
+        || current.device !== binding.device || current.inode !== binding.inode) fail("SOURCE_DATABASE_BINDING");
+}
 function digestRows(rows: Iterable<{
     row_id: string;
     row_hash: string;
@@ -187,7 +277,8 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
 }): PreparedMirrorRecovery {
     if (pins.length === 0 || pins.length > 240 || new Set(pins.map(p => p.name)).size !== pins.length)
         fail("SHARD_BUDGET");
-    const dir = realpathSync(historyDir), dbMap = resume?.originalDb ?? dbHashes(db), stage = new Database(":memory:");
+    const dir = realpathSync(historyDir), execution = bindIsolatedExecution(dir), sourceDbBinding = bindSourceDatabase(db);
+    const dbMap = resume?.originalDb ?? dbHashes(db), stage = new Database(":memory:");
     const inventory = (): string => readdirSync(dir).filter(n => /^zao_signals_\d{4}_\d{2}\.csv$/u.test(n)).sort().join("|");
     let expectedNames = pins.map(p => p.name).sort().join("|");
     if (inventory() !== expectedNames) {
@@ -197,7 +288,7 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
     stage.exec("CREATE TABLE history(row_id TEXT PRIMARY KEY,row_hash TEXT NOT NULL,raw_json TEXT NOT NULL)");
     const insert = stage.prepare("INSERT INTO history VALUES(?,?,?)"), find = stage.prepare("SELECT row_hash FROM history WHERE row_id=?");
     let bytes = 0, count = 0, missing = 0, historicalIds = 0;
-    const stamps = new Map<string, string>();
+    const stamps = new Map<string, string>(), prefixBytes = new Map<string, number>();
     try {
         for (const pin of [...pins].sort((a, b) => a.name.localeCompare(b.name))) {
             if (!/^zao_signals_\d{4}_\d{2}\.csv$/u.test(pin.name) || !/^[0-9a-f]{64}$/u.test(pin.sha256) || !Number.isSafeInteger(pin.rows) || pin.rows < 0)
@@ -210,6 +301,7 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
             if (resume?.expectedCurrent.has(pin.name) && hash(current) !== resume.expectedCurrent.get(pin.name))
                 fail("RESUME_SOURCE_CHANGED");
             const raw = resume?.originals.get(pin.name) ?? current;
+            prefixBytes.set(pin.name, raw.length);
             if (hash(raw) !== pin.sha256 || stamp(path) !== before)
                 fail("SOURCE_CHANGED");
             const table = parseCsvTable(raw.toString("utf8"));
@@ -240,11 +332,13 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
             stamps.set(path, before);
         }
         const sourceUnchanged = (): void => {
+            execution.assert();
             if (inventory() !== expectedNames)
                 fail("SOURCE_UNIVERSE_CHANGED");
             for (const [p, s] of stamps)
                 if (stamp(p) !== s)
                     fail("SOURCE_CHANGED");
+            execution.assert();
         };
         sourceUnchanged();
         const historySha = digestRows(stage.prepare("SELECT row_id,row_hash FROM history ORDER BY row_id COLLATE BINARY").iterate() as Iterable<{
@@ -276,9 +370,8 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
             row_hash: string;
         }>)
             union.set(r.row_id, r.row_hash);
-        const releaseGitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: fileURLToPath(new URL(".", import.meta.url)), encoding: "utf8" }).trim();
-        if (!/^[0-9a-f]{40}$/u.test(releaseGitSha))
-            fail("CODE_RELEASE_UNKNOWN");
+        execution.assert();
+        const releaseGitSha = execution.releaseGitSha;
         const base = { kind: "ZMI_MIRROR_RECOVERY_PLAN_V1" as const, releaseGitSha, dbIdentitySha256: mapDigest(dbMap), historyIdentitySha256: historySha, unionIdentitySha256: mapDigest(union), historyRows: count, dbRows: dbMap.size,
             historyOnly: missing, historicalIdentityFormatExceptions: historicalIds, dbOnly: legacy.length, recoverableLegacyRows: legacy.length, legacyIdentitySha256: mapDigest(legacyPairs), legacySavedJsonSha256: mapDigest(legacyRawHashes), pins: [...pins].map(p => Object.freeze({ ...p })), originalSourceAuthenticity: "NOT_ESTABLISHED" as const };
         const plan = { ...base, planSha256: hash(JSON.stringify(base)) };
@@ -288,7 +381,8 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                 if (genuine.delete(result))
                     stage.close();
             } };
-        genuine.set(result, { historyDir: dir, sourceDatabase: db, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, sourceUnchanged,
+        assertSourceDatabaseBinding(db, sourceDbBinding);
+        genuine.set(result, { historyDir: dir, sourceDatabase: db, sourceDbBinding, legacyPublished: legacy.length === 0, stage, dbHashes: dbMap, prefixBytes, appendEligible: !resume, assertExecutionSource: execution.assert, executionRoot: execution.root, sourceUnchanged,
             legacyUnchanged(): void {
                 for (const [id, sha] of legacyRawHashes) {
                     const r = getRaw.get(id) as {
@@ -298,12 +392,21 @@ function prepareInternal(db: Database.Database, historyDir: string, pins: readon
                         fail("LEGACY_SAVED_JSON_CHANGED");
                 }
             },
+            preflightOwnPublication(paths: readonly string[]): void {
+                sourceUnchanged();
+                for (const path of paths)
+                    if (dirname(path) !== dir || !stamps.has(path) || !existsSync(path) || lstatSync(path).isSymbolicLink() || realpathSync(path) !== path)
+                        fail("LEGACY_PUBLICATION_SCOPE_BEFORE_MUTATION");
+                execution.assert();
+            },
             admitOwnPublication(path: string): void {
+                execution.assert();
                 const next = [...new Set([...expectedNames.split("|"), basename(path)])].sort().join("|");
                 if (inventory() !== next)
                     fail("SOURCE_UNIVERSE_CHANGED");
                 expectedNames = next;
                 stamps.set(path, stamp(path));
+                execution.assert();
             } });
         return Object.freeze(result);
     }
@@ -316,7 +419,131 @@ function acceptance(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptanc
     const ctx = genuine.get(prepared);
     if (!ctx || !a || a.purpose !== purpose || a.planSha256 !== prepared.plan.planSha256 || a.releaseGitSha !== prepared.plan.releaseGitSha || !/^[0-9a-f]{40}$/u.test(a.releaseGitSha) || !REF.test(a.tdAcceptanceRef) || !REF.test(a.ownerApprovalRef))
         return fail("EXPLICIT_ACCEPTANCE_REQUIRED");
+    ctx.assertExecutionSource();
+    assertSourceDatabaseBinding(ctx.sourceDatabase, ctx.sourceDbBinding);
+    // Once a recovery phase is accepted, do not reinterpret its prepared stage
+    // as a new append-only plan. Existing persisted plans/receipts keep their identity.
+    ctx.appendEligible = false;
     return ctx;
+}
+
+/** Advance only a LIVE genuine preparation before any accepted recovery phase.
+ * This does not rehydrate a serialized plan/MODEL, acquire authority or write
+ * canonical data. Original bytes are rehashed; only appended rows are parsed
+ * semantically. The old handle becomes unusable only after successful RAM commit.
+ * Writer provenance and market-price eligibility are separate caller gates.
+ */
+export function extendPreparedMirrorRecoveryAppendOnly(prepared: PreparedMirrorRecovery, pins: readonly PinnedMarketShard[], newShardNames: readonly string[] = []): {
+    prepared: PreparedMirrorRecovery;
+    appendedRows: number;
+    oldRowsSemanticallyRevalidated: 0;
+} {
+    const ctx = genuine.get(prepared);
+    if (!ctx || !ctx.appendEligible) fail("LIVE_UNACCEPTED_PREPARATION_REQUIRED");
+    if (pins.length < 1 || pins.length > 240 || new Set(pins.map(p => p.name)).size !== pins.length
+        || pins.some(p => !/^zao_signals_\d{4}_(?:0[1-9]|1[0-2])\.csv$/u.test(p.name) || !/^[0-9a-f]{64}$/u.test(p.sha256) || !Number.isSafeInteger(p.rows) || p.rows < 0)) fail("APPEND_PIN_SCOPE");
+    const oldPins = new Map(prepared.plan.pins.map(p => [p.name, p]));
+    if (newShardNames.length > 240 || new Set(newShardNames).size !== newShardNames.length || newShardNames.some(n => oldPins.has(n)
+        || !/^zao_signals_\d{4}_(?:0[1-9]|1[0-2])\.csv$/u.test(n))) fail("APPEND_NEW_SHARD_SCOPE");
+    const expected = [...oldPins.keys(), ...newShardNames].sort().join("|");
+    if (pins.map(p => p.name).sort().join("|") !== expected) fail("APPEND_PIN_UNIVERSE");
+    const dir = ctx.historyDir, inventory = () => readdirSync(dir).filter(n => /^zao_signals_\d{4}_\d{2}\.csv$/u.test(n)).sort().join("|");
+    const noWriter = () => {
+        ctx.assertExecutionSource();
+        if (inventory() !== expected || existsSync(join(dir, APPEND_LOCK_FILENAME))) fail("APPEND_WRITER_OR_UNIVERSE");
+        assertSourceDatabaseBinding(ctx.sourceDatabase, ctx.sourceDbBinding);
+        if (ctx.sourceDbBinding && ["-wal", "-shm", "-journal"].some(s => existsSync(ctx.sourceDbBinding!.canonical + s))) fail("APPEND_DB_SIDECAR");
+    };
+    const read = (path: string): Buffer => {
+        if (realpathSync(path) !== path || lstatSync(path).isSymbolicLink()) fail("APPEND_CANONICAL_FILE");
+        const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+            const a = fstatSync(fd, { bigint: true });
+            if (!a.isFile() || a.size < 1n || a.size > BigInt(32 * 1024 * 1024)) fail("APPEND_BYTE_BUDGET");
+            const raw = Buffer.alloc(Number(a.size)); let n = 0;
+            while (n < raw.length) { const k = readSync(fd, raw, n, raw.length - n, null); if (!k) fail("APPEND_SHORT_READ"); n += k; }
+            const signature = (s: typeof a) => [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].join("|");
+            if (signature(a) !== signature(fstatSync(fd, { bigint: true })) || signature(a) !== signature(lstatSync(path, { bigint: true }))) fail("APPEND_SOURCE_CHANGED");
+            return raw;
+        } finally { closeSync(fd); }
+    };
+    noWriter();
+    if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256) fail("APPEND_DB_CHANGED");
+    ctx.legacyUnchanged();
+    ctx.assertExecutionSource();
+    const images = new Map<string, { sha256: string; bytes: number }>(), rows: Record<string, string>[] = [];
+    let totalBytes = 0;
+    for (const pin of pins) {
+        const raw = read(join(dir, pin.name)); totalBytes += raw.length;
+        if (totalBytes > 128 * 1024 * 1024 || hash(raw) !== pin.sha256 || raw.at(-1) !== 10) fail("APPEND_RAW_PIN_OR_BUDGET");
+        const prior = oldPins.get(pin.name), prefix = prior ? ctx.prefixBytes.get(pin.name) : raw.indexOf(10) + 1;
+        if (!prefix || prefix < 1 || prefix > raw.length || raw[prefix - 1] !== 10 || prior && hash(raw.subarray(0, prefix)) !== prior.sha256) fail("APPEND_OLD_PREFIX_CHANGED");
+        const end = raw.indexOf(10); if (end < 1 || end > 16384) fail("APPEND_HEADER_BUDGET");
+        const header = raw.subarray(0, end + 1), tail = Buffer.concat([header, raw.subarray(prefix)]);
+        if (!Buffer.from(tail.toString("utf8"), "utf8").equals(tail)) fail("APPEND_UTF8");
+        const table = parseCsvTable(tail.toString("utf8"));
+        if (table.headers.join("|") !== HISTORY_CSV_HEADERS.join("|") || table.rows.length + (prior?.rows ?? 0) !== pin.rows) fail("APPEND_SCHEMA_OR_COUNT");
+        if (rows.length + table.rows.length > 10000) fail("APPEND_ROW_BUDGET");
+        for (const row of table.rows) {
+            const id = row["row_id"], rowHash = row["row_hash"];
+            if (!id || Buffer.byteLength(id) > 256 || /[\u0000-\u001f\u007f]/u.test(id) || !/^[0-9a-f]{64}$/u.test(rowHash ?? "")) fail("APPEND_IDENTITY");
+            const parsed = historyRowFromCsvRecord(HISTORY_CSV_HEADERS.map(k => row[k] ?? ""));
+            if (parsed.shardMonth !== pin.name.slice(12, -4) || parsed.shardMonth !== shardMonthFromCheckin(parsed.checkin)
+                || buildRowHash(parsed) !== rowHash || buildRowId(parsed) !== id) fail("APPEND_CONTENT_HASH_OR_SHARD");
+            rows.push(row);
+        }
+        images.set(pin.name, { sha256: pin.sha256, bytes: raw.length });
+    }
+    const sourceUnchanged = () => {
+        ctx.assertExecutionSource();
+        if (inventory() !== expected) fail("APPEND_WRITER_OR_UNIVERSE");
+        for (const [name, image] of images) if (hash(read(join(dir, name))) !== image.sha256) fail("APPEND_SOURCE_CHANGED");
+        ctx.assertExecutionSource();
+    };
+    if (!rows.length && !newShardNames.length && pins.every(p => p.sha256 === oldPins.get(p.name)!.sha256 && p.rows === oldPins.get(p.name)!.rows)) {
+        noWriter(); sourceUnchanged(); ctx.legacyUnchanged();
+        if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256) fail("APPEND_DB_CHANGED");
+        ctx.assertExecutionSource();
+        return { prepared, appendedRows: 0, oldRowsSemanticallyRevalidated: 0 };
+    }
+    let next: PreparedMirrorRecovery | undefined;
+    ctx.stage.transaction(() => {
+        const find = ctx.stage.prepare("SELECT row_hash FROM history WHERE row_id=?"), insert = ctx.stage.prepare("INSERT INTO history VALUES(?,?,?)");
+        if ((ctx.stage.prepare("SELECT COUNT(*) n FROM history").get() as { n: number }).n !== prepared.plan.historyRows) fail("APPEND_STAGE_CHANGED");
+        for (const row of rows) {
+            if (find.get(row["row_id"]) || ctx.dbHashes.has(row["row_id"]!)) fail("APPEND_DUPLICATE_OR_LEGACY_COLLISION");
+            insert.run(row["row_id"], row["row_hash"], JSON.stringify(row));
+        }
+        const count = prepared.plan.historyRows + rows.length; if (count > 200000) fail("APPEND_HISTORY_BUDGET");
+        const union = new Map(ctx.dbHashes);
+        for (const row of ctx.stage.prepare("SELECT row_id,row_hash FROM history").iterate() as Iterable<{ row_id: string; row_hash: string }>) union.set(row.row_id, row.row_hash);
+        const { planSha256: _priorSha, ...prior } = prepared.plan;
+        const base = { ...prior, historyIdentitySha256: digestRows(ctx.stage.prepare("SELECT row_id,row_hash FROM history ORDER BY row_id COLLATE BINARY").iterate() as Iterable<{ row_id: string; row_hash: string }>),
+            unionIdentitySha256: mapDigest(union), historyRows: count, historyOnly: prepared.plan.historyOnly + rows.length, pins: pins.map(p => Object.freeze({ ...p })) };
+        const plan = Object.freeze({ ...base, planSha256: hash(JSON.stringify(base)) }); Object.freeze(plan.pins);
+        next = Object.freeze({ plan, legacyRows: prepared.legacyRows, close: () => { if (genuine.delete(next!)) ctx.stage.close(); } });
+        noWriter(); sourceUnchanged(); ctx.legacyUnchanged();
+        if (mapDigest(dbHashes(ctx.sourceDatabase)) !== plan.dbIdentitySha256) fail("APPEND_DB_CHANGED");
+        ctx.assertExecutionSource();
+    })();
+    if (!next) return fail("APPEND_RAM_COMMIT_UNPROVEN");
+    genuine.delete(prepared);
+    genuine.set(next, { ...ctx, prefixBytes: new Map([...images].map(([n, p]) => [n, p.bytes])), sourceUnchanged,
+        preflightOwnPublication(paths: readonly string[]): void {
+            sourceUnchanged();
+            for (const path of paths)
+                if (dirname(path) !== dir || !images.has(basename(path)) || !existsSync(path) || lstatSync(path).isSymbolicLink() || realpathSync(path) !== path)
+                    fail("LEGACY_PUBLICATION_SCOPE_BEFORE_MUTATION");
+            ctx.assertExecutionSource();
+        },
+        admitOwnPublication(path: string): void {
+            ctx.assertExecutionSource();
+            // Accepted legacy publication may only target an already pinned shard.
+            const name = basename(path); if (!images.has(name) || realpathSync(path) !== join(dir, name)) fail("APPEND_PUBLICATION_SCOPE");
+            const raw = read(path); images.set(name, { sha256: hash(raw), bytes: raw.length });
+            ctx.assertExecutionSource();
+        } });
+    return { prepared: next, appendedRows: rows.length, oldRowsSemanticallyRevalidated: 0 };
 }
 function syncDirectory(path: string): void {
     const fd = openSync(path, "r");
@@ -383,10 +610,12 @@ function stageLegacy(prepared: PreparedMirrorRecovery, ctx: Context): void {
 export function persistMirrorRecoveryPlan(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, backupDir: string, lock: MirrorRecoveryLock): void {
     const ctx = acceptance(prepared, a, "MIRROR_RECONCILIATION");
     requireLock(lock, ctx.historyDir);
+    const backupPath = externalBackupPath(backupDir, ctx.executionRoot);
     ctx.sourceUnchanged();
     ctx.legacyUnchanged();
-    mkdirSync(backupDir, { recursive: true });
-    const backup = realpathSync(backupDir);
+    mkdirSync(backupPath, { recursive: true });
+    const backup = realpathSync(backupPath);
+    if (backup !== backupPath) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
     if (backup === ctx.historyDir)
         fail("BACKUP_MUST_BE_SEPARATE");
     const path = join(backup, `recovery_plan_${prepared.plan.planSha256}.json`), body = JSON.stringify(prepared.plan);
@@ -426,6 +655,7 @@ export function readPersistedMirrorRecoveryPlan(backupDir: string, a: MirrorReco
 export function resumeMirrorRecovery(db: Database.Database, historyDir: string, backupDir: string, a: MirrorRecoveryAcceptance, key: Buffer, lock: MirrorRecoveryLock): PreparedMirrorRecovery {
     const dir = realpathSync(historyDir);
     requireLock(lock, dir);
+    backupDir = externalBackupPath(backupDir, bindIsolatedExecution(dir).root);
     const saved = readPersistedMirrorRecoveryPlan(backupDir, a);
     const originals = new Map<string, Buffer>(), expectedCurrent = new Map<string, string>();
     for (const pin of saved.pins) {
@@ -503,12 +733,13 @@ export function resumeMirrorRecovery(db: Database.Database, historyDir: string, 
  * Successful per-file publication is retained if the later DB phase fails; no historical rows are deleted.
  * Each file is atomically published with encrypted original-byte backup and an immutable metadata receipt.
  */
-export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, backupDir: string, backupKey: Buffer, lock: MirrorRecoveryLock): {
+export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, backupDir: string, backupKey: Buffer, lock: MirrorRecoveryLock, criticalGuard?: (point: { stage: "CSV_RENAME"; shard: string }) => void): {
     appended: number;
     touchedShards: number;
 } {
     const ctx = acceptance(prepared, a, "MIRROR_RECONCILIATION");
     requireLock(lock, ctx.historyDir);
+    const backupPath = externalBackupPath(backupDir, ctx.executionRoot);
     ctx.sourceUnchanged();
     ctx.legacyUnchanged();
     if (ctx.sourceDatabase.readonly)
@@ -519,17 +750,23 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
         return { appended: 0, touchedShards: 0 };
     if (mapDigest(dbHashes(ctx.sourceDatabase)) !== prepared.plan.dbIdentitySha256)
         fail("DB_CHANGED");
-    mkdirSync(backupDir, { recursive: true });
-    const backup = realpathSync(backupDir);
+    // This implementation publishes only already-pinned physical shards. Check
+    // ALL destinations before creating backup files or publishing the first one.
+    const groups = new Map<string, HistoryRow[]>();
+    const pinnedNames = new Set(prepared.plan.pins.map(p => p.name));
+    for (const row of prepared.legacyRows) {
+        if (!/^\d{4}_\d{2}$/u.test(row.shardMonth) || !pinnedNames.has(`zao_signals_${row.shardMonth}.csv`))
+            fail("LEGACY_PUBLICATION_SCOPE_BEFORE_MUTATION");
+        const list = groups.get(row.shardMonth) ?? [];
+        list.push(row); groups.set(row.shardMonth, list);
+    }
+    ctx.preflightOwnPublication([...groups.keys()].map(month => join(ctx.historyDir, `zao_signals_${month}.csv`)));
+    mkdirSync(backupPath, { recursive: true });
+    const backup = realpathSync(backupPath);
+    if (backup !== backupPath) fail("IMMUTABLE_EXECUTION_BACKUP_OVERLAP");
     if (backup === ctx.historyDir)
         fail("BACKUP_MUST_BE_SEPARATE");
     persistMirrorRecoveryPlan(prepared, a, backup, lock);
-    const groups = new Map<string, HistoryRow[]>();
-    for (const row of prepared.legacyRows) {
-        const list = groups.get(row.shardMonth) ?? [];
-        list.push(row);
-        groups.set(row.shardMonth, list);
-    }
     let appended = 0, touched = 0;
     for (const [month, rows] of groups) {
         if (!/^\d{4}_\d{2}$/u.test(month))
@@ -579,6 +816,8 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
         ctx.sourceUnchanged();
         ctx.legacyUnchanged();
         requireLock(lock, ctx.historyDir);
+        criticalGuard?.({ stage: "CSV_RENAME", shard: name });
+        ctx.sourceUnchanged(); ctx.legacyUnchanged(); requireLock(lock, ctx.historyDir);
         renameSync(tmp, path);
         const directory = openSync(ctx.historyDir, "r");
         try {
@@ -600,7 +839,7 @@ export function publishRecoveredLegacyHistory(prepared: PreparedMirrorRecovery, 
 /** Database phase only. Any legacy publication must finish under this genuine prepared context before applying.
  * Existing natural mirror guards are not weakened; this separate explicit recovery is bounded by its exact plan.
  */
-export function applyMirrorDatabaseRecovery(db: Database.Database, prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, at: string, lock: MirrorRecoveryLock): {
+export function applyMirrorDatabaseRecovery(db: Database.Database, prepared: PreparedMirrorRecovery, a: MirrorRecoveryAcceptance, at: string, lock: MirrorRecoveryLock, localGuard?: () => void): {
     state: string;
     inserted: number;
     mirrorExact: boolean;
@@ -644,6 +883,7 @@ export function applyMirrorDatabaseRecovery(db: Database.Database, prepared: Pre
         const flush = (): void => {
             if (chunk.length === 0)
                 return;
+            localGuard?.();
             const r = applyRealSync({ db, runId: `recovery_${prepared.plan.planSha256.slice(0, 20)}_${batch++}`, generatedAtJst: at, reportPath: "EXPLICIT_MIRROR_RECOVERY", sourceHistoryFiles: prepared.plan.pins.map(p => p.name), rows: chunk });
             if (r.conflict_rows !== 0 || r.inserted_rows !== chunk.length)
                 fail("INSERT_READBACK_MISMATCH");
