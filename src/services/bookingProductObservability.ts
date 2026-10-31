@@ -119,8 +119,10 @@ export async function readBookingHeaderSnapshot(page:Page){
  const date=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container'),party=page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/}),login=page.locator('header [data-testid="header-sign-in-button"],header a').filter({hasText:/^(?:ログイン|Sign in)$/u});
  const dateCount=await date.count(),partyCount=await party.count();if(dateCount!==1||partyCount!==1)throw Error('HEADER_CONTROL_NOT_UNIQUE');
  const dateFields=[];
- for(const id of ['date-display-field-start','date-display-field-end']as const){const f=date.getByTestId(id),count=await f.count(),visible=count===1&&await f.isVisible();
-  dateFields.push({id,count,visible,text:visible?(await f.innerText({timeout:2000})).slice(0,181):'',aria:visible?(await f.getAttribute('aria-label'))?.slice(0,181)??null:null});
+ for(const id of ['date-display-field-start','date-display-field-end']as const){const f=date.getByTestId(id),count=await f.count(),visible=count===1&&await f.isVisible()&&await f.evaluate(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.closest('[aria-hidden="true"], [hidden]')===null);
+  const times=visible?await f.evaluate(e=>[e,...e.querySelectorAll('time[datetime]')].filter(t=>t.matches('time[datetime]')&&t.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&t.getBoundingClientRect().width>0&&t.getBoundingClientRect().height>0&&t.closest('[aria-hidden="true"], [hidden]')===null).slice(0,3).map(t=>({value:t.getAttribute('datetime')?.slice(0,41)??'',text:(t as HTMLElement).innerText.slice(0,181)}))):[];
+  dateFields.push({id,count,visible,text:visible?(await f.innerText({timeout:2000})).slice(0,181):'',aria:visible?(await f.getAttribute('aria-label'))?.slice(0,181)??null:null,
+   title:visible?(await f.getAttribute('title'))?.slice(0,181)??null:null,times});
  }
  return {dateCount,partyCount,dateVisible:await date.isVisible(),partyVisible:await party.isVisible(),dateText:await date.innerText({timeout:2000}),dateAria:await date.getAttribute('aria-label'),expanded:await date.getAttribute('aria-expanded'),party:await party.getAttribute('aria-label'),signedOutControlVisible:await login.count()===1&&await login.isVisible(),dateFields};
 }
@@ -149,9 +151,14 @@ export function parseExplicitBookingStayLabels(dateText:string,dateAria:string|n
  }
  return {checkin:strings[0]!,checkout:strings[1]!};
 }
-type VisibleBookingDateField={id:string;count:number;visible:boolean;text:string;aria:string|null};
+type VisibleBookingDateField={id:string;count:number;visible:boolean;text:string;aria:string|null;title?:string|null;times?:readonly {value:string;text:string}[]};
 function explicitDateField(field:VisibleBookingDateField,role:'start'|'end',fromRange?:string){
- const labels=[field.text,field.aria??''];if(field.id!==`date-display-field-${role}`||field.count!==1||!field.visible||labels.some(s=>!bookingInformationTextSafe(s,180)))return null;
+ const times=field.times??[];
+ if(times.length>1||times.some(t=>typeof t.value!=='string'||!/^\d{4}-\d{2}-\d{2}$/u.test(t.value)))return null;
+ // A semantic time must be a unique visible descendant of this exact typed
+ // start/end field. Hidden state, generic data-date and calendar candidates are
+ // never assigned a role from their DOM order.
+ const labels=[field.text,field.aria??'',field.title??'',...times.flatMap(t=>[t.value,t.text])];if(field.id!==`date-display-field-${role}`||field.count!==1||!field.visible||labels.some(s=>!bookingInformationTextSafe(s,180)))return null;
  const prefix=role==='start'?'チェックイン':'チェックアウト';
  const parse=(raw:string)=>{const s=raw.normalize('NFKC').trim().replace(/\s+/gu,' ').replace(/日([日月火水木金土])曜日/gu,'日($1)');
   const jp=new RegExp('^(?:'+prefix+'(?:日)?\\s*[:：]?\\s*)?(?:(\\d{4})年)?(\\d{1,2})月(\\d{1,2})日(?:\\s*\\(([日月火水木金土])(?:曜日)?\\))?$','u').exec(s);
@@ -175,7 +182,7 @@ export function parseExplicitBookingDateFields(dateText:string,dateAria:string|n
  const range=start+' — '+end,a=parseExplicitBookingStayLabels(dateText,range),b=parseExplicitBookingStayLabels(dateAria??'',range);
  return a&&b&&a.checkin===start&&a.checkout===end&&b.checkin===start&&b.checkout===end?a:null;
 }
-export type BookingPassiveStayDenial = 'PASSIVE_DATE_CONTROL_NOT_UNIQUE'|'PASSIVE_PARTY_CONTROL_NOT_UNIQUE'|'PASSIVE_DATE_CONTROL_NOT_VISIBLE'|'PASSIVE_PARTY_CONTROL_NOT_VISIBLE'|'PASSIVE_DATE_CONTROL_NOT_CLOSED'|'PASSIVE_DATE_EXPLICIT_YEAR_MISSING'|'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID'|'PASSIVE_PARTY_LABEL_UNPROVEN'|'PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE'|'PASSIVE_TYPED_DATE_FIELDS_UNPROVEN'|'PASSIVE_OUTER_DATE_YEAR_TOKENS_PRESENT_FORMAT_UNPROVEN'|'PASSIVE_OUTER_DATE_NO_YEAR_TOKENS';
+export type BookingPassiveStayDenial = 'PASSIVE_DATE_CONTROL_NOT_UNIQUE'|'PASSIVE_PARTY_CONTROL_NOT_UNIQUE'|'PASSIVE_DATE_CONTROL_NOT_VISIBLE'|'PASSIVE_PARTY_CONTROL_NOT_VISIBLE'|'PASSIVE_DATE_CONTROL_NOT_CLOSED'|'PASSIVE_DATE_EXPLICIT_YEAR_MISSING'|'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID'|'PASSIVE_PARTY_LABEL_UNPROVEN'|'PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE'|'PASSIVE_TYPED_DATE_FIELDS_UNPROVEN'|'PASSIVE_OUTER_DATE_YEAR_TOKENS_PRESENT_FORMAT_UNPROVEN'|'PASSIVE_OUTER_DATE_NO_YEAR_TOKENS'|'PASSIVE_TYPED_TITLE_YEAR_WITNESS_PRESENT'|'PASSIVE_TYPED_TITLE_YEAR_WITNESS_ABSENT'|'PASSIVE_TYPED_TIME_WITNESS_PRESENT'|'PASSIVE_TYPED_TIME_WITNESS_ABSENT_OR_AMBIGUOUS';
 // Closed diagnostic codes only: do not export DOM labels, URLs or page text.
 export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:BookingPassiveStayDenial)=>void){
  const deny=(reason:BookingPassiveStayDenial)=>{recordDenial?.(reason);return null;};
@@ -192,7 +199,9 @@ export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:Boo
  if(header.expanded!=='false')return deny('PASSIVE_DATE_CONTROL_NOT_CLOSED');
  if(!stay){
   const hasYear=(s:string)=>bookingInformationTextSafe(s,180)&&/(?:\d{4}年|\d{4}-\d{2}-\d{2})/u.test(s.normalize('NFKC'));
-  const outerYear=[header.dateText,header.dateAria??''].some(hasYear),childYear=header.dateFields.filter(f=>f.count===1&&f.visible).some(f=>[f.text,f.aria??''].some(hasYear));
+  const outerYear=[header.dateText,header.dateAria??''].some(hasYear),childYear=header.dateFields.filter(f=>f.count===1&&f.visible).some(f=>[f.text,f.aria??'',f.title??'',...f.times.flatMap(t=>[t.value,t.text])].some(hasYear));
+  recordDenial?.(header.dateFields.some(f=>hasYear(f.title??''))?'PASSIVE_TYPED_TITLE_YEAR_WITNESS_PRESENT':'PASSIVE_TYPED_TITLE_YEAR_WITNESS_ABSENT');
+  recordDenial?.(header.dateFields.every(f=>f.times.length===1)?'PASSIVE_TYPED_TIME_WITNESS_PRESENT':'PASSIVE_TYPED_TIME_WITNESS_ABSENT_OR_AMBIGUOUS');
   recordDenial?.(header.dateFields.some(f=>f.count!==1)?'PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE':'PASSIVE_TYPED_DATE_FIELDS_UNPROVEN');
   recordDenial?.(outerYear?'PASSIVE_OUTER_DATE_YEAR_TOKENS_PRESENT_FORMAT_UNPROVEN':'PASSIVE_OUTER_DATE_NO_YEAR_TOKENS');
   return deny(outerYear||childYear?'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID':'PASSIVE_DATE_EXPLICIT_YEAR_MISSING');

@@ -33,3 +33,15 @@ for(const mode of ['missing-year','hidden','duplicate','wrong-id','wrong-date','
 it('refuses contradictory outer date labels despite valid inner fields',()=>{
  expect(fields('1月14日(木) — 1月15日(金)',null,typed())).toBeNull();expect(fields('1月15日(金) — 1月16日(土)','2028年1月15日 — 2028年1月16日',typed())).toBeNull();
 });
+const noYears=()=>typed().map(f=>({...f,aria:null as string|null,title:null as string|null,times:[] as {value:string;text:string}[]}));
+it('proves each year from the title of its exact visible typed field',()=>{
+ const f=noYears();f[0]!.title='2027年1月15日金曜日';f[1]!.title='2027年1月16日土曜日';expect(fields('1月15日(金) — 1月16日(土)',null,f)).toEqual(expected);
+});
+it('proves each year from one semantic time in each exact visible typed field',()=>{
+ const f=noYears();f[0]!.times=[{value:'2027-01-15',text:'1月15日(金)'}];f[1]!.times=[{value:'2027-01-16',text:'1月16日(土)'}];expect(fields('1月15日(金) — 1月16日(土)',null,f)).toEqual(expected);
+});
+for(const mode of ['only-start','duplicate-time','timestamp','timezone','impossible-date','wrong-role','time-text-conflict','title-conflict','aria-conflict','unknown-title'] as const)it('refuses additional year witness '+mode,()=>{
+ const f=noYears();f[0]!.times=[{value:'2027-01-15',text:'1月15日(金)'}];f[1]!.times=[{value:'2027-01-16',text:'1月16日(土)'}];
+ if(mode==='only-start')f[1]!.times=[];if(mode==='duplicate-time')f[0]!.times.push({...f[0]!.times[0]!});if(mode==='timestamp')f[0]!.times[0]!.value='2027-01-15T00:00:00';if(mode==='timezone')f[0]!.times[0]!.value='2027-01-14T15:00:00Z';if(mode==='impossible-date')f[0]!.times[0]!.value='2027-02-30';if(mode==='wrong-role')f.reverse();if(mode==='time-text-conflict')f[0]!.times[0]!.text='1月14日(木)';if(mode==='title-conflict')f[0]!.title='2028年1月15日';if(mode==='aria-conflict')f[0]!.aria='2028年1月15日';if(mode==='unknown-title')f[0]!.title='別の日を選択';
+ expect(fields('1月15日(金) — 1月16日(土)',null,f)).toBeNull();
+});
