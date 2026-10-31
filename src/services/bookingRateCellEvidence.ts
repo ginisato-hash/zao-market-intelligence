@@ -118,6 +118,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   captureStage='INFORMATION_GUARD_ARM';
   if(detailed)await guard.armReadOnlyInformation();
   await guard.requireClear();
+  if(detailed&&passiveHeader&&canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(passiveHeader))throw Error('PASSIVE_STAY_CHANGED_DURING_INFORMATION_ARM');
   if(!detailed){
   captureStage='DATE_DETAILS';
   const dateButton=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container');
@@ -135,6 +136,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   }
   await guard.requireClear();
   captureStage='RATE_ROWS';
+  if(detailed)guard.setInformationPhase('RATE_INFORMATION');
   const rows=await page.locator('#hprt-table tr[data-block-id]').evaluateAll(es=>{
     const visible=es.filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0),clipped=visible.slice(0,200),names=new Map<string,{name:string;text:string}>();
     for(const e of clipped){const a=e.querySelector('[id^="room_type_id_"]');if(a){const id=a.id.slice('room_type_id_'.length);names.set(id,{name:(a as HTMLElement).innerText.slice(0,4001),text:((a.closest('th') as HTMLElement|null)?.innerText??'').slice(0,4001)});}}

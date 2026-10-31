@@ -187,8 +187,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
-      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page):null;
       const initialLoad=rateCellSink!==undefined?observeBookingInitialLoad(page):null;
+      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page,initialLoad!):null;
       let rateCellRecord:Record<string,unknown>|null=null;
       let fixedCapture:Awaited<ReturnType<typeof captureBookingRateCells>>|null=null;
       let initialLoadReadiness:Awaited<ReturnType<NonNullable<typeof initialLoad>['waitForFreshQuiet']>>|null=null;
@@ -204,12 +204,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         // the information guard, which must remain strict through page close.
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
         if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
-          // Passive initial loading may include timer/lazyload traffic. Require
-          // fresh quiet after the screenshot, within a fixed absolute budget.
-          // The unchanged ALL-HTTP guard is still armed before every info click.
-          initialLoadReadiness=await initialLoad!.waitForFreshQuiet();initialLoad!.dispose();
-          if(initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION',marketPriceEligible:false};
-          if(initialLoadReadiness.status==='QUIET_BEFORE_INFORMATION'){
+          // Passive DOM prechecks precede the single fresh wait at the actual
+          // information-arm boundary. The observer stays through route install.
           try{
             const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
             fixedCapture=capture;
@@ -217,9 +213,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
             rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,httpStatus,parserVersion:capture.parserVersion,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
+            if(pageGuard?.initialLoadReadiness&&pageGuard.initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')rateCellRecord['status']='INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION';
 
           }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
-          }
         }
       } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
       finally {
@@ -229,7 +225,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         if(pageGuard){
           await pageGuard.finishReadOnlyInformation();
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
-          if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;}
+          initialLoadReadiness=pageGuard.initialLoadReadiness;
+          if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['initialLoadReadinessPhase']=initialLoadReadiness?'IMMEDIATELY_BEFORE_INFORMATION_ARM':null;rateCellRecord['initialLoadHandoffVerified']=pageGuard.initialLoadHandoffVerified;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;rateCellRecord['observedDeniedRequestPhase']=pageGuard.observedDeniedRequestPhase;}
           pageGuard.dispose();
         }
       }
