@@ -118,13 +118,18 @@ export async function readBookingMaterialRow(page:Page,blockId:string){
 export async function readBookingHeaderSnapshot(page:Page){
  const date=page.locator('#hp_availability_style_changes').getByTestId('searchbox-dates-container'),party=page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/}),login=page.locator('header [data-testid="header-sign-in-button"],header a').filter({hasText:/^(?:ログイン|Sign in)$/u});
  const dateCount=await date.count(),partyCount=await party.count();if(dateCount!==1||partyCount!==1)throw Error('HEADER_CONTROL_NOT_UNIQUE');
- return {dateCount,partyCount,dateVisible:await date.isVisible(),partyVisible:await party.isVisible(),dateText:await date.innerText({timeout:2000}),dateAria:await date.getAttribute('aria-label'),expanded:await date.getAttribute('aria-expanded'),party:await party.getAttribute('aria-label'),signedOutControlVisible:await login.count()===1&&await login.isVisible()};
+ const dateFields=[];
+ for(const id of ['date-display-field-start','date-display-field-end']as const){const f=date.getByTestId(id),count=await f.count(),visible=count===1&&await f.isVisible();
+  dateFields.push({id,count,visible,text:visible?(await f.innerText({timeout:2000})).slice(0,181):'',aria:visible?(await f.getAttribute('aria-label'))?.slice(0,181)??null:null});
+ }
+ return {dateCount,partyCount,dateVisible:await date.isVisible(),partyVisible:await party.isVisible(),dateText:await date.innerText({timeout:2000}),dateAria:await date.getAttribute('aria-label'),expanded:await date.getAttribute('aria-expanded'),party:await party.getAttribute('aria-label'),signedOutControlVisible:await login.count()===1&&await login.isVisible(),dateFields};
 }
 
 // Only an explicitly year-bearing visible-control label proves the year. Never
 // fill it from the request URL, today's date or a month/day-only label.
 function dateLabelParts(raw:string){
- const s=raw.normalize('NFKC').trim().replace(/\s+/gu,' ');
+ const normalized=raw.normalize('NFKC').trim().replace(/\s+/gu,' ').replace(/日([日月火水木金土])曜日/gu,'日($1)');
+ const s=normalized.startsWith('チェックイン')?normalized.replace(/、\s*(?=チェックアウト)/u,' — '):normalized;
  const jp=/^(?:チェックイン(?:日)?\s*[:：]?\s*)?(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(?:\s*\(([日月火水木金土])(?:曜日)?\))?\s*(?:[–—〜~−-]|から)\s*(?:チェックアウト(?:日)?\s*[:：]?\s*)?(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(?:\s*\(([日月火水木金土])(?:曜日)?\))?$/u.exec(s);
  if(jp)return [{y:jp[1]?Number(jp[1]):null,m:Number(jp[2]),d:Number(jp[3]),w:jp[4]??null},{y:jp[5]?Number(jp[5]):null,m:Number(jp[6]),d:Number(jp[7]),w:jp[8]??null}];
  const iso=/^(\d{4})-(\d{2})-(\d{2})\s*(?:[–—〜~]| - )\s*(\d{4})-(\d{2})-(\d{2})$/u.exec(s);
@@ -144,7 +149,33 @@ export function parseExplicitBookingStayLabels(dateText:string,dateAria:string|n
  }
  return {checkin:strings[0]!,checkout:strings[1]!};
 }
-export type BookingPassiveStayDenial = 'PASSIVE_DATE_CONTROL_NOT_UNIQUE'|'PASSIVE_PARTY_CONTROL_NOT_UNIQUE'|'PASSIVE_DATE_CONTROL_NOT_VISIBLE'|'PASSIVE_PARTY_CONTROL_NOT_VISIBLE'|'PASSIVE_DATE_CONTROL_NOT_CLOSED'|'PASSIVE_DATE_EXPLICIT_YEAR_MISSING'|'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID'|'PASSIVE_PARTY_LABEL_UNPROVEN';
+type VisibleBookingDateField={id:string;count:number;visible:boolean;text:string;aria:string|null};
+function explicitDateField(field:VisibleBookingDateField,role:'start'|'end',fromRange?:string){
+ const labels=[field.text,field.aria??''];if(field.id!==`date-display-field-${role}`||field.count!==1||!field.visible||labels.some(s=>!bookingInformationTextSafe(s,180)))return null;
+ const prefix=role==='start'?'チェックイン':'チェックアウト';
+ const parse=(raw:string)=>{const s=raw.normalize('NFKC').trim().replace(/\s+/gu,' ').replace(/日([日月火水木金土])曜日/gu,'日($1)');
+  const jp=new RegExp('^(?:'+prefix+'(?:日)?\\s*[:：]?\\s*)?(?:(\\d{4})年)?(\\d{1,2})月(\\d{1,2})日(?:\\s*\\(([日月火水木金土])(?:曜日)?\\))?$','u').exec(s);
+  if(jp)return {y:jp[1]?Number(jp[1]):null,m:Number(jp[2]),d:Number(jp[3]),w:jp[4]??null};
+  const iso=/^(\d{4})-(\d{2})-(\d{2})$/u.exec(s);return iso?{y:Number(iso[1]),m:Number(iso[2]),d:Number(iso[3]),w:null}:null;
+ };
+ const parsed=labels.map(parse),full=parsed.find(p=>p?.y!==null&&p!==null);if(!full&&!fromRange||!parsed.some(p=>p!==null))return null;
+ const value=fromRange??`${full!.y}-${String(full!.m).padStart(2,'0')}-${String(full!.d).padStart(2,'0')}`,at=new Date(value+'T00:00:00Z');
+ if(!/^\d{4}-\d{2}-\d{2}$/u.test(value)||!Number.isFinite(at.getTime())||at.toISOString().slice(0,10)!==value)return null;
+ for(let i=0;i<labels.length;i++){const p=parsed[i];if(!p){if(!['',prefix,prefix+'日'].includes(labels[i]!.normalize('NFKC').trim()))return null;continue;}
+  if(p.y!==null&&p.y!==at.getUTCFullYear()||p.m!==at.getUTCMonth()+1||p.d!==at.getUTCDate()||p.w!==null&&p.w!=='日月火水木金土'[at.getUTCDay()])return null;
+ }
+ return value;
+}
+/** Both unique visible typed descendants must explicitly prove their own year.
+ * Outer labels still have to agree. No request/current-year/hidden-state fallback.
+ */
+export function parseExplicitBookingDateFields(dateText:string,dateAria:string|null,fields:readonly VisibleBookingDateField[]){
+ if(fields.length!==2)return null;
+ const start=explicitDateField(fields[0]!,'start'),end=explicitDateField(fields[1]!,'end');if(!start||!end)return null;
+ const range=start+' — '+end,a=parseExplicitBookingStayLabels(dateText,range),b=parseExplicitBookingStayLabels(dateAria??'',range);
+ return a&&b&&a.checkin===start&&a.checkout===end&&b.checkin===start&&b.checkout===end?a:null;
+}
+export type BookingPassiveStayDenial = 'PASSIVE_DATE_CONTROL_NOT_UNIQUE'|'PASSIVE_PARTY_CONTROL_NOT_UNIQUE'|'PASSIVE_DATE_CONTROL_NOT_VISIBLE'|'PASSIVE_PARTY_CONTROL_NOT_VISIBLE'|'PASSIVE_DATE_CONTROL_NOT_CLOSED'|'PASSIVE_DATE_EXPLICIT_YEAR_MISSING'|'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID'|'PASSIVE_PARTY_LABEL_UNPROVEN'|'PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE'|'PASSIVE_TYPED_DATE_FIELDS_UNPROVEN'|'PASSIVE_OUTER_DATE_YEAR_TOKENS_PRESENT_FORMAT_UNPROVEN'|'PASSIVE_OUTER_DATE_NO_YEAR_TOKENS';
 // Closed diagnostic codes only: do not export DOM labels, URLs or page text.
 export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:BookingPassiveStayDenial)=>void){
  const deny=(reason:BookingPassiveStayDenial)=>{recordDenial?.(reason);return null;};
@@ -153,13 +184,18 @@ export async function readBookingPassiveStay(page:Page,recordDenial?:(reason:Boo
  if(await party.count()!==1)return deny('PASSIVE_PARTY_CONTROL_NOT_UNIQUE');
  if(!await date.isVisible())return deny('PASSIVE_DATE_CONTROL_NOT_VISIBLE');
  if(!await party.isVisible())return deny('PASSIVE_PARTY_CONTROL_NOT_VISIBLE');
- const header=await readBookingHeaderSnapshot(page),stay=parseExplicitBookingStayLabels(header.dateText,header.dateAria);
+ const header=await readBookingHeaderSnapshot(page),range=parseExplicitBookingStayLabels(header.dateText,header.dateAria);
+ const fieldConflict=!!range&&header.dateFields.some(f=>f.count>0)&&(!explicitDateField(header.dateFields[0]!,'start',range.checkin)||!explicitDateField(header.dateFields[1]!,'end',range.checkout));
+ const stay=fieldConflict?null:range??parseExplicitBookingDateFields(header.dateText,header.dateAria,header.dateFields);
  if(!header.dateVisible)return deny('PASSIVE_DATE_CONTROL_NOT_VISIBLE');
  if(!header.partyVisible)return deny('PASSIVE_PARTY_CONTROL_NOT_VISIBLE');
  if(header.expanded!=='false')return deny('PASSIVE_DATE_CONTROL_NOT_CLOSED');
  if(!stay){
-  const full=[header.dateText,header.dateAria??''].some(label=>bookingInformationTextSafe(label,180)&&dateLabelParts(label)?.every(d=>d.y!==null));
-  return deny(full?'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID':'PASSIVE_DATE_EXPLICIT_YEAR_MISSING');
+  const hasYear=(s:string)=>bookingInformationTextSafe(s,180)&&/(?:\d{4}年|\d{4}-\d{2}-\d{2})/u.test(s.normalize('NFKC'));
+  const outerYear=[header.dateText,header.dateAria??''].some(hasYear),childYear=header.dateFields.filter(f=>f.count===1&&f.visible).some(f=>[f.text,f.aria??''].some(hasYear));
+  recordDenial?.(header.dateFields.some(f=>f.count!==1)?'PASSIVE_TYPED_DATE_FIELDS_ABSENT_OR_NOT_UNIQUE':'PASSIVE_TYPED_DATE_FIELDS_UNPROVEN');
+  recordDenial?.(outerYear?'PASSIVE_OUTER_DATE_YEAR_TOKENS_PRESENT_FORMAT_UNPROVEN':'PASSIVE_OUTER_DATE_NO_YEAR_TOKENS');
+  return deny(outerYear||childYear?'PASSIVE_DATE_LABEL_CONFLICT_OR_INVALID':'PASSIVE_DATE_EXPLICIT_YEAR_MISSING');
  }
  if(header.party===null||!bookingInformationTextSafe(header.party,200))return deny('PASSIVE_PARTY_LABEL_UNPROVEN');
  const partyText=header.party.normalize('NFKC').trim().replace(/\s+/gu,' ');
