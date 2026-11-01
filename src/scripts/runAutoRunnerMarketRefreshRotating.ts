@@ -19,6 +19,7 @@ import {captureBookingRateCells,deriveBookingRateCell} from '../services/booking
 import {observeBookingInitialLoad} from '../services/bookingInitialLoadBarrier';
 import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollection} from '../services/bookingPrimaryCollection';
 import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
+import {recordNormalObservedListingDiagnostic} from '../services/observedListingPublicationLane';
 import {readCaptureTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
@@ -537,6 +538,11 @@ async function run(): Promise<void> {
   writeFileSync(out.csv_path, renderCsv(selectedTargets), "utf8");
   writeFileSync(out.report_path, renderReport(out), "utf8");
   writeJson(resolve(debugPath, "rotating_plan.json"), quoteLane.enabled?{legacyPlan:plan,actualTargets:selectedTargets,usefulQuoteLane:quoteLane.diagnostics,status:quoteLane.status}:plan);
+
+  // Separate listing estimand; never turn strict QUALITY off/on or repurpose fixed-product admissions.
+  // Its own immutable receipt is written after the normal final report; that report is not rewritten.
+  if(liveMode){const listing=recordNormalObservedListingDiagnostic(env,{root:process.cwd(),runId,reportPath:out.json_path,dbPath:resolve(DB_PATH),mirrorExact:dbSynced},value=>writeFileSync(resolve(debugPath,'observed_listing_publication.json'),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}));
+    if(listing.status!=='DISABLED')console.log('observed_listing_publication_status='+listing.status);}
 
   for (const [k, v] of Object.entries(out)) {
     if (typeof v === "object") continue;
