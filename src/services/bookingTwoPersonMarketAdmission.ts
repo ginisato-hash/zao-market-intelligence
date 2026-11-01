@@ -33,7 +33,7 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
  const total=v2?selectedBookingTotalV2(cell,d):null;
  if(v2?!total:!hasExplicitAllMandatoryTotal(cell.priceText+'。'+(extra.allMandatoryText??''))||d.localTaxTreatment!=='EXPLICIT_INCLUDED'||d.localTaxPerAdultNightJpy===null)return no('ALL_MANDATORY_TOTAL_NOT_PROVED');
  if(d.memberConditional||((c.parserVersion==='booking-rate-cell-v4'||v2)?!extra.publicPriceProved:!/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText)))return no('PUBLIC_PRICE_NOT_PROVED');
- if(d.meal!=='ROOM_ONLY'||!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))return no('CONDITIONS_NOT_KNOWN');
+  if(d.meal!=='ROOM_ONLY'||!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE',...(v2?['PARTIAL_REFUNDABLE']:[])].includes(d.refund))return no('CONDITIONS_NOT_KNOWN');
  const prepayment=v2?deriveBookingPrepaymentV2(cell.policyText):deriveBookingPrepayment(cell.policyText);
  if(prepayment==='UNKNOWN')return no('PREPAYMENT_UNKNOWN_OR_CONFLICT');
  if(d.currentDisplayedJpy!==r.sourcePrimaryPrice||(v2?total!.comparisonTotalJpy:d.currentDisplayedJpy)!==r.normalizedTotalPrice)return no('FIXED_PRODUCT_NOT_THE_CANONICAL_PRICE');
@@ -50,12 +50,21 @@ export function admitCanonicalBookingTwoPerson(input:{row:HistoryRow;mirrorIdent
  return {status:'VERIFIED_CANONICAL_TWO_PERSON_FACT' as const,reason:'SOURCE_RECEIPT_AND_CANONICAL_MIRROR_IDENTITY_MATCH',observation,quality};
 }
 /** Selected quote only. Original amount is never rewritten; unknown mandatory fees refuse. */
-export function selectedBookingTotalV2(cell:{priceText:string;conditionsText:string;taxDetails?:{label:string;details:string}[]},d:{currentDisplayedJpy:number|null;localTaxTreatment:string;localTaxPerAdultNightJpy:number|null}){
+export function selectedBookingTotalV2(cell:{priceText:string;priceRoleText?:string;conditionsText:string;taxDetails?:{label:string;details:string}[]},d:{currentDisplayedJpy:number|null;localTaxTreatment:string;localTaxPerAdultNightJpy:number|null}){
  const text=(cell.priceText+'。'+cell.conditionsText).normalize('NFKC'),amount=d.currentDisplayedJpy;
  if(amount===null||!Number.isSafeInteger(amount)||amount<=0)return null;
  const included=bookingTaxInclusiveLabelV2(text);
  const details=cell.taxDetails??[],extra=details.filter(r=>/^(?:別|含まれないもの)$/u.test(r.label.trim()));
- const all=text+'。'+details.map(r=>r.label+' '+r.details).join('。');
+ const role=(cell.priceRoleText??'').normalize('NFKC'),all=text+'。'+role+'。'+details.map(r=>r.label+' '+r.details).join('。');
+ const channelAmounts:number[]=[];
+ for(const channel of [text,role]){
+  const labels=[...channel.matchAll(/[＋+]\s*税[・、と]手数料/gu)],amounts=[...channel.matchAll(/[＋+]\s*税[・、と]手数料\s*[（(]\s*[￥¥]\s*([\d,]+)\s*[)）]/gu)];
+  if(labels.length&&(labels.length!==1||amounts.length!==1))return null;
+  if(amounts.length)channelAmounts.push(Number(amounts[0]![1]!.replace(/,/gu,'')));
+ }
+ if(new Set(channelAmounts).size>1)return null;
+ const surcharge=channelAmounts[0]??null;
+ if(surcharge!==null&&(!Number.isSafeInteger(surcharge)||surcharge<=0))return null;
  if(/(?:税込|税[・、と]手数料込)[^。\n]{0,20}(?:ではありません|ではない|除く|含まれません)/u.test(all))return null;
  const exclusions=all.split(/[。\n]/u).filter(c=>/別途|別料金|現地(?:で)?支払|含まれない|含まない|除外|除く|含まれません|含まれていません|含まれておりません|not included|additional|excluding/iu.test(c));
  if(exclusions.some(c=>!c.includes('入湯税')||/サービス|清掃|リゾート|宿泊税|service|cleaning|resort/iu.test(c)))return null;
@@ -64,10 +73,10 @@ export function selectedBookingTotalV2(cell:{priceText:string;conditionsText:str
  if(d.localTaxTreatment==='EXPLICIT_EXCLUDED'&&d.localTaxPerAdultNightJpy!==null){
   if(extra.length!==1||!/入湯税/u.test(extra[0]!.details))return null;
   if(/(?:清掃|サービス|リゾート|宿泊税)[^。\n]{0,50}(?:別途|別料金|含まれません)/u.test(text))return null;
-  const fee=d.localTaxPerAdultNightJpy*2,total=amount+fee;if(!Number.isSafeInteger(total)||total>2000000)return null;
+  const fee=d.localTaxPerAdultNightJpy*2,total=amount+fee;if(surcharge!==null&&surcharge!==fee)return null;if(!Number.isSafeInteger(total)||total>2000000)return null;
   return {originalDisplayedJpy:amount,addedMandatoryFeesJpy:fee,comparisonTotalJpy:total,basis:'EXPLICIT_ADULT_NIGHT_ONSEN_FEE' as const};
  }
- if(excluded||exclusions.length||extra.length)return null;
+ if(excluded||exclusions.length||extra.length||surcharge!==null)return null;
  return {originalDisplayedJpy:amount,addedMandatoryFeesJpy:0,comparisonTotalJpy:amount,basis:'SELECTED_ALL_MANDATORY_INCLUDED' as const};
 }
 
