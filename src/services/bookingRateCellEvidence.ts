@@ -48,7 +48,11 @@ export function deriveBookingRateCell(cap:BookingRateCellCapture,cell:BookingRat
   const roleText=cap.parserVersion!=='booking-rate-cell-v2'?cell.priceRoleText??'':cell.priceText;
   const pair=/元の料金\s*[￥¥]\s*([\d,]+)\s*現在の料金\s*[￥¥]\s*([\d,]+)/u.exec(roleText);
   const values=[...new Set(yen(roleText))],original=pair?Number(pair[1]!.replace(/,/gu,'')):null;
-  const current=pair?Number(pair[2]!.replace(/,/gu,'')):values.length===1?values[0]!:null;
+  // V5: a positive selected primary-price role is separate from an explicitly labelled fee.
+  // This never proves that fee's applicability/unit or an all-mandatory comparison total.
+  const selectedRole=v2?/^(?:[￥¥]\s*([\d,]+)\s+)?料金\s*[￥¥]\s*([\d,]+)\s*[＋+]\s*税[・、と]手数料\s*[（(]\s*[￥¥]\s*([\d,]+)\s*[)）]$/u.exec(roleText.normalize('NFKC').trim()):null;
+  const selectedAmount=selectedRole&&(selectedRole[1]===undefined||Number(selectedRole[1].replace(/,/gu,''))===Number(selectedRole[2]!.replace(/,/gu,'')))?Number(selectedRole[2]!.replace(/,/gu,'')):null;
+  const current=pair?Number(pair[2]!.replace(/,/gu,'')):selectedAmount??(values.length===1?values[0]!:null);
   if(current===null||current<=0||current>2_000_000||original!==null&&(original<current||original>2_000_000))reasons.push('PRICE_ROLE_AMBIGUOUS_OR_INVALID');
   const quantity=/^1\s*[（(]\s*[￥¥]\s*([\d,]+)\s*[)）]/u.exec(cell.oneRoomOptionText.trim());
   if(!quantity||Number(quantity[1]!.replace(/,/gu,''))!==current)reasons.push('ONE_ROOM_PRICE_NOT_CONFIRMED');

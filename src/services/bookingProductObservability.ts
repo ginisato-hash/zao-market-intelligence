@@ -12,7 +12,7 @@ export function bookingSelectedQuotePartyConflict(text:string){
 }
 export function bookingTaxInclusiveLabelV2(text:string){return /税[・、と]手数料込|税込み?|すべての税金と料金が含まれ|tax(?:es)? (?:and |& )?(?:fees|charges) included/iu.test(text.normalize('NFKC'));}
 export const BOOKING_ADOPTION_V2='BOOKING_2P_ADOPTION_V2' as const;
-export const BOOKING_ADOPTION_V2_DIGEST=createHash('sha256').update('TD6545859658+TD6545970990:calendar-difference-no-literal-night-or-weekday;opaque-rate-tokens-selected-visible-party;controlled-policy-dom-close;policy-visible-snapshot-and-normal-closed-dom-teardown;preclose-known-request-drain;2adults/0children/1room/1night/JPY;composite-stay;capacity-auxiliary;selected-total;anonymous-selected-public;abort-verified-row-scope;semantic-conditions;matched-anchor-weight').digest('hex');
+export const BOOKING_ADOPTION_V2_DIGEST=createHash('sha256').update('TD6545859658+TD6545970990:calendar-difference-no-literal-night-or-weekday;opaque-rate-tokens-selected-visible-party;controlled-policy-dom-close;policy-visible-snapshot-and-normal-closed-dom-teardown;preclose-known-request-drain;explicit-primary-role-separate-fee;explicit-partial-cancel-noshow-full-booking-payment-series;2adults/0children/1room/1night/JPY;composite-stay;capacity-auxiliary;selected-total;anonymous-selected-public;abort-verified-row-scope;semantic-conditions;matched-anchor-weight').digest('hex');
 import type {BookingUiBlockGuard} from './bookingUiBlockGuard';
 const anonymousContexts=new WeakSet<BrowserContext>();
 export async function createAnonymousBookingCaptureContext(browser:Browser,userAgent:string){

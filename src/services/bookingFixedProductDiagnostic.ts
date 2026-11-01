@@ -29,7 +29,7 @@ export function diagnoseBookingFixedProductCapture(cap:BookingRateCellCapture){
   const publicPrice=!d.memberConditional&&(extra.publicPriceProved||!v2&&/一般公開料金|すべてのゲスト|ログイン不要/u.test(cell.priceText));
   if(!publicPrice)missing.push(d.memberConditional?'MEMBER_CONDITIONAL_PRICE':'PUBLIC_PRICE_NOT_PROVED');
   if(d.meal!=='ROOM_ONLY')missing.push('ROOM_ONLY_NOT_PROVED');
-  if(!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE'].includes(d.refund))missing.push('CANCELLATION_NOT_PROVED');
+  if(!['NON_REFUNDABLE','CONDITIONAL_REFUNDABLE',...(v2?['PARTIAL_REFUNDABLE']:[])].includes(d.refund))missing.push('CANCELLATION_NOT_PROVED');
   if(prepayment==='UNKNOWN')missing.push('PREPAYMENT_NOT_PROVED');
   if(v2&&!bookingSemanticTermsV2(cell.policyText,d.refund))missing.push('MATERIAL_CONDITIONS_UNINTERPRETED');
   return {cellSha256:digest(cell),roomId:d.roomId,ratePlanId:d.ratePlanId,requestedAdults:2 as const,explicitMaxAdults:maxAdults,
