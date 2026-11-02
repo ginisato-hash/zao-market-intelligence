@@ -95,7 +95,7 @@ export function sealBookingRateCellCapture(x:Omit<BookingRateCellCapture,'captur
   return {...body,captureSha256:createHash('sha256').update(canonicalJson(body)).digest('hex')};
 }
 /** Only date/policy information controls are used. Blocked pages receive no further interaction. */
-export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string;adoptionPolicy?:typeof BOOKING_ADOPTION_V2},maxProducts=3,externalGuard?:BookingUiBlockGuard,fixedProducts?:readonly {productId:string;ratePlanId:string}[]):Promise<BookingRateCellCapture>{
+export async function captureBookingRateCells(page:Page,input:{propertySlug:string;checkin:string;checkout:string;observedAt:string;adoptionPolicy?:typeof BOOKING_ADOPTION_V2},maxProducts=3,externalGuard?:BookingUiBlockGuard,fixedProducts?:readonly {productId:string;ratePlanId:string}[],documentProof?:{assertUnchanged:()=>Promise<void>}):Promise<BookingRateCellCapture>{
   if(!/^[a-z0-9-]+$/u.test(input.propertySlug)||!isoDate(input.checkin)||!isoDate(input.checkout)
     ||Date.parse(input.checkout)-Date.parse(input.checkin)!==86400000||!Number.isSafeInteger(maxProducts)||maxProducts<1||maxProducts>5||fixedProducts!==undefined&&(fixedProducts.length>5||fixedProducts.some(p=>!/^\d{1,20}$/u.test(p.productId)||!/^\d{1,20}$/u.test(p.ratePlanId))))throw Error('RATE_CELL_CAPTURE_SCOPE');
   const detailed=usesFreshAnonymousBookingContext(page),v2=input.adoptionPolicy===BOOKING_ADOPTION_V2;
@@ -110,12 +110,13 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   const empty=(problem:string)=>sealBookingRateCellCapture({schema:'ZMI_BOOKING_RATE_CELLS_V1',parserVersion:version,...adoption,propertySlug:input.propertySlug,observedAt:input.observedAt,request,requestUrlMatches,displayedCheckin,displayedCheckout,displayedParty:'',cells:[],problems:[...problems,problem],blockReason:null,blockStateVerified:true});
   if(!requestUrlMatches)return empty('SERVED_URL_TUPLE_MISMATCH_NO_INTERACTION');
   const guard=externalGuard??new BookingUiBlockGuard(page,undefined,v2);
+  const requireClear=async()=>{await documentProof?.assertUnchanged();await guard.requireClear();await documentProof?.assertUnchanged();};
   if(v2&&!guard.evidencePolicyV2)throw Error('V2_GUARD_POLICY_REQUIRED');
   let result:BookingRateCellCapture;
   let captureStage='PAGE_PRECHECK';
   let passiveHeader:Awaited<ReturnType<typeof readBookingHeaderSnapshot>>|null=null;
   try{
-  await guard.requireClear();
+  await requireClear();
   if(await page.locator('#hprt-table tr[data-block-id]').count()===0){if(detailed)problems.push('NO_RATE_TABLE_NO_INTERACTION');throw Error('NO_RATE_TABLE_NO_INTERACTION');}
   // No rate rows means no information interaction. Do not arm the context-wide
   // guard merely to discover that this prerequisite is absent.
@@ -130,12 +131,12 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     if(!v2&&!passive)problems.push(...passiveDenials);
     if(!v2&&(!passive||passive.stay.checkin!==input.checkin||passive.stay.checkout!==input.checkout)){problems.push('PASSIVE_STAY_HEADER_UNPROVEN_NO_INTERACTION');throw Error('PASSIVE_STAY_HEADER_UNPROVEN');}
     if(passive){passiveHeader=passive.header;displayedCheckin=passive.stay.checkin;displayedCheckout=passive.stay.checkout;displayedParty=passive.party;}
-    await guard.requireClear();
+    await requireClear();
     if(canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(passiveHeader))throw Error('PASSIVE_STAY_CHANGED_BEFORE_INFORMATION');
   }
   captureStage='INFORMATION_GUARD_ARM';
   if(detailed)await guard.armReadOnlyInformation();
-  await guard.requireClear();
+  await requireClear();
   if(detailed&&passiveHeader&&canonicalJson(await readBookingHeaderSnapshot(page))!==canonicalJson(passiveHeader))throw Error('PASSIVE_STAY_CHANGED_DURING_INFORMATION_ARM');
   if(!detailed){
   captureStage='DATE_DETAILS';
@@ -144,7 +145,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   try{
     displayedParty=(await page.locator('#hp_availability_style_changes').getByRole('button',{name:/宿泊人数と部屋数/}).getAttribute('aria-label',{timeout:3000}))??'';
     if(await dateButton.getAttribute('aria-expanded',{timeout:3000})!=='false')throw Error('DATE_PANEL_ALREADY_OPEN');
-    await guard.requireClear();dateOpened=true;await dateButton.click({timeout:3000});await guard.requireClear();
+    await requireClear();dateOpened=true;await dateButton.click({timeout:3000});await requireClear();
     const dates=await page.locator('[role="gridcell"][aria-selected="true"] [data-date]').evaluateAll(es=>es.filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0).slice(0,4).map(e=>({date:e.getAttribute('data-date')?.slice(0,40)??null,label:(e.getAttribute('aria-label')??'').slice(0,300)})));
     const starts=dates.filter(d=>d.label.includes('チェックイン日')),ends=dates.filter(d=>d.label.includes('チェックアウト日'));
     if(starts.length===1)displayedCheckin=starts[0]!.date;if(ends.length===1)displayedCheckout=ends[0]!.date;
@@ -152,7 +153,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
   finally{if(dateOpened&&await guard.checkpoint()&&await dateButton.getAttribute('aria-expanded',{timeout:3000}).catch(()=>null)==='true')await dateButton.click({timeout:3000}).catch(()=>{problems.push('DATE_PANEL_CLOSE_FAILED');});}
   if(problems.includes('DATE_PANEL_CLOSE_FAILED')||problems.includes('DISPLAYED_DATE_OR_PARTY_UNVERIFIED'))throw Error('NO_RATE_INTERACTION_AFTER_PANEL_FAILURE');
   }
-  await guard.requireClear();
+  await requireClear();
   captureStage='RATE_ROWS';
   if(detailed)guard.setInformationPhase('RATE_INFORMATION');
   const rows=await page.locator('#hprt-table tr[data-block-id]').evaluateAll(es=>{
@@ -178,7 +179,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     &&(fixedProducts===undefined||fixedProducts.some(p=>v2?r.blockId.split('_')[0]===p.productId&&r.blockId.split('_')[1]===p.ratePlanId:r.blockId===`${p.productId}_${p.ratePlanId}_2_0_0`))).slice(0,maxProducts),cells:BookingRateCell[]=[];
   const material=new Map<string,Awaited<ReturnType<typeof readBookingMaterialRow>>>(),policyDomHashes=new Map<string,string>(),headerBefore=passiveHeader;
   for(const row of selected){
-    await guard.requireClear();
+    await requireClear();
     if(await page.locator('[role="dialog"]:visible').count()>0)throw Error('UNOWNED_INFORMATION_DIALOG_VISIBLE');
     if(detailed){const snapshot=await readBookingMaterialRow(page,row.blockId,v2);if(!snapshot.rowVisible)throw Error('SELECTED_ROW_NOT_VISIBLE');material.set(row.blockId,snapshot);const {rowVisible,selectedValues,roomHref,roomControls,...fields}=snapshot;Object.assign(row,fields);}
     const rowProblems:string[]=[],problem=(reason:string)=>{(detailed?rowProblems:problems).push(reason);};
@@ -198,7 +199,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
     try{
       if(row.policyControlId!==expectedControlId)throw Error('POLICY_ID_INVALID');
       if(!v2&&await page.getByRole('dialog',{name:'食事およびキャンセルポリシーと前払いポリシーに関する詳細',exact:true}).isVisible())throw Error('POLICY_PANEL_ALREADY_OPEN');
-      await guard.requireClear();opened=true;await button.click({timeout:3000});await guard.requireClear();
+      await requireClear();opened=true;await button.click({timeout:3000});await requireClear();
       await dialog.waitFor({state:'visible',timeout:3000});
       if(v2&&(await owned.count()!==1||await dialog.count()!==1))throw Error('POLICY_CONTAINER_NOT_UNIQUE');
       policyContainerId=await dialog.evaluate(e=>e.closest('[id^="policyModal_"]')?.id??null);
@@ -209,7 +210,7 @@ export async function captureBookingRateCells(page:Page,input:{propertySlug:stri
       if(text.length>2400)problem('POLICY_TEXT_BUDGET_EXCEEDED');else policyText=scrubExcerpt(text,2400);
     }catch{problem('RATE_POLICY_UNVERIFIED');}
     finally{if(opened&&!identified&&await guard.checkpoint()&&!v2)throw Error('POLICY_INFORMATION_UNBOUND_STOP');if(opened&&identified&&await guard.checkpoint()){try{if(await dialog.isVisible()){if(v2&&policyElement){if(!await dialog.evaluate((el,prior)=>el===prior,policyElement))problem('POLICY_CONTAINER_CHANGED_DURING_INFORMATION');const repeated=await dialog.innerText({timeout:3000});if(policyCapturedText===null||bookingPolicyObservationKey(repeated)!==bookingPolicyObservationKey(policyCapturedText))problem('POLICY_TERMS_CHANGED_DURING_INFORMATION');}const close=dialog.getByRole('button',{name:v2?/^(?:閉じる|Close)$/u:'閉じる',exact:true});if(v2&&await close.count()!==1)throw Error('POLICY_CLOSE_NOT_UNIQUE');await close.click({timeout:3000});if(v2){await dialog.waitFor({state:'hidden',timeout:3000});if(await page.locator('[role="dialog"]:visible').count()!==0)throw Error('POLICY_PANEL_CLOSE_FAILED');if(policyOwnedElement){const retained=await policyOwnedElement.evaluate(el=>el.isConnected?el.textContent:null);if(retained!==null&&!/^(?:\s|閉じる|Close)*$/iu.test(retained)&&bookingPolicyObservationKey(retained)!==bookingPolicyObservationKey(policyDomBefore))problem('POLICY_TERMS_CHANGED_AFTER_INFORMATION');}}else if(await dialog.isVisible())throw Error('POLICY_PANEL_CLOSE_FAILED');}}catch{if(v2)guard.failInformationCleanup();throw Error('POLICY_PANEL_CLOSE_FAILED');}}}
-    await guard.requireClear();
+    await requireClear();
     if(Object.values(row).some(v=>typeof v==='string'&&v.length>4000)){problems.push('RATE_CELL_TEXT_BUDGET_EXCEEDED');continue;}
     cells.push({...row,...(policyDomRawSha256?{policyDomRawSha256}:{}),...(detailed?{productFacts:productFacts!,rowProblems}:{}),roomName:scrubExcerpt(row.roomName,200),roomText:scrubExcerpt(row.roomText,1600),occupancyText:scrubExcerpt(row.occupancyText,160),priceText:scrubExcerpt(row.priceText,1600),priceRoleText:scrubExcerpt(row.priceRoleText,1600),taxDetails:row.taxDetails.map(t=>({label:scrubExcerpt(t.label,51),details:scrubExcerpt(t.details,1001)})),conditionsText:scrubExcerpt(row.conditionsText,1600),oneRoomOptionText:scrubExcerpt(row.oneRoomOptionText,200),policyContainerId,policyText});
     if(problems.includes('POLICY_PANEL_CLOSE_FAILED')||v2&&opened&&!identified)break;
