@@ -18,6 +18,16 @@ export interface ListingAnalysisPolicy {
 }
 export interface ListingAttempt {propertyId:string;stayDate:string;attemptedAt:string;completedObservationRowId:string|null}
 export interface ListingRunReport {runId:string;rawSha256:string;rawJson:string}
+/** A completed DOM capture is not the final page/abort-cleanup outcome. */
+export const listingCaptureFinalGuardClear=(c:Record<string,unknown>)=>c.pageFinalBlockStateVerified===true&&c.informationFailureCode==null&&c.pageFinalBlockReason==null&&c.blockReason==null;
+export function listingRowFinalGuardFailure(r:ListingCanonicalRow,reports:ReadonlyMap<string,Record<string,any>>,asOf:number):string|null{
+ const slot=/\/auto-runner-market-refresh-rotating\/(\d{8}_\d{6})\//u.exec(r.raw.debug_artifact_path??'')?.[1];if(!slot)return null;
+ const d=reports.get('auto_runner_market_refresh_rotating_'+slot),at=instant(r.raw.collected_at_jst??''),slug=r.raw.source_slug_or_code||r.raw.source_property_id;
+ if(!d||d.run_id!=='auto_runner_market_refresh_rotating_'+slot||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision)||instant(d.generated_at_jst)!==at||!Array.isArray(d.rate_cell_evidence?.captures))return 'OBSERVATION_REPORT_UNVERIFIED';
+ const cs=d.rate_cell_evidence.captures.filter((c:any)=>c.propertySlug===slug&&c.stayDate===r.raw.checkin&&c.attemptedNetwork===true);
+ if(cs.length!==1||!Number.isFinite(instant(cs[0].completedAt))||instant(cs[0].completedAt)<at||instant(cs[0].completedAt)>asOf)return 'OBSERVATION_REPORT_UNVERIFIED';
+ return listingCaptureFinalGuardClear(cs[0])?null:'OBSERVATION_FINAL_GUARD_UNVERIFIED';
+}
 export interface ListingSourceSnapshot {schema:'OBSERVED_LISTING_CANONICAL_INPUT_MANIFEST_V1';asOf:string;canonicalRowSetSha256:string;attemptSetSha256:string;canonicalRows:number;targetDates:string[];sourceFiles:{path:string;sha256:string}[];attempts:ListingAttempt[];producerCodeSha256s:string[];producerSetSha256:string;propertyAliases:ReturnType<typeof listingPropertyAliases>;[key:string]:unknown}
 export const canonicalListingRowSetSha256=(rows:ListingCanonicalRow[])=>digest(rows.map(x=>({rowId:x.rowId,rowHash:x.rowHash,rawRecordSha256:digest(x.raw),quarantineReason:x.quarantineReason})).sort((a,b)=>a.rowId<b.rowId?-1:a.rowId>b.rowId?1:0));
 export function listingPropertyAliases(rows:ListingCanonicalRow[]){const groups=new Map<string,{source:string;physicalPropertyId:string;sourcePropertyIds:Set<string>;propertyIds:Set<string>}>();for(const x of rows){const r=x.raw,source=r.source??'',slug=r.source_slug_or_code||r.source_property_id||'',id=r.source_property_id||slug,physical=marketPropertyGroup(source,slug).propertyKey??id,key=source+'|'+physical;const g=groups.get(key)??{source,physicalPropertyId:physical,sourcePropertyIds:new Set<string>(),propertyIds:new Set<string>()};g.sourcePropertyIds.add(id);g.propertyIds.add(slug);groups.set(key,g);}return [...groups.values()].map(g=>({...g,sourcePropertyIds:[...g.sourcePropertyIds].sort(),propertyIds:[...g.propertyIds].sort()})).sort((a,b)=>(a.source+'|'+a.physicalPropertyId).localeCompare(b.source+'|'+b.physicalPropertyId));}
@@ -64,16 +74,17 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
  if(digest(snapshot.propertyAliases)!==digest(listingPropertyAliases(input.rows)))throw Error('LISTING_ALIAS_BINDING');
  if(!snapshot.producerCodeSha256s.length||snapshot.producerCodeSha256s.length>30||snapshot.producerCodeSha256s.some(x=>!/^[0-9a-f]{64}$/u.test(x))||snapshot.producerSetSha256!==digest([...new Set(snapshot.producerCodeSha256s)].sort()))throw Error('LISTING_PRODUCER_BINDING');
  const reports=new Map<string,Record<string,any>>();let reportBytes=0;
- for(const r of input.reports??[]){reportBytes+=Buffer.byteLength(r.rawJson);if(reports.has(r.runId)||reportBytes>16*1024*1024||Buffer.byteLength(r.rawJson)>2*1024*1024||createHash('sha256').update(r.rawJson).digest('hex')!==r.rawSha256||!snapshot.sourceFiles.some(f=>f.path.endsWith('/'+r.runId+'.json')&&f.sha256===r.rawSha256))throw Error('LISTING_REPORT_RECEIPT_BINDING');const d=JSON.parse(r.rawJson);if(d.run_id!==r.runId||d.dry_run!==false||d.decision!=='rotating_market_refresh_success')throw Error('LISTING_REPORT_NOT_FINAL');reports.set(r.runId,d);}
+ for(const r of input.reports??[]){reportBytes+=Buffer.byteLength(r.rawJson);if(reports.has(r.runId)||reportBytes>16*1024*1024||Buffer.byteLength(r.rawJson)>2*1024*1024||createHash('sha256').update(r.rawJson).digest('hex')!==r.rawSha256||!snapshot.sourceFiles.some(f=>f.path.endsWith('/'+r.runId+'.json')&&f.sha256===r.rawSha256))throw Error('LISTING_REPORT_RECEIPT_BINDING');const d=JSON.parse(r.rawJson);if(d.run_id!==r.runId||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision))throw Error('LISTING_REPORT_NOT_FINAL');reports.set(r.runId,d);}
  for(const a of input.attempts){
   if(!a.propertyId||!targets.has(a.stayDate)||!Number.isFinite(instant(a.attemptedAt))||instant(a.attemptedAt)>at)throw Error('LISTING_ATTEMPT_SCOPE_OR_TIME');
   if(a.completedObservationRowId!==null){const r=input.rows.find(x=>x.rowId===a.completedObservationRowId);if(!r||(r.raw.source_slug_or_code||r.raw.source_property_id)!==a.propertyId||r.raw.checkin!==a.stayDate)throw Error('LISTING_ATTEMPT_ROW_TUPLE');
    const slot=/\/auto-runner-market-refresh-rotating\/(\d{8}_\d{6})\//u.exec(r.raw.debug_artifact_path??'')?.[1],d=slot?reports.get('auto_runner_market_refresh_rotating_'+slot):null;
    const c=d?.rate_cell_evidence?.captures?.find((x:any)=>x.propertySlug===a.propertyId&&x.stayDate===a.stayDate&&x.attemptedNetwork===true);
    if(!d||!c||instant(d.generated_at_jst)!==instant(r.raw.collected_at_jst)||instant(a.attemptedAt)<instant(d.generated_at_jst)||!Number.isFinite(instant(c.completedAt))||instant(c.completedAt)<instant(a.attemptedAt)||instant(c.completedAt)>at)throw Error('LISTING_ATTEMPT_COMPLETION_RECEIPT');
+   if(!listingCaptureFinalGuardClear(c))throw Error('LISTING_ATTEMPT_COMPLETION_FINAL_GUARD');
   }
  }
- const rows=input.rows.map(r=>classify(r,at));
+ const rows=input.rows.map(r=>{const x=classify(r,at),failure=listingRowFinalGuardFailure(r,reports,at);if(failure)x.reasons.push(failure);return x;});
  const groups=new Map<string,Classified[]>();
  for(const r of rows){const key=r.h.source+'|'+(marketPropertyGroup(r.h.source,r.h.property_id).propertyKey??(r.x.raw.source_property_id||r.h.property_id))+'|'+r.h.checkin_date;const a=groups.get(key)??[];a.push(r);groups.set(key,a);}
  const latest=new Map<string,Classified>(),pairs:{previous:Classified;current:Classified;ratio:number}[]=[],failures:{stayDate:string;propertyId:string;reasons:string[]}[]=[];
@@ -81,10 +92,10 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
   const physical=marketPropertyGroup(current.h.source,current.h.property_id).propertyKey??(current.x.raw.source_property_id||current.h.property_id),requestAliases=new Set(snapshot.propertyAliases.find(g=>g.source===current.h.source&&g.physicalPropertyId===physical)!.propertyIds),localAttempts=input.attempts.filter(a=>requestAliases.has(a.propertyId)&&a.stayDate===current.h.checkin_date),newestAt=Math.max(-Infinity,...localAttempts.map(a=>instant(a.attemptedAt))),newest=localAttempts.filter(a=>instant(a.attemptedAt)===newestAt);
   const reasons=[...current.reasons];if(newestAt>=current.at&&newest.some(a=>a.completedObservationRowId!==current.x.rowId))reasons.push('NEWER_ATTEMPT_NOT_RECONCILED');
   if(at-current.at>=p.maxCurrentAgeHours*3600000)reasons.push('CURRENT_STALE');
-  if(list.some(r=>r!==current&&r.at===current.at&&(r.amount!==current.amount||r.cohort!==current.cohort)))reasons.push('SAME_TIME_CONFLICT');
+  if(list.some(r=>r!==current&&r.at===current.at&&(r.amount!==current.amount||r.cohort!==current.cohort||r.reasons.length!==0)))reasons.push('SAME_TIME_CONFLICT');
   if(reasons.length){failures.push({stayDate:current.h.checkin_date,propertyId:current.h.property_id,reasons});continue;}
   const previous=list.find(r=>r.at<current.at&&r.cohort===current.cohort&&r.reasons.length===0&&at-r.at<=p.maxComparisonAgeHours*3600000);
-  if(previous&&list.some(r=>r!==previous&&r.at===previous.at&&(r.amount!==previous.amount||r.cohort!==previous.cohort))){failures.push({stayDate:current.h.checkin_date,propertyId:current.h.property_id,reasons:['PREVIOUS_SAME_TIME_CONFLICT']});continue;}
+  if(previous&&list.some(r=>r!==previous&&r.at===previous.at&&(r.amount!==previous.amount||r.cohort!==previous.cohort||r.reasons.length!==0))){failures.push({stayDate:current.h.checkin_date,propertyId:current.h.property_id,reasons:['PREVIOUS_SAME_TIME_CONFLICT']});continue;}
   if(previous&&current.base&&previous.base&&previous.amount!==null&&current.amount!==null)pairs.push({previous,current,ratio:current.amount/previous.amount});
  }
  const days=input.targetDates.map(stayDate=>{
