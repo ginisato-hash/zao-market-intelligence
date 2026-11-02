@@ -16,8 +16,10 @@ import {classifyBlock} from '../src/services/crawlThrottlePolicy';
 import {productFactsFixtureHtml} from './fixtures/bookingProductFactsPage';
 import {guardedCalendarFixture} from './fixtures/bookingGuardedCalendarPage';
 import {observeBookingInitialLoad} from '../src/services/bookingInitialLoadBarrier';
+import {observeBookingCurrentDocument} from '../src/services/bookingCurrentDocument';
 
-function actualCollector(dependencies:Record<string,unknown>){
+function actualCollector(overrides:Record<string,unknown>){
+ const dependencies={observeBookingCurrentDocument,...overrides};
  const path=new URL('../src/scripts/runAutoRunnerMarketRefreshRotating.ts',import.meta.url),source=readFileSync(path,'utf8');
  const parsed=ts.createSourceFile('runner.ts',source,ts.ScriptTarget.ES2022,true);
  const declaration=parsed.statements.find(s=>ts.isFunctionDeclaration(s)&&s.name?.text==='collectBookingLive');
@@ -104,25 +106,39 @@ it('normal collector saves the final unmatched request and actual loop stop ordi
 
 // Replay the real pre-capture gate using owned synthetic pages. These statuses
 // reproduce a possible failure mechanism; they do not identify the actual OTA cause.
-async function runCaptureEntryFixture(mode:'200'|'202'|'403'|'goto-timeout'|'overflow'){
- const browsers:Browser[]=[],debug=mkdtempSync(join(tmpdir(),'booking-capture-entry-'));let captureCalls=0;
+async function runCaptureEntryFixture(mode:'200'|'202'|'403'|'goto-timeout'|'overflow'|'202-reload'|'202-xhr'|'202-iframe'|'202-fake-response'|'202-wrong-tuple'|'200-reload-202'|'document-replaced'|'202-later-403'|'202-captcha'|'202-fake-timing'|'document-protocol-stall'|'root-replaced'|'quiet-document-replaced'|'202-later-429'){
+ const browsers:Browser[]=[],debug=mkdtempSync(join(tmpdir(),'booking-capture-entry-'));let captureCalls=0,fixturePage:any;
+ class DocumentSwapGuard extends BookingUiBlockGuard{override async armReadOnlyInformation(){await super.armReadOnlyInformation();if(mode==='quiet-document-replaced')await fixturePage.evaluate((html:string)=>{document.open();document.write(html);document.close();},productFactsFixtureHtml());}}
  const collect=actualCollector({launchOwnedBookingBrowser:async()=>{const b=await launchOwnedBookingBrowser();browsers.push(b);return b;},ownedBookingBrowserStatus,terminateOwnedBookingBrowser,USER_AGENT:'synthetic-agent',
   createAnonymousBookingCaptureContext:async(b:Browser,agent:string)=>{
    const context=await createAnonymousBookingCaptureContext(b,agent);
-   await context.route('**/*',route=>route.fulfill({status:mode==='202'?202:mode==='403'?403:200,contentType:'text/html; charset=utf-8',body:productFactsFixtureHtml()}));
-   const newPage=context.newPage.bind(context);context.newPage=async()=>{const page=await newPage(),wait=page.waitForTimeout.bind(page);
-    page.waitForTimeout=async ms=>{if(ms!==5000)await wait(ms);};
+   if(mode==='document-protocol-stall'){const open=context.newCDPSession.bind(context);context.newCDPSession=async page=>{const session=await open(page),send=session.send.bind(session);let docs=0;session.send=(async(method:any,params:any)=>{if(method==='DOM.getDocument'&&++docs===2)return new Promise(()=>{});return send(method,params);}) as typeof session.send;return session;};}
+   let mainDocuments=0;
+   await context.route('**/*',route=>{
+    const request=route.request(),main=request.isNavigationRequest()&&request.frame().parentFrame()===null;
+    if(main)mainDocuments++;
+    const transition=['202-reload','202-wrong-tuple','200-reload-202','202-later-403','202-later-429','202-captcha'].includes(mode);
+    const status=mode==='403'?403:mode==='202'||mode==='202-xhr'||mode==='202-iframe'||mode==='202-fake-response'||mode==='202-fake-timing'?202:transition?(mainDocuments===1?(mode==='200-reload-202'?200:202):mode==='200-reload-202'?202:(mode==='202-later-403'||mode==='202-later-429')&&mainDocuments===2?(mode==='202-later-429'?429:403):200):200;
+    const action=transition&&mainDocuments===1?`<script>setTimeout(()=>location.replace(${JSON.stringify(mode==='202-wrong-tuple'?request.url().replace('checkin=2027-01-15','checkin=2027-01-17'):request.url())}),30)</script>`:(mode==='202-later-403'||mode==='202-later-429')&&mainDocuments===2?`<script>setTimeout(()=>location.reload(),30)</script>`:mode==='202-xhr'?'<script>fetch("/extra")</script>':mode==='202-iframe'?'<iframe src="/extra"></iframe>':'';
+    return route.fulfill({status:main?status:200,contentType:'text/html; charset=utf-8',body:main?(mode==='202-captcha'?'CAPTCHA Verify you are human':productFactsFixtureHtml())+action:'synthetic subresource'});
+   });
+   const newPage=context.newPage.bind(context);context.newPage=async()=>{const page=await newPage(),wait=page.waitForTimeout.bind(page);fixturePage=page;
+    if(mode==='202-fake-timing')await page.addInitScript(()=>{const fake={responseStatus:200,get name(){return document.URL;}};Performance.prototype.getEntriesByType=function(){return [fake] as unknown as PerformanceEntryList;};});
+    page.waitForTimeout=async ms=>{if(ms===5000&&['202-reload','202-wrong-tuple','200-reload-202','202-later-403','202-later-429','202-captcha'].includes(mode)){
+      await page.waitForFunction(({want})=>{const n=performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;return n?.responseStatus===want;},{want:mode==='200-reload-202'?202:200});
+      if(mode==='202-later-403'||mode==='202-later-429')await wait(120);
+    }else if(ms!==5000)await wait(ms);};
     if(mode==='goto-timeout')page.goto=(async()=>{const e=new Error('timeout https://sensitive.invalid/?cookie=secret auth=Bearer-hidden');e.name='TimeoutError';throw e;}) as typeof page.goto;
-    page.screenshot=(async()=>{if(mode==='overflow')for(let i=0;i<20;i++)(page as any).emit('response',{status:()=>200,request:()=>({isNavigationRequest:()=>true,frame:()=>page.mainFrame()})});return Buffer.alloc(0);}) as typeof page.screenshot;
+    page.screenshot=(async()=>{if(mode==='document-replaced')await page.goto(page.url());if(mode==='root-replaced')await page.evaluate((html:string)=>{document.open();document.write(html);document.close();},productFactsFixtureHtml());if(mode==='202-fake-response')(page as any).emit('response',{status:()=>200,request:()=>({isNavigationRequest:()=>true,frame:()=>page.mainFrame()})});if(mode==='overflow')for(let i=0;i<20;i++)(page as any).emit('response',{status:()=>200,request:()=>({isNavigationRequest:()=>true,frame:()=>page.mainFrame()})});return Buffer.alloc(0);}) as typeof page.screenshot;
     return page;
    };return context;
   },sleep:async()=>{},jitterDelayMs:()=>0,backoffDelayMs:()=>0,shouldEarlyStop:()=>true,nextDay:()=> '2027-01-16',
   buildBookingRenderedDomUrl:()=> 'https://www.booking.com/hotel/jp/synthetic.ja.html?checkin=2027-01-15&checkout=2027-01-16&group_adults=2&group_children=0&no_rooms=1&selected_currency=JPY',
-  join,mkdirSync,writeFileSync,createHash,BookingUiBlockGuard,observeBookingInitialLoad,
+  join,mkdirSync,writeFileSync,createHash,BookingUiBlockGuard:DocumentSwapGuard,observeBookingInitialLoad,
   captureBookingRateCells:async(...args:Parameters<typeof captureBookingRateCells>)=>{captureCalls++;return captureBookingRateCells(...args);},deriveBookingRateCell,classifyBlock,
   analyzeBookingRenderedDomSignals:(input:unknown)=>input,buildBookingRenderedDomRow:(x:unknown)=>x,toPreviewRow:(x:unknown)=>x,sanitizeBookingUrl:()=> 'synthetic',toSingleLine:(x:unknown)=>String(x)});
  const captures:Array<Record<string,any>>=[],loop:Record<string,unknown>={};
- try{const rows=await collect([{property_slug:'synthetic',canonical_property_name:'synthetic',checkin:'2027-01-15'}],debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>true,null,undefined,loop);return {captures,rows,loop,captureCalls};}
+ try{const rows=await collect([{property_slug:'synthetic',canonical_property_name:'synthetic',checkin:'2027-01-15'}],debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>true,null,undefined,loop);return {captures,rows,loop,captureCalls,browserStatuses:browsers.map(ownedBookingBrowserStatus)};}
  finally{for(const b of browsers)await terminateOwnedBookingBrowser(b);rmSync(debug,{recursive:true,force:true});}
 }
 it.each(['200','202','403','goto-timeout'] as const)('capture entry diagnostics distinguish %s without changing the real capture or block gate',async mode=>{
@@ -139,3 +155,28 @@ it('capture entry diagnostics bound document response counts and do not turn ove
  const r=await runCaptureEntryFixture('overflow'),d=r.captures[0]!.captureEntryDiagnostics;
  expect(d.mainDocumentStatuses).toHaveLength(16);expect(d.responseOverflow).toBe(true);expect(d.responseUnverified).toBe(false);expect(r.captureCalls).toBe(1);expect(d.initialHttpStatus).toBe(200);
 },30000);
+
+it('a current bound200 document after an initial202 reaches the existing passive tuple and material checks',async()=>{
+ const r=await runCaptureEntryFixture('202-reload'),c=r.captures[0]!;
+ expect(c.captureEntryDiagnostics).toMatchObject({initialHttpStatus:202,reason:'CAPTURE_CALLED',captureCalled:true,mainDocumentStatuses:[202,200]});
+ expect(c.currentDocumentHttpProof).toMatchObject({status:'BOUND_200',responseStatus:200});
+ expect(c.httpStatus).toBe(200);expect(c.cells).toBe(1);expect(c.pageFinalBlockStateVerified).toBe(true);expect(r.loop.status).toBe('COMPLETE');
+},30000);
+it.each(['202-xhr','202-iframe','202-fake-response','202-fake-timing','202-wrong-tuple','200-reload-202'] as const)('current document proof refuses %s rather than borrowing a200 response',async mode=>{
+ const r=await runCaptureEntryFixture(mode),c=r.captures[0]!;expect(r.captureCalls).toBe(0);expect(c.currentDocumentHttpProof.status).toBe('UNVERIFIED');expect(c.currentDocumentHttpProof.responseStatus).toBeNull();
+},30000);
+it.each(['document-replaced','root-replaced'] as const)('%s after binding is sticky and produces no selected capture',async mode=>{
+ const r=await runCaptureEntryFixture(mode),c=r.captures[0]!;expect(r.captureCalls).toBe(0);expect(c.currentDocumentHttpProof.status).toBe('CHANGED');expect(c.pageFinalBlockStateVerified).toBe(false);expect(r.loop.status).toBe('STOPPED');
+},30000);
+it.each(['202-later-403','202-later-429','202-captcha'] as const)('current200 proof never clears a real restriction for %s',async mode=>{
+ const r=await runCaptureEntryFixture(mode),c=r.captures[0]!;expect(r.captureCalls).toBe(0);expect(c.pageFinalBlockStateVerified===false||c.pageFinalBlockReason!==null).toBe(true);expect(r.loop.status).toBe('STOPPED');
+},30000);
+
+it('a stalled native document proof returns a finite sticky STOP and still reaches owned process termination',async()=>{
+ const started=Date.now(),r=await runCaptureEntryFixture('document-protocol-stall'),c=r.captures[0]!;
+ expect(Date.now()-started).toBeLessThan(7000);expect(r.captureCalls).toBe(0);expect(c.currentDocumentHttpProof.status).toBe('CHANGED');expect(c.pageFinalBlockStateVerified).toBe(false);expect(r.loop.status).toBe('STOPPED');expect(r.browserStatuses).toEqual([expect.objectContaining({owned:true,processExited:true,serverClosed:true,clientDisconnected:true})]);
+},10000);
+
+it('root replacement during quiet/arm is fenced before the first information interaction or capture publication',async()=>{
+ const r=await runCaptureEntryFixture('quiet-document-replaced'),c=r.captures[0]!;expect(r.captureCalls).toBe(1);expect(c.status).toBe('CAPTURE_FAILED');expect(c.capturePath).toBeUndefined();expect(c.currentDocumentHttpProof.status).toBe('CHANGED');expect(c.pageFinalBlockStateVerified).toBe(false);expect(r.loop.status).toBe('STOPPED');
+},10000);
