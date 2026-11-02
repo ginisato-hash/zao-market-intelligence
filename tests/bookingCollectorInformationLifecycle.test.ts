@@ -6,10 +6,12 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import ts from 'typescript';
-import {chromium} from 'playwright';
+import {chromium,type Browser} from 'playwright';
+import {launchOwnedBookingBrowser,ownedBookingBrowserStatus,terminateOwnedBookingBrowser} from '../src/services/bookingOwnedBrowser';
 import {createAnonymousBookingCaptureContext} from '../src/services/bookingProductObservability';
 import {captureBookingRateCells,deriveBookingRateCell} from '../src/services/bookingRateCellEvidence';
 import {BookingUiBlockGuard} from '../src/services/bookingUiBlockGuard';
+import {listingCaptureFinalGuardClear} from '../src/services/observedListingRelative';
 import {classifyBlock} from '../src/services/crawlThrottlePolicy';
 import {productFactsFixtureHtml} from './fixtures/bookingProductFactsPage';
 import {guardedCalendarFixture} from './fixtures/bookingGuardedCalendarPage';
@@ -25,10 +27,10 @@ function actualCollector(dependencies:Record<string,unknown>){
 }
 
 it('baseline screenshot resources cannot poison the strict information phase or stop later planned properties',async()=>{
- const browser=await chromium.launch({headless:true}),debug=mkdtempSync(join(tmpdir(),'booking-runner-lifecycle-'));
+ const browsers:Browser[]=[],launch=async()=>{const b=await launchOwnedBookingBrowser();browsers.push(b);return b;},debug=mkdtempSync(join(tmpdir(),'booking-runner-lifecycle-'));
  let served=0,reservations=0,shots=0;
- const collect=actualCollector({chromium:{launch:async()=>browser},USER_AGENT:'synthetic-agent',
-  createAnonymousBookingCaptureContext:async(b:typeof browser,agent:string)=>{
+ const collect=actualCollector({launchOwnedBookingBrowser:launch,ownedBookingBrowserStatus,terminateOwnedBookingBrowser,USER_AGENT:'synthetic-agent',
+  createAnonymousBookingCaptureContext:async(b:Browser,agent:string)=>{
    const context=await createAnonymousBookingCaptureContext(b,agent);
    await context.route('**/*',route=>{served++;const missing=route.request().url().includes('/no-rate.ja.html');
     const body=route.request().url().includes('/baseline-shot')?'synthetic resource':missing?productFactsFixtureHtml().replace(/<table id='hprt-table'>[\s\S]*?<\/table>/u,''):productFactsFixtureHtml();
@@ -48,21 +50,21 @@ it('baseline screenshot resources cannot poison the strict information phase or 
  try{
   const rows=await collect(targets,debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>{reservations++;return true;});
   expect(rows).toHaveLength(3);expect(reservations).toBe(3);expect(shots).toBe(3);expect(served).toBe(6);
-  expect(captures).toHaveLength(3);expect(captures[0]?.problems).toContain('NO_RATE_TABLE_NO_INTERACTION');
+  expect(captures).toHaveLength(3);expect(captures[0]?.informationDiagnostics).toMatchObject({schema:'BOOKING_INFORMATION_LIFECYCLE_DIAGNOSTICS_V2',lifecycle:'FINAL',termination:{verified:true}});expect(listingCaptureFinalGuardClear(captures[0]!)).toBe(true);expect(captures[0]?.problems).toContain('NO_RATE_TABLE_NO_INTERACTION');
   expect(captures.slice(1).every(x=>x.cells===1&&x.pageFinalBlockStateVerified===true&&x.informationRequestRefused===false)).toBe(true);
   expect(captures.every(x=>x.marketPriceEligible===false)).toBe(true);
- }finally{await browser.close();rmSync(debug,{recursive:true,force:true});}
+ }finally{for(const b of browsers)await terminateOwnedBookingBrowser(b);rmSync(debug,{recursive:true,force:true});}
 },30000);
 
 async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout'|'without-barrier'|'precheck-baseline'|'during-arm'|'quantity-change'|'header-change'|'unmatched-final'){
- const browser=await chromium.launch({headless:true}),debug=mkdtempSync(join(tmpdir(),'booking-fresh-load-'));
+ const browsers:Browser[]=[],launch=async()=>{const b=await launchOwnedBookingBrowser();browsers.push(b);return b;},debug=mkdtempSync(join(tmpdir(),'booking-fresh-load-'));
  let documents=0,baselinePosts=0,reservations=0,barrierEntries=0,armed=0,informationClicks=0;
  let fixturePage:any;
- class ObservedGuard extends BookingUiBlockGuard {private injected=false;private finalInjected=false;async armReadOnlyInformation(){if(['precheck-baseline','quantity-change','header-change'].includes(mode)&&!this.injected){this.injected=true;await fixturePage.evaluate((m:string)=>{setTimeout(()=>{if(m==='precheck-baseline')void fetch('/precheck-delayed',{method:'POST'}).catch(()=>{});else if(m==='quantity-change')(document.querySelector('#hprt-table select') as HTMLSelectElement).value='1';else document.querySelector('[data-testid="searchbox-dates-container"]')!.setAttribute('aria-label','2027年1月17日(日) — 2027年1月18日(月)');},250);},mode);}await super.armReadOnlyInformation();armed++;}
+ class ObservedGuard extends BookingUiBlockGuard {async closeReadOnlyInformationPage(){if(mode==='without-barrier')await new Promise(r=>setTimeout(r,300));informationClicks+=await fixturePage.evaluate(()=>(window as any).fixtureInformationClicks??0).catch(()=>0);return super.closeReadOnlyInformationPage();}private injected=false;private finalInjected=false;async armReadOnlyInformation(){if(['precheck-baseline','quantity-change','header-change'].includes(mode)&&!this.injected){this.injected=true;await fixturePage.evaluate((m:string)=>{setTimeout(()=>{if(m==='precheck-baseline')void fetch('/precheck-delayed',{method:'POST'}).catch(()=>{});else if(m==='quantity-change')(document.querySelector('#hprt-table select') as HTMLSelectElement).value='1';else document.querySelector('[data-testid="searchbox-dates-container"]')!.setAttribute('aria-label','2027年1月17日(日) — 2027年1月18日(月)');},250);},mode);}await super.armReadOnlyInformation();armed++;}
  async finishReadOnlyInformation(){if(mode==='unmatched-final'&&!this.finalInjected&&fixturePage.isClosed()){this.finalInjected=true;(this as any).informationRequestSeen({method:()=> 'GET',resourceType:()=> 'xhr',isNavigationRequest:()=>false});}await super.finishReadOnlyInformation();}}
  const readiness=mode==='timeout'?()=>({waitForFreshQuiet:async()=>{barrierEntries++;return {status:'TIMED_OUT_NO_INFORMATION'};},finishQuietHandoff:()=>false,dispose:()=>{}}):mode==='without-barrier'?()=>({waitForFreshQuiet:async()=>({status:'QUIET_BEFORE_INFORMATION'}),finishQuietHandoff:()=>true,dispose:()=>{}}):(page:any)=>{const b=observeBookingInitialLoad(page);return {...b,waitForFreshQuiet:async()=>{barrierEntries++;return b.waitForFreshQuiet();}};};
- const collect=actualCollector({chromium:{launch:async()=>browser},USER_AGENT:'synthetic-agent',observeBookingInitialLoad:readiness,
-  createAnonymousBookingCaptureContext:async(b:typeof browser,agent:string)=>{
+ const collect=actualCollector({launchOwnedBookingBrowser:launch,ownedBookingBrowserStatus,terminateOwnedBookingBrowser,USER_AGENT:'synthetic-agent',observeBookingInitialLoad:readiness,
+  createAnonymousBookingCaptureContext:async(b:Browser,agent:string)=>{
    const context=await createAnonymousBookingCaptureContext(b,agent);
    await context.route('**/*',route=>{if(route.request().isNavigationRequest())documents++;else if(route.request().method()==='POST')baselinePosts++;
     return route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:(mode==='header-change'?productFactsFixtureHtml():guardedCalendarFixture('normal')).replace("<div class='prco-wrapper'>￥20,000</div>","<div class='prco-wrapper'>1泊 大人2名 ￥20,000</div>")});});
@@ -84,7 +86,7 @@ async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout
  const targets=['external','external-two'].map(property_slug=>({property_slug,canonical_property_name:'synthetic',checkin:'2027-01-15'})),captures:Array<Record<string,unknown>>=[];
  const loop:Record<string,unknown>={};
  try{const rows=await collect(targets,debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>{reservations++;return true;},null,undefined,loop);return {rows,captures,documents,baselinePosts,reservations,barrierEntries,armed,informationClicks,loop};}
- finally{await browser.close();rmSync(debug,{recursive:true,force:true});}
+ finally{for(const b of browsers)await terminateOwnedBookingBrowser(b);rmSync(debug,{recursive:true,force:true});}
 }
 it('waits for a fresh passive window after screenshots; delayed baseline POST never enters the information guard',async()=>{const r=await runFreshLoadFixture('delayed-baseline');expect(r.rows).toHaveLength(2);expect(r.documents).toBe(2);expect(r.baselinePosts).toBe(2);expect(r.barrierEntries).toBe(2);expect(r.captures.every(c=>c.cells===1&&c.informationRequestRefused===false&&c.pageFinalBlockStateVerified===true)).toBe(true);expect(r.captures.every(c=>(c.initialLoadReadiness as any).status==='QUIET_BEFORE_INFORMATION')).toBe(true);},30000);
 it('v2 aborts click POSTs without discarding independently unchanged rows or later properties',async()=>{const r=await runFreshLoadFixture('click-post');expect(r.rows).toHaveLength(2);expect(r.reservations).toBe(2);expect(r.documents).toBe(2);expect(r.baselinePosts).toBe(0);expect(r.captures.every(c=>c.cells===1&&c.informationRequestRefused===true&&c.pageFinalBlockStateVerified===true)).toBe(true);},30000);

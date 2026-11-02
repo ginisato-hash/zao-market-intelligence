@@ -19,14 +19,25 @@ export interface ListingAnalysisPolicy {
 export interface ListingAttempt {propertyId:string;stayDate:string;attemptedAt:string;completedObservationRowId:string|null}
 export interface ListingRunReport {runId:string;rawSha256:string;rawJson:string}
 /** A completed DOM capture is not the final page/abort-cleanup outcome. */
-export const listingCaptureFinalGuardClear=(c:Record<string,unknown>)=>c.pageFinalBlockStateVerified===true&&c.informationFailureCode==null&&c.pageFinalBlockReason==null&&c.blockReason==null;
+export const listingCaptureFinalGuardClear=(c:Record<string,unknown>,reportRunId?:string,reportGeneratedAt?:string)=>{
+ const d=c.informationDiagnostics as Record<string,any>|undefined,t=d?.termination;
+ // The last actually observed legacy run is fixed, not a moving wall-clock
+ // exception. A new run cannot omit/downgrade its terminal receipt to V1.
+ const match=typeof reportRunId==='string'?/^auto_runner_market_refresh_rotating_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/u.exec(reportRunId):null;
+ const runTime=match?Date.parse(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+09:00`):NaN,generated=Date.parse(reportGeneratedAt??''),cutoff=Date.parse('2026-11-02T22:00:05+09:00');
+ const calendar=Number.isFinite(runTime)&&new Date(runTime+9*3600000).toISOString().slice(0,19).replace(/[-:T]/gu,'')===match!.slice(1).join('');
+ const legacy=calendar&&runTime<=cutoff&&Number.isFinite(generated)&&generated<=cutoff;
+ const legacyFormat=d===undefined||(d!==null&&typeof d==='object'&&!Array.isArray(d)&&(d.schema===undefined||d.schema==='BOOKING_INFORMATION_LIFECYCLE_DIAGNOSTICS_V1'));
+ const owned=d?.schema==='BOOKING_INFORMATION_LIFECYCLE_DIAGNOSTICS_V2'?(d.lifecycle==='FINAL'&&d.failure===null&&d.overflow===false&&d.counts?.unmatched===0&&d.counts?.abortFailed===0&&d.counts?.abortPending===0&&t?.mode==='OWNED_PROCESS_KILL'&&t.owned===true&&t.planned===true&&t.terminationStarted===true&&t.verified===true&&t.processExited===true&&t.serverClosed===true&&t.clientDisconnected===true&&t.unexpectedDisconnect===false):legacy&&legacyFormat;
+ return owned&&c.pageFinalBlockStateVerified===true&&c.informationFailureCode==null&&c.pageFinalBlockReason==null&&c.blockReason==null;
+};
 export function listingRowFinalGuardFailure(r:ListingCanonicalRow,reports:ReadonlyMap<string,Record<string,any>>,asOf:number):string|null{
  const slot=/\/auto-runner-market-refresh-rotating\/(\d{8}_\d{6})\//u.exec(r.raw.debug_artifact_path??'')?.[1];if(!slot)return null;
  const d=reports.get('auto_runner_market_refresh_rotating_'+slot),at=instant(r.raw.collected_at_jst??''),slug=r.raw.source_slug_or_code||r.raw.source_property_id;
  if(!d||d.run_id!=='auto_runner_market_refresh_rotating_'+slot||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision)||instant(d.generated_at_jst)!==at||!Array.isArray(d.rate_cell_evidence?.captures))return 'OBSERVATION_REPORT_UNVERIFIED';
  const cs=d.rate_cell_evidence.captures.filter((c:any)=>c.propertySlug===slug&&c.stayDate===r.raw.checkin&&c.attemptedNetwork===true);
  if(cs.length!==1||!Number.isFinite(instant(cs[0].completedAt))||instant(cs[0].completedAt)<at||instant(cs[0].completedAt)>asOf)return 'OBSERVATION_REPORT_UNVERIFIED';
- return listingCaptureFinalGuardClear(cs[0])?null:'OBSERVATION_FINAL_GUARD_UNVERIFIED';
+ return listingCaptureFinalGuardClear(cs[0],d.run_id,d.generated_at_jst)?null:'OBSERVATION_FINAL_GUARD_UNVERIFIED';
 }
 export interface ListingSourceSnapshot {schema:'OBSERVED_LISTING_CANONICAL_INPUT_MANIFEST_V1';asOf:string;canonicalRowSetSha256:string;attemptSetSha256:string;canonicalRows:number;targetDates:string[];sourceFiles:{path:string;sha256:string}[];attempts:ListingAttempt[];producerCodeSha256s:string[];producerSetSha256:string;propertyAliases:ReturnType<typeof listingPropertyAliases>;[key:string]:unknown}
 export const canonicalListingRowSetSha256=(rows:ListingCanonicalRow[])=>digest(rows.map(x=>({rowId:x.rowId,rowHash:x.rowHash,rawRecordSha256:digest(x.raw),quarantineReason:x.quarantineReason})).sort((a,b)=>a.rowId<b.rowId?-1:a.rowId>b.rowId?1:0));
@@ -81,7 +92,7 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
    const slot=/\/auto-runner-market-refresh-rotating\/(\d{8}_\d{6})\//u.exec(r.raw.debug_artifact_path??'')?.[1],d=slot?reports.get('auto_runner_market_refresh_rotating_'+slot):null;
    const c=d?.rate_cell_evidence?.captures?.find((x:any)=>x.propertySlug===a.propertyId&&x.stayDate===a.stayDate&&x.attemptedNetwork===true);
    if(!d||!c||instant(d.generated_at_jst)!==instant(r.raw.collected_at_jst)||instant(a.attemptedAt)<instant(d.generated_at_jst)||!Number.isFinite(instant(c.completedAt))||instant(c.completedAt)<instant(a.attemptedAt)||instant(c.completedAt)>at)throw Error('LISTING_ATTEMPT_COMPLETION_RECEIPT');
-   if(!listingCaptureFinalGuardClear(c))throw Error('LISTING_ATTEMPT_COMPLETION_FINAL_GUARD');
+   if(!listingCaptureFinalGuardClear(c,d.run_id,d.generated_at_jst))throw Error('LISTING_ATTEMPT_COMPLETION_FINAL_GUARD');
   }
  }
  const rows=input.rows.map(r=>{const x=classify(r,at),failure=listingRowFinalGuardFailure(r,reports,at);if(failure)x.reasons.push(failure);return x;});
