@@ -25,7 +25,7 @@ import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricing
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
 import {launchOwnedBookingBrowser,ownedBookingBrowserStatus,terminateOwnedBookingBrowser} from '../services/bookingOwnedBrowser';
 import { join, resolve } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Response } from "playwright";
 import {
   analyzeBookingRenderedDomSignals,
   buildBookingRenderedDomRow,
@@ -203,19 +203,41 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       const fixedProducts=panel?.products.filter(p=>p.sourcePropertyId===t.property_slug&&p.source==='booking');
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
+      // Closed diagnostics only: do not retain request URLs, page text or errors.
+      // This observes the existing gate; it grants no additional capture or HTTP permission.
+      type CaptureEntryPhase='GOTO'|'BASELINE_WAIT'|'DOM_READ'|'SCREENSHOT'|'CAPTURE_GATE'|'CAPTURE';
+      let phase:CaptureEntryPhase='GOTO';
+      let entryReason:'NOT_REACHED'|'EVIDENCE_DISABLED'|'INITIAL_HTTP_NOT_200'|'PAGE_BLOCKED'|'CAPTURE_CALLED'|'CAPTURE_FAILED'|'PRECAPTURE_EXCEPTION'='NOT_REACHED';
+      let entryBlock:ReturnType<typeof classifyBlock>|'NOT_EVALUATED'='NOT_EVALUATED';
+      let failurePhase:CaptureEntryPhase|null=null,navigationErrorClass:'NONE'|'TIMEOUT'|'NETWORK_ERROR'|'OTHER'|'NON_GOTO_FAILURE'='NONE',captureCalled=false;
+      const mainDocumentStatuses:number[]=[];let responseOverflow=false,responseUnverified=false;
+      const mainDocumentResponse=(response:Response)=>{
+        try{const request=response.request();if(!request.isNavigationRequest()||request.frame()!==page.mainFrame())return;
+          const status=response.status();if(!Number.isInteger(status)||status<100||status>599){responseUnverified=true;return;}
+          if(mainDocumentStatuses.length<16)mainDocumentStatuses.push(status);else responseOverflow=true;
+        }catch{responseUnverified=true;}
+      };
+      page.on('response',mainDocumentResponse);
       try {
         if(loopDiagnostics)loopDiagnostics['pagesStarted']=Number(loopDiagnostics['pagesStarted'])+1;
         const resp = await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 35_000 });
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
+        phase='BASELINE_WAIT';
         await page.waitForTimeout(5_000);
+        phase='DOM_READ';
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
         // Baseline screenshots may load ordinary page resources. Take them before
         // the information guard, which must remain strict through page close.
+        phase='SCREENSHOT';
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
-        if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
+        phase='CAPTURE_GATE';
+        entryBlock=rateCellSink!==undefined&&httpStatus===200?classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`):'NOT_EVALUATED';
+        entryReason=rateCellSink===undefined?'EVIDENCE_DISABLED':httpStatus!==200?'INITIAL_HTTP_NOT_200':entryBlock!==null?'PAGE_BLOCKED':'CAPTURE_CALLED';
+        if(rateCellSink!==undefined&&httpStatus===200&&entryBlock===null){
           // Passive DOM prechecks precede the single fresh wait at the actual
           // information-arm boundary. The observer stays through route install.
           try{
+            phase='CAPTURE';captureCalled=true;
             const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString(),adoptionPolicy:'BOOKING_2P_ADOPTION_V2'},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
             fixedCapture=capture;
             uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
@@ -224,10 +246,16 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
             rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,httpStatus,parserVersion:capture.parserVersion,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
             if(pageGuard?.initialLoadReadiness&&pageGuard.initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')rateCellRecord['status']='INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION';
 
-          }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
+          }catch{entryReason='CAPTURE_FAILED';rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
         }
-      } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
+      } catch (caught) {
+        failurePhase=phase;entryReason='PRECAPTURE_EXCEPTION';
+        if(phase!=='GOTO')navigationErrorClass='NON_GOTO_FAILURE';
+        else{const message=caught instanceof Error?caught.message:'';navigationErrorClass=caught instanceof Error&&(caught.name==='TimeoutError'||/timeout/iu.test(message))?'TIMEOUT':/net::ERR_[A-Z_]+/u.test(message)?'NETWORK_ERROR':'OTHER';}
+        error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl;
+      }
       finally {
+        page.off('response',mainDocumentResponse);
         initialLoad?.dispose();
         if(pageGuard)await pageGuard.checkpoint();
         if(pageGuard)await pageGuard.closeReadOnlyInformationPage().catch(()=>undefined);else await terminateOwnedBookingBrowser(browser);
@@ -244,6 +272,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       if(rateCellSink){
         const record=rateCellRecord??{propertySlug:t.property_slug,stayDate:t.checkin,status:'NO_SELECTED_CAPTURE',marketPriceEligible:false};
         Object.assign(record,{attemptedNetwork:true,completedAt:new Date().toISOString(),pageFinalBlockReason:uiBlock,pageFinalBlockStateVerified:!uiStateUnverified});
+        record['captureEntryDiagnostics']={schema:'BOOKING_CAPTURE_ENTRY_DIAGNOSTICS_V1',loaded,initialHttpStatus:Number.isInteger(httpStatus)&&httpStatus>=0&&httpStatus<=599?httpStatus:null,phase,reason:entryReason,preCaptureBlock:entryBlock,failurePhase,navigationErrorClass,captureCalled,mainDocumentStatuses,responseOverflow,responseUnverified};
         if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
         rateCellSink.push(record);
       }

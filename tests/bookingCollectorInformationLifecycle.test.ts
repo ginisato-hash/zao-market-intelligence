@@ -101,3 +101,41 @@ it('normal collector saves the final unmatched request and actual loop stop ordi
  expect(r.captures[0]).toMatchObject({pageFinalBlockStateVerified:false,informationFailureCode:'UNABORTED_OBSERVED_REQUEST',informationDiagnostics:{counts:{unmatched:1},lastUnmatched:[{id:1,method:'GET',resourceType:'xhr',routeStarted:null}]}});
  expect(r.loop).toMatchObject({status:'STOPPED',planned:2,visited:1,pagesStarted:1,stoppedAfterTargetOrdinal:1,unvisitedTargets:1,stopReason:'INFORMATION_GUARD_FAILURE',informationFailureCode:'UNABORTED_OBSERVED_REQUEST'});
 },30000);
+
+// Replay the real pre-capture gate using owned synthetic pages. These statuses
+// reproduce a possible failure mechanism; they do not identify the actual OTA cause.
+async function runCaptureEntryFixture(mode:'200'|'202'|'403'|'goto-timeout'|'overflow'){
+ const browsers:Browser[]=[],debug=mkdtempSync(join(tmpdir(),'booking-capture-entry-'));let captureCalls=0;
+ const collect=actualCollector({launchOwnedBookingBrowser:async()=>{const b=await launchOwnedBookingBrowser();browsers.push(b);return b;},ownedBookingBrowserStatus,terminateOwnedBookingBrowser,USER_AGENT:'synthetic-agent',
+  createAnonymousBookingCaptureContext:async(b:Browser,agent:string)=>{
+   const context=await createAnonymousBookingCaptureContext(b,agent);
+   await context.route('**/*',route=>route.fulfill({status:mode==='202'?202:mode==='403'?403:200,contentType:'text/html; charset=utf-8',body:productFactsFixtureHtml()}));
+   const newPage=context.newPage.bind(context);context.newPage=async()=>{const page=await newPage(),wait=page.waitForTimeout.bind(page);
+    page.waitForTimeout=async ms=>{if(ms!==5000)await wait(ms);};
+    if(mode==='goto-timeout')page.goto=(async()=>{const e=new Error('timeout https://sensitive.invalid/?cookie=secret auth=Bearer-hidden');e.name='TimeoutError';throw e;}) as typeof page.goto;
+    page.screenshot=(async()=>{if(mode==='overflow')for(let i=0;i<20;i++)(page as any).emit('response',{status:()=>200,request:()=>({isNavigationRequest:()=>true,frame:()=>page.mainFrame()})});return Buffer.alloc(0);}) as typeof page.screenshot;
+    return page;
+   };return context;
+  },sleep:async()=>{},jitterDelayMs:()=>0,backoffDelayMs:()=>0,shouldEarlyStop:()=>true,nextDay:()=> '2027-01-16',
+  buildBookingRenderedDomUrl:()=> 'https://www.booking.com/hotel/jp/synthetic.ja.html?checkin=2027-01-15&checkout=2027-01-16&group_adults=2&group_children=0&no_rooms=1&selected_currency=JPY',
+  join,mkdirSync,writeFileSync,createHash,BookingUiBlockGuard,observeBookingInitialLoad,
+  captureBookingRateCells:async(...args:Parameters<typeof captureBookingRateCells>)=>{captureCalls++;return captureBookingRateCells(...args);},deriveBookingRateCell,classifyBlock,
+  analyzeBookingRenderedDomSignals:(input:unknown)=>input,buildBookingRenderedDomRow:(x:unknown)=>x,toPreviewRow:(x:unknown)=>x,sanitizeBookingUrl:()=> 'synthetic',toSingleLine:(x:unknown)=>String(x)});
+ const captures:Array<Record<string,any>>=[],loop:Record<string,unknown>={};
+ try{const rows=await collect([{property_slug:'synthetic',canonical_property_name:'synthetic',checkin:'2027-01-15'}],debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>true,null,undefined,loop);return {captures,rows,loop,captureCalls};}
+ finally{for(const b of browsers)await terminateOwnedBookingBrowser(b);rmSync(debug,{recursive:true,force:true});}
+}
+it.each(['200','202','403','goto-timeout'] as const)('capture entry diagnostics distinguish %s without changing the real capture or block gate',async mode=>{
+ const r=await runCaptureEntryFixture(mode),c=r.captures[0]!,d=c.captureEntryDiagnostics;
+ expect(d.schema).toBe('BOOKING_CAPTURE_ENTRY_DIAGNOSTICS_V1');
+ expect(Object.keys(d).sort()).toEqual(['captureCalled','failurePhase','initialHttpStatus','loaded','mainDocumentStatuses','navigationErrorClass','phase','preCaptureBlock','reason','responseOverflow','responseUnverified','schema'].sort());
+ expect(JSON.stringify(d)).not.toMatch(/sensitive|secret|Bearer|https?:|cookie|header|bodyText|pageTitle/iu);
+ if(mode==='200'){expect(r.captureCalls).toBe(1);expect(d).toMatchObject({loaded:true,initialHttpStatus:200,captureCalled:true,reason:'CAPTURE_CALLED',preCaptureBlock:null,navigationErrorClass:'NONE',mainDocumentStatuses:[200]});expect(c.cells).toBe(1);}
+ if(mode==='202'){expect(r.captureCalls).toBe(0);expect(c.status).toBe('NO_SELECTED_CAPTURE');expect(d).toMatchObject({loaded:true,initialHttpStatus:202,captureCalled:false,reason:'INITIAL_HTTP_NOT_200',preCaptureBlock:'NOT_EVALUATED',mainDocumentStatuses:[202]});expect(r.loop.status).toBe('COMPLETE');}
+ if(mode==='403'){expect(r.captureCalls).toBe(0);expect(r.loop).toMatchObject({status:'STOPPED',stopReason:'HTTP_OR_UI_BLOCK'});expect(c.pageFinalBlockReason).toBe('forbidden_403');expect(d).toMatchObject({initialHttpStatus:403,captureCalled:false,reason:'INITIAL_HTTP_NOT_200'});}
+ if(mode==='goto-timeout'){expect(r.captureCalls).toBe(0);expect(d).toMatchObject({loaded:false,initialHttpStatus:0,captureCalled:false,reason:'PRECAPTURE_EXCEPTION',failurePhase:'GOTO',navigationErrorClass:'TIMEOUT',mainDocumentStatuses:[]});}
+},30000);
+it('capture entry diagnostics bound document response counts and do not turn overflow into a capture permission',async()=>{
+ const r=await runCaptureEntryFixture('overflow'),d=r.captures[0]!.captureEntryDiagnostics;
+ expect(d.mainDocumentStatuses).toHaveLength(16);expect(d.responseOverflow).toBe(true);expect(d.responseUnverified).toBe(false);expect(r.captureCalls).toBe(1);expect(d.initialHttpStatus).toBe(200);
+},30000);
