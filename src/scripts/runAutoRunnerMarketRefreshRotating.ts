@@ -162,9 +162,10 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null,publicationGuard?:(sourcePropertyId:string,stayDate:string)=>boolean): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null,publicationGuard?:(sourcePropertyId:string,stayDate:string)=>boolean,loopDiagnostics?:Record<string,unknown>): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
-  if(targets.length===0)return rows;
+  if(loopDiagnostics)Object.assign(loopDiagnostics,{schema:'BOOKING_COLLECTION_LOOP_DIAGNOSTICS_V1',status:'RUNNING',planned:targets.length,visited:0,pagesStarted:0,reservationRefused:0,publicationRefused:0,stoppedAfterTargetOrdinal:null,unvisitedTargets:targets.length,stopReason:null,informationFailureCode:null});
+  if(targets.length===0){if(loopDiagnostics)loopDiagnostics['status']='COMPLETE';return rows;}
   const browser = await chromium.launch({ headless: true });
   const context = await createAnonymousBookingCaptureContext(browser,USER_AGENT);
   let consecutiveBlocks = 0;
@@ -175,6 +176,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       // Polite jitter between sequential requests (skip before the very first).
       if (index > 0) await sleep(jitterDelayMs());
       index += 1;
+      if(loopDiagnostics){loopDiagnostics['visited']=index;loopDiagnostics['unvisitedTargets']=targets.length-index;}
       const target = { canonicalPropertyName: t.canonical_property_name, slug: t.property_slug };
       const checkout = nextDay(t.checkin);
       const probeUrl = buildBookingRenderedDomUrl({ ...target, checkin: t.checkin });
@@ -182,9 +184,10 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       mkdirSync(artifactDir, { recursive: true });
       const screenshotPath = join(artifactDir, "screenshot.png");
       if(reserveAttempt&& !reserveAttempt(t,new Date().toISOString())){
+        if(loopDiagnostics)loopDiagnostics['reservationRefused']=Number(loopDiagnostics['reservationRefused'])+1;
         rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;
       }
-      if(publicationGuard&&!publicationGuard(t.property_slug,t.checkin)){rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'PUBLICATION_GUARD_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;}
+      if(publicationGuard&&!publicationGuard(t.property_slug,t.checkin)){if(loopDiagnostics)loopDiagnostics['publicationRefused']=Number(loopDiagnostics['publicationRefused'])+1;rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'PUBLICATION_GUARD_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;}
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
@@ -197,6 +200,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
       try {
+        if(loopDiagnostics)loopDiagnostics['pagesStarted']=Number(loopDiagnostics['pagesStarted'])+1;
         const resp = await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 35_000 });
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
         await page.waitForTimeout(5_000);
@@ -236,6 +240,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       if(rateCellSink){
         const record=rateCellRecord??{propertySlug:t.property_slug,stayDate:t.checkin,status:'NO_SELECTED_CAPTURE',marketPriceEligible:false};
         Object.assign(record,{attemptedNetwork:true,completedAt:new Date().toISOString(),pageFinalBlockReason:uiBlock,pageFinalBlockStateVerified:!uiStateUnverified});
+        if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
         rateCellSink.push(record);
       }
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
@@ -247,7 +252,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
       const block = uiBlock ?? classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
-      if(pageGuard?.hardStop||block!==null){await sleep(backoffDelayMs(backoffAttempt));break;} // Actual restriction, abort/guard/cleanup failure stops; page-local insufficient evidence does not.
+      if(pageGuard?.hardStop||block!==null){if(loopDiagnostics)Object.assign(loopDiagnostics,{status:'STOPPED',stoppedAfterTargetOrdinal:index,unvisitedTargets:targets.length-index,stopReason:block!==null?'HTTP_OR_UI_BLOCK':'INFORMATION_GUARD_FAILURE',informationFailureCode:pageGuard?.informationFailureCode??null});await sleep(backoffDelayMs(backoffAttempt));break;} // Actual restriction, abort/guard/cleanup failure stops; page-local insufficient evidence does not.
       if (block !== null) {
         consecutiveBlocks += 1;
         await sleep(backoffDelayMs(backoffAttempt));
@@ -258,7 +263,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         backoffAttempt = 0;
       }
     }
+  } catch(error){if(loopDiagnostics)Object.assign(loopDiagnostics,{status:'ERROR',stoppedAfterTargetOrdinal:index,unvisitedTargets:targets.length-index,stopReason:'COLLECTOR_EXCEPTION'});throw error;
   } finally { await context.close().catch(() => undefined); await browser.close().catch(() => undefined); }
+  if(loopDiagnostics&&loopDiagnostics['status']==='RUNNING')loopDiagnostics['status']='COMPLETE';
   return rows;
 }
 
@@ -300,6 +307,7 @@ async function run(): Promise<void> {
   // Record this run's source observations; never infer a past producer from a later checkout.
   const producerStarted=rateCellsOn?observeCollectorSource():null;
   const bookingEvidence: BookingCaptureRef[] = [];
+  const bookingCollectionDiagnostics:Record<string,unknown>={schema:'BOOKING_COLLECTION_LOOP_DIAGNOSTICS_V1',status:'NOT_RUN'};
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
   let optionalJalanStatus='NOT_RUN';
   let curvePublication:Record<string,unknown>={status:'NOT_RUN'};
@@ -379,7 +387,7 @@ async function run(): Promise<void> {
     liveExecuted = selectedTargets.length>0;
     const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
     const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readCaptureTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined);
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readCaptureTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined,bookingCollectionDiagnostics);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const optionalJalan=await optionalSecondaryCollection(async()=>{
@@ -512,7 +520,7 @@ async function run(): Promise<void> {
     ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
     ...(env['ZMI_2P_CURVE_PUBLICATION_ENABLED']==='1'?{two_person_curve_publication:curvePublication}:{}),
     ...(env['ZMI_2P_QUALITY_ENABLED']==='1'?{two_person_admission:twoPersonAdmission}:{}),
-    ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false}}:{}),
+    ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false},booking_collection_lifecycle:bookingCollectionDiagnostics}:{}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",
     winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,
     winter_lane_selected: plan.winter_lane.selected_count,

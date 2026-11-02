@@ -54,11 +54,12 @@ it('baseline screenshot resources cannot poison the strict information phase or 
  }finally{await browser.close();rmSync(debug,{recursive:true,force:true});}
 },30000);
 
-async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout'|'without-barrier'|'precheck-baseline'|'during-arm'|'quantity-change'|'header-change'){
+async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout'|'without-barrier'|'precheck-baseline'|'during-arm'|'quantity-change'|'header-change'|'unmatched-final'){
  const browser=await chromium.launch({headless:true}),debug=mkdtempSync(join(tmpdir(),'booking-fresh-load-'));
  let documents=0,baselinePosts=0,reservations=0,barrierEntries=0,armed=0,informationClicks=0;
  let fixturePage:any;
- class ObservedGuard extends BookingUiBlockGuard {private injected=false;async armReadOnlyInformation(){if(['precheck-baseline','quantity-change','header-change'].includes(mode)&&!this.injected){this.injected=true;await fixturePage.evaluate((m:string)=>{setTimeout(()=>{if(m==='precheck-baseline')void fetch('/precheck-delayed',{method:'POST'}).catch(()=>{});else if(m==='quantity-change')(document.querySelector('#hprt-table select') as HTMLSelectElement).value='1';else document.querySelector('[data-testid="searchbox-dates-container"]')!.setAttribute('aria-label','2027年1月17日(日) — 2027年1月18日(月)');},250);},mode);}await super.armReadOnlyInformation();armed++;}}
+ class ObservedGuard extends BookingUiBlockGuard {private injected=false;private finalInjected=false;async armReadOnlyInformation(){if(['precheck-baseline','quantity-change','header-change'].includes(mode)&&!this.injected){this.injected=true;await fixturePage.evaluate((m:string)=>{setTimeout(()=>{if(m==='precheck-baseline')void fetch('/precheck-delayed',{method:'POST'}).catch(()=>{});else if(m==='quantity-change')(document.querySelector('#hprt-table select') as HTMLSelectElement).value='1';else document.querySelector('[data-testid="searchbox-dates-container"]')!.setAttribute('aria-label','2027年1月17日(日) — 2027年1月18日(月)');},250);},mode);}await super.armReadOnlyInformation();armed++;}
+ async finishReadOnlyInformation(){if(mode==='unmatched-final'&&!this.finalInjected&&fixturePage.isClosed()){this.finalInjected=true;(this as any).informationRequestSeen({method:()=> 'GET',resourceType:()=> 'xhr',isNavigationRequest:()=>false});}await super.finishReadOnlyInformation();}}
  const readiness=mode==='timeout'?()=>({waitForFreshQuiet:async()=>{barrierEntries++;return {status:'TIMED_OUT_NO_INFORMATION'};},finishQuietHandoff:()=>false,dispose:()=>{}}):mode==='without-barrier'?()=>({waitForFreshQuiet:async()=>({status:'QUIET_BEFORE_INFORMATION'}),finishQuietHandoff:()=>true,dispose:()=>{}}):(page:any)=>{const b=observeBookingInitialLoad(page);return {...b,waitForFreshQuiet:async()=>{barrierEntries++;return b.waitForFreshQuiet();}};};
  const collect=actualCollector({chromium:{launch:async()=>browser},USER_AGENT:'synthetic-agent',observeBookingInitialLoad:readiness,
   createAnonymousBookingCaptureContext:async(b:typeof browser,agent:string)=>{
@@ -81,7 +82,8 @@ async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout
   analyzeBookingRenderedDomSignals:()=>({synthetic:true}),buildBookingRenderedDomRow:(x:unknown)=>x,toPreviewRow:(x:unknown)=>x,
   sanitizeBookingUrl:()=> 'synthetic',toSingleLine:(x:unknown)=>String(x)});
  const targets=['external','external-two'].map(property_slug=>({property_slug,canonical_property_name:'synthetic',checkin:'2027-01-15'})),captures:Array<Record<string,unknown>>=[];
- try{const rows=await collect(targets,debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>{reservations++;return true;});return {rows,captures,documents,baselinePosts,reservations,barrierEntries,armed,informationClicks};}
+ const loop:Record<string,unknown>={};
+ try{const rows=await collect(targets,debug,'2027-01-15T00:00:00+09:00',undefined,captures,()=>{reservations++;return true;},null,undefined,loop);return {rows,captures,documents,baselinePosts,reservations,barrierEntries,armed,informationClicks,loop};}
  finally{await browser.close();rmSync(debug,{recursive:true,force:true});}
 }
 it('waits for a fresh passive window after screenshots; delayed baseline POST never enters the information guard',async()=>{const r=await runFreshLoadFixture('delayed-baseline');expect(r.rows).toHaveLength(2);expect(r.documents).toBe(2);expect(r.baselinePosts).toBe(2);expect(r.barrierEntries).toBe(2);expect(r.captures.every(c=>c.cells===1&&c.informationRequestRefused===false&&c.pageFinalBlockStateVerified===true)).toBe(true);expect(r.captures.every(c=>(c.initialLoadReadiness as any).status==='QUIET_BEFORE_INFORMATION')).toBe(true);},30000);
@@ -92,3 +94,8 @@ it('checks quiet at the arm boundary after passive prechecks, before any informa
 it('traffic during guard installation stays denied and cannot inherit the earlier quiet snapshot',async()=>{const r=await runFreshLoadFixture('during-arm');expect(r.rows).toHaveLength(2);expect(r.baselinePosts).toBe(0);expect(r.captures[0]).toMatchObject({cells:0,initialLoadHandoffVerified:false,informationRequestRefused:true,pageFinalBlockStateVerified:false,observedDeniedRequestPhase:'ARMING'});},30000);
 it('quantity changes during the fresh wait prevent the first calendar click',async()=>{const r=await runFreshLoadFixture('quantity-change');expect(r.rows).toHaveLength(2);expect(r.informationClicks).toBe(0);expect(r.captures.every(c=>c.cells===0&&c.initialLoadHandoffVerified===true)).toBe(true);},30000);
 it('passive-year header changes during the fresh wait prevent all room, tax and policy clicks',async()=>{const r=await runFreshLoadFixture('header-change');expect(r.rows).toHaveLength(2);expect(r.informationClicks).toBe(0);expect(r.captures.every(c=>c.cells===0&&c.initialLoadHandoffVerified===true)).toBe(true);},30000);
+it('normal collector saves the final unmatched request and actual loop stop ordinal without attempting the next target',async()=>{
+ const r=await runFreshLoadFixture('unmatched-final');expect(r.rows).toHaveLength(1);expect(r.reservations).toBe(1);expect(r.documents).toBe(1);expect(r.baselinePosts).toBe(0);
+ expect(r.captures[0]).toMatchObject({pageFinalBlockStateVerified:false,informationFailureCode:'UNABORTED_OBSERVED_REQUEST',informationDiagnostics:{counts:{unmatched:1},lastUnmatched:[{id:1,method:'GET',resourceType:'xhr',routeStarted:null}]}});
+ expect(r.loop).toMatchObject({status:'STOPPED',planned:2,visited:1,pagesStarted:1,stoppedAfterTargetOrdinal:1,unvisitedTargets:1,stopReason:'INFORMATION_GUARD_FAILURE',informationFailureCode:'UNABORTED_OBSERVED_REQUEST'});
+},30000);
