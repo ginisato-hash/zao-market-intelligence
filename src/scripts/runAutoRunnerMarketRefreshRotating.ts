@@ -23,6 +23,7 @@ import {recordNormalObservedListingDiagnostic} from '../services/observedListing
 import {readCaptureTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
+import {launchOwnedBookingBrowser,ownedBookingBrowserStatus,terminateOwnedBookingBrowser} from '../services/bookingOwnedBrowser';
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import {
@@ -166,8 +167,6 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
   const rows: BookingPreviewRow[] = [];
   if(loopDiagnostics)Object.assign(loopDiagnostics,{schema:'BOOKING_COLLECTION_LOOP_DIAGNOSTICS_V1',status:'RUNNING',planned:targets.length,visited:0,pagesStarted:0,reservationRefused:0,publicationRefused:0,stoppedAfterTargetOrdinal:null,unvisitedTargets:targets.length,stopReason:null,informationFailureCode:null});
   if(targets.length===0){if(loopDiagnostics)loopDiagnostics['status']='COMPLETE';return rows;}
-  const browser = await chromium.launch({ headless: true });
-  const context = await createAnonymousBookingCaptureContext(browser,USER_AGENT);
   let consecutiveBlocks = 0;
   let backoffAttempt = 0;
   let index = 0;
@@ -188,6 +187,11 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;
       }
       if(publicationGuard&&!publicationGuard(t.property_slug,t.checkin)){if(loopDiagnostics)loopDiagnostics['publicationRefused']=Number(loopDiagnostics['publicationRefused'])+1;rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'PUBLICATION_GUARD_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;}
+      // A fresh owned process per target prevents Chromium's graceful teardown
+      // from dispatching unobservable keepalive requests after DOM capture.
+      const browser=await launchOwnedBookingBrowser();
+      try{
+      const context=await createAnonymousBookingCaptureContext(browser,USER_AGENT);
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
@@ -226,9 +230,9 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       finally {
         initialLoad?.dispose();
         if(pageGuard)await pageGuard.checkpoint();
-        if(pageGuard)await pageGuard.closeReadOnlyInformationPage().catch(()=>undefined);else await page.close().catch(() => undefined);
+        if(pageGuard)await pageGuard.closeReadOnlyInformationPage().catch(()=>undefined);else await terminateOwnedBookingBrowser(browser);
         if(pageGuard){
-          await pageGuard.finishReadOnlyInformation();
+          await pageGuard.finishReadOnlyInformation().catch(()=>undefined);
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
           initialLoadReadiness=pageGuard.initialLoadReadiness;
           if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['initialLoadReadinessPhase']=initialLoadReadiness?'IMMEDIATELY_BEFORE_INFORMATION_ARM':null;rateCellRecord['initialLoadHandoffVerified']=pageGuard.initialLoadHandoffVerified;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;rateCellRecord['observedDeniedRequestPhase']=pageGuard.observedDeniedRequestPhase;rateCellRecord['informationFailureCode']=pageGuard.informationFailureCode;}
@@ -262,9 +266,14 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         consecutiveBlocks = 0;
         backoffAttempt = 0;
       }
+      }finally{
+        // Setup/capture exceptions also end only this captured owned process.
+        // Termination is single-attempt; no graceful fallback or blind retry.
+        if(!ownedBookingBrowserStatus(browser).terminationStarted)await terminateOwnedBookingBrowser(browser);
+      }
     }
   } catch(error){if(loopDiagnostics)Object.assign(loopDiagnostics,{status:'ERROR',stoppedAfterTargetOrdinal:index,unvisitedTargets:targets.length-index,stopReason:'COLLECTOR_EXCEPTION'});throw error;
-  } finally { await context.close().catch(() => undefined); await browser.close().catch(() => undefined); }
+  }
   if(loopDiagnostics&&loopDiagnostics['status']==='RUNNING')loopDiagnostics['status']='COMPLETE';
   return rows;
 }

@@ -1,7 +1,8 @@
 import type { Page, Response, Route,Request } from 'playwright';
 import { classifyBlock, type BlockReason } from './crawlThrottlePolicy';
 import type {BookingInitialLoadObserver,BookingInitialLoadReadiness} from './bookingInitialLoadBarrier';
-export type BookingInformationFailureCode='REQUEST_BUDGET_EXCEEDED'|'ABORT_FAILED'|'UNEXPECTED_PAGE'|'GUARD_ARM_FAILED'|'POLICY_DOM_CLEANUP_UNVERIFIED'|'ABORT_DRAIN_TIMEOUT'|'PAGE_CLOSE_FAILED'|'PAGE_NOT_CLOSED'|'ROUTE_CLEANUP_FAILED'|'UNABORTED_OBSERVED_REQUEST'|'UI_STATE_UNREADABLE';
+import {isOwnedBookingBrowser,ownedBookingBrowserStatus,terminateOwnedBookingBrowser} from './bookingOwnedBrowser';
+export type BookingInformationFailureCode='REQUEST_BUDGET_EXCEEDED'|'ABORT_FAILED'|'UNEXPECTED_PAGE'|'GUARD_ARM_FAILED'|'POLICY_DOM_CLEANUP_UNVERIFIED'|'ABORT_DRAIN_TIMEOUT'|'PAGE_CLOSE_FAILED'|'PAGE_NOT_CLOSED'|'ROUTE_CLEANUP_FAILED'|'UNABORTED_OBSERVED_REQUEST'|'UI_STATE_UNREADABLE'|'OWNED_BROWSER_TERMINATION_FAILED'|'OWNED_BROWSER_DISCONNECTED';
 type InformationPhase='ARMING'|'ARMED_IDLE'|'CALENDAR_OPEN'|'CALENDAR_READ'|'CALENDAR_CLOSE'|'CALENDAR_CLOSED'|'RATE_INFORMATION';
 type LifecyclePhase='BEFORE_ARM'|'INSTALLING'|'ACTIVE'|'PRECLOSE'|'CLOSING'|'CLOSED'|'DRAINING'|'UNROUTING'|'FINAL';
 type RequestDiagnostic={id:number;method:string;resourceType:string;navigation:boolean;seen:number|null;routeStarted:number|null;routeCompleted:number|null;abortSucceeded:number|null;abortFailed:number|null;seenPhase:InformationPhase|null;routePhase:InformationPhase|null;lifecycleAtSeen:LifecyclePhase|null;lifecycleAtRoute:LifecyclePhase|null};
@@ -18,6 +19,8 @@ export class BookingUiBlockGuard {
   private informationPhase:InformationPhase='ARMING';
   private informationArmed = false;
   private finishPromise:Promise<void>|null = null;
+  private ownedTerminationPlanned=false;
+  private ownedTerminationVerified=false;
   private disposePending = false;
   hardStop=false;
   informationFailureCode:BookingInformationFailureCode|null=null;
@@ -44,7 +47,8 @@ export class BookingUiBlockGuard {
   /** Finite page-local ordering only. Never includes URL, payload, headers, error text or cross-run identifiers. */
   get informationDiagnostics(){
     const rows=[...this.requestDiagnostics.values()],unmatched=rows.filter(x=>x.seen!==null&&x.abortSucceeded===null);
-    return {schema:'BOOKING_INFORMATION_LIFECYCLE_DIAGNOSTICS_V1',sequence:this.diagnosticOrder,overflow:this.diagnosticOverflow,lifecycle:this.lifecycle,boundaries:{...this.boundaries},failure:this.failureDiagnostic?{...this.failureDiagnostic}:null,
+    return {schema:isOwnedBookingBrowser(this.page.context().browser())?'BOOKING_INFORMATION_LIFECYCLE_DIAGNOSTICS_V2':'BOOKING_INFORMATION_LIFECYCLE_DIAGNOSTICS_V1',sequence:this.diagnosticOrder,overflow:this.diagnosticOverflow,lifecycle:this.lifecycle,boundaries:{...this.boundaries},failure:this.failureDiagnostic?{...this.failureDiagnostic}:null,
+      termination:{mode:isOwnedBookingBrowser(this.page.context().browser())?'OWNED_PROCESS_KILL':'LEGACY_PAGE_CLOSE',planned:this.ownedTerminationPlanned,verified:this.ownedTerminationVerified,...ownedBookingBrowserStatus(this.page.context().browser())},
       registration:{...this.registration},counts:{seen:this.seen.size,routeStarted:rows.filter(x=>x.routeStarted!==null).length,routeCompleted:rows.filter(x=>x.routeCompleted!==null).length,abortSucceeded:this.safelyAborted.size,abortFailed:rows.filter(x=>x.abortFailed!==null).length,abortPending:this.aborts.size,unmatched:[...this.seen].filter(r=>!this.safelyAborted.has(r)).length},
       lastUnmatched:unmatched.slice(-8).map(x=>({...x})),lastRequests:rows.slice(-8).map(x=>({...x}))};
   }
@@ -75,7 +79,7 @@ export class BookingUiBlockGuard {
     }catch{/* Optional diagnostics must not interfere with the already attempted abort. */}
   };
   private readonly unexpectedPage = (other:Page):void => {
-    if(other!==this.page){this.informationRequestRefused=true;this.informationFailure('UNEXPECTED_PAGE');void other.close().catch(()=>{this.hardStop=true;});}
+    if(other!==this.page){this.informationRequestRefused=true;this.informationFailure('UNEXPECTED_PAGE');const browser=this.page.context().browser();if(isOwnedBookingBrowser(browser))void terminateOwnedBookingBrowser(browser!).catch(()=>{});else void other.close().catch(()=>{this.hardStop=true;});}
   };
   async armReadOnlyInformation():Promise<void>{
     if(this.informationArmed)return;
@@ -90,7 +94,7 @@ export class BookingUiBlockGuard {
     try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await context.route('**/*',this.informationRoute);this.registration.CONTEXT_ROUTE_READY=this.order();this.registration.PAGE_ROUTE_BEGIN=this.order();await this.page.route('**/*',this.informationRoute);this.registration.PAGE_ROUTE_READY=this.order();}
     catch{this.informationFailure('GUARD_ARM_FAILED');context.off('request',this.informationRequestSeen);await context.unroute('**/*',this.informationRoute).catch(()=>{});throw Error('INFORMATION_GUARD_ARM_FAILED');}
     this.informationArmed=true;context.on('page',this.unexpectedPage);
-    this.page.once('close',()=>{void this.finishReadOnlyInformation().catch(()=>{this.stateVerified=false;});});
+    this.page.once('close',()=>{if(isOwnedBookingBrowser(this.page.context().browser())){if(!this.ownedTerminationPlanned)this.informationFailure('PAGE_CLOSE_FAILED');return;}void this.finishReadOnlyInformation().catch(()=>{this.stateVerified=false;});});
     if(this.initialLoad){this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff();if(!this.initialLoadHandoffVerified){this.stateVerified=false;throw Error('INITIAL_LOAD_CHANGED_DURING_INFORMATION_ARM');}}
     this.informationPhase='ARMED_IDLE';
     this.boundary('ACTIVE');
@@ -105,6 +109,20 @@ export class BookingUiBlockGuard {
   /** Settle already observed guarded requests before normal close. This is not an initial-load quiet wait. */
   async closeReadOnlyInformationPage():Promise<void>{
     this.boundary('PRECLOSE');
+    const browser=this.page.context().browser();
+    if(isOwnedBookingBrowser(browser)){
+      this.ownedTerminationPlanned=true;
+      const deadline=performance.now()+3000;
+      if(ownedBookingBrowserStatus(browser).unexpectedDisconnect)this.informationFailure('OWNED_BROWSER_DISCONNECTED');
+      while(!this.hardStop&&(this.aborts.size>0||[...this.seen].some(r=>!this.safelyAborted.has(r)))){
+        if(performance.now()>=deadline){this.informationFailure('ABORT_DRAIN_TIMEOUT');break;}
+        await new Promise<void>(resolve=>setTimeout(resolve,10));
+      }
+      this.boundary('CLOSING');
+      try{await terminateOwnedBookingBrowser(browser!,deadline);this.ownedTerminationVerified=true;}
+      catch{this.informationFailure('OWNED_BROWSER_TERMINATION_FAILED');throw Error('OWNED_BROWSER_TERMINATION_FAILED');}
+      this.boundaries.CLOSED??=this.order();return;
+    }
     if(this.informationArmed){
       const deadline=Date.now()+3000;
       while(!this.hardStop&&(this.aborts.size>0||[...this.seen].some(r=>!this.safelyAborted.has(r)))){
@@ -121,6 +139,21 @@ export class BookingUiBlockGuard {
   setInformationPhase(phase:InformationPhase):void{this.informationPhase=phase;}
   /** The normal collector calls this after page.close and before reading final guard state or opening another page. */
   async finishReadOnlyInformation():Promise<void>{
+    const browser=this.page.context().browser();
+    if(isOwnedBookingBrowser(browser)){
+      if(!this.ownedTerminationVerified){this.informationFailure('OWNED_BROWSER_TERMINATION_FAILED');throw Error('OWNED_BROWSER_TERMINATION_UNVERIFIED');}
+      if(this.finishPromise)return this.finishPromise;
+      this.finishPromise=(async()=>{
+        this.boundary('DRAINING');
+        // SIGKILL is no abort receipt. Every observed request still needs its
+        // original successful disposition; process death never fills a gap.
+        if(this.aborts.size)this.informationFailure('ABORT_DRAIN_TIMEOUT');
+        if([...this.seen].some(r=>!this.safelyAborted.has(r)))this.informationFailure('UNABORTED_OBSERVED_REQUEST');
+        // The whole owned process is gone. No unroute command is sent to a
+        // disconnected browser; routes remain installed until that verified exit.
+        this.page.context().off('page',this.unexpectedPage);this.page.context().off('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_OFF=this.order();this.boundary('FINAL');
+      })();return this.finishPromise;
+    }
     if(!this.informationArmed)return;
     if(!this.page.isClosed()){this.informationFailure('PAGE_NOT_CLOSED');throw Error('INFORMATION_PAGE_NOT_CLOSED');}
     if(this.finishPromise)return this.finishPromise;

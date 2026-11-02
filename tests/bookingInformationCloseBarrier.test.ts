@@ -3,7 +3,7 @@ import {BookingUiBlockGuard} from '../src/services/bookingUiBlockGuard';
 
 function fixture(){
  let closed=false;
- const context:any={on:()=>{},off:()=>{},route:async()=>{},unroute:async()=>{}};
+ const context:any={browser:()=>null,on:()=>{},off:()=>{},route:async()=>{},unroute:async()=>{}};
  const page:any={on:()=>{},once:()=>{},off:()=>{},context:()=>context,route:async()=>{},isClosed:()=>closed,title:async()=> 'synthetic',locator:()=>({innerText:async()=> 'synthetic'}),close:async()=>{closed=true;}};
  const guard=new BookingUiBlockGuard(page,undefined,true);
  const request:any={method:()=> 'POST',resourceType:()=> 'fetch',isNavigationRequest:()=>false};
