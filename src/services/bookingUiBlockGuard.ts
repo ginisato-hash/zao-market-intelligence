@@ -6,6 +6,8 @@ export type BookingInformationFailureCode='REQUEST_BUDGET_EXCEEDED'|'ABORT_FAILE
 type InformationPhase='ARMING'|'ARMED_IDLE'|'CALENDAR_OPEN'|'CALENDAR_READ'|'CALENDAR_CLOSE'|'CALENDAR_CLOSED'|'RATE_INFORMATION';
 type LifecyclePhase='BEFORE_ARM'|'INSTALLING'|'ACTIVE'|'PRECLOSE'|'CLOSING'|'CLOSED'|'DRAINING'|'UNROUTING'|'FINAL';
 type RequestDiagnostic={id:number;method:string;resourceType:string;navigation:boolean;seen:number|null;routeStarted:number|null;routeCompleted:number|null;abortSucceeded:number|null;abortFailed:number|null;seenPhase:InformationPhase|null;routePhase:InformationPhase|null;lifecycleAtSeen:LifecyclePhase|null;lifecycleAtRoute:LifecyclePhase|null};
+type CausalEvent='initialEvent'|'initialRoute'|'fallbackStarted'|'fallbackSettled'|'fallbackFailed'|'informationEvent'|'informationRoute'|'finished'|'failed';
+type CausalRequest={id:number;method:string;resourceType:string;navigation:boolean;scheme:'HTTP'|'HTTPS'|'OTHER'|'UNREADABLE';informationDiagnosticId:number|null;first:Partial<Record<CausalEvent,number>>;last:Partial<Record<CausalEvent,number>>;counts:Partial<Record<CausalEvent,number>>;failureClass:'NET_ERR_ABORTED'|'NET_ERR_BLOCKED_BY_CLIENT'|'OTHER'|'UNAVAILABLE'|null};
 
 /** Sticky, page-local detection only. It never retries, navigates or solves a challenge. */
 export class BookingUiBlockGuard {
@@ -23,6 +25,35 @@ export class BookingUiBlockGuard {
   private routePreparation:Promise<void>|null=null;
   private informationSwitched=false;
   private readonly initialContinuations=new Set<Promise<void>>();
+  // Separate diagnostic namespace: it never changes V2 admission, seen/abort
+  // sets, quiet timing or the meaning of a successful route.abort receipt.
+  private causalSequence=0;
+  private causalOverflow=false;
+  private causalUnreadable=false;
+  private readonly causalRequests=new Map<Request,CausalRequest>();
+  private readonly causalBoundaries:Partial<Record<'prepareStarted'|'contextReady'|'pageReady'|'denySwitch'|'closeCalled'|'killCalled'|'ownedTerminationVerified'|'final',number>>={};
+  private causalDenyReason:'INFORMATION_ARM'|'NO_INFO_CLOSE'|'PREPARE_FAILED'|'PREPARE_INCOMPLETE'|'INITIAL_ROUTE_BUDGET'|null=null;
+  private causalOrder():number{if(this.causalSequence>=1_000_000)this.causalOverflow=true;return this.causalSequence=Math.min(1_000_000,this.causalSequence+1);}
+  private recordCausalDeny(reason:NonNullable<BookingUiBlockGuard['causalDenyReason']>):void{if(this.causalBoundaries.denySwitch===undefined){this.causalBoundaries.denySwitch=this.causalOrder();this.causalDenyReason=reason;}}
+  private causalMark(request:Request,event:CausalEvent,informationId:number|null=null):void{
+    try{
+      let row=this.causalRequests.get(request);
+      if(!row){
+        if(this.causalRequests.size>=1000){this.causalOverflow=true;return;}
+        let method='OTHER',resourceType='other',navigation=false,scheme:CausalRequest['scheme']='UNREADABLE';
+        try{const m=request.method().toUpperCase(),r=request.resourceType();method=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(m)?m:'OTHER';resourceType=['document','xhr','fetch','image','stylesheet','script','font','websocket'].includes(r)?r:'other';navigation=request.isNavigationRequest()===true;const protocol=new URL(request.url()).protocol;scheme=protocol==='http:'?'HTTP':protocol==='https:'?'HTTPS':'OTHER';}catch{this.causalUnreadable=true;}
+        row={id:this.causalRequests.size+1,method,resourceType,navigation,scheme,informationDiagnosticId:null,first:{},last:{},counts:{},failureClass:null};this.causalRequests.set(request,row);
+      }
+      const order=this.causalOrder();row.first[event]??=order;row.last[event]=order;row.counts[event]=Math.min(1_000_000,(row.counts[event]??0)+1);if(informationId!==null)row.informationDiagnosticId=informationId;
+      if(event==='failed'){try{const error=request.failure()?.errorText;row.failureClass=error==='net::ERR_ABORTED'?'NET_ERR_ABORTED':error==='net::ERR_BLOCKED_BY_CLIENT'?'NET_ERR_BLOCKED_BY_CLIENT':typeof error==='string'?'OTHER':'UNAVAILABLE';}catch{row.failureClass='UNAVAILABLE';this.causalUnreadable=true;}}
+    }catch{this.causalUnreadable=true;}
+  }
+  private readonly causalFinished=(request:Request):void=>{this.causalMark(request,'finished');};
+  private readonly causalFailed=(request:Request):void=>{this.causalMark(request,'failed');};
+  get initialRouteCausalDiagnostics(){
+    const rows=[...this.causalRequests.values()],copy=(r:CausalRequest)=>({...r,first:{...r.first},last:{...r.last},counts:{...r.counts}}),sum=(event:CausalEvent)=>rows.reduce((n,r)=>n+(r.counts[event]??0),0);
+    return {schema:'BOOKING_INITIAL_ROUTE_CAUSAL_DIAGNOSTICS_V1',evidenceScope:'DIAGNOSTIC_ONLY_NOT_WIRE_OR_ADMISSION_PROOF',sequence:this.causalSequence,overflow:this.causalOverflow,unreadable:this.causalUnreadable,prepared:this.routingPrepared,boundaries:{...this.causalBoundaries},denyReason:this.causalDenyReason,trackedRequests:rows.length,counts:{initialEvents:sum('initialEvent'),initialRoutes:sum('initialRoute'),fallbackStarted:sum('fallbackStarted'),fallbackSettled:sum('fallbackSettled'),fallbackFailed:sum('fallbackFailed'),informationEvents:sum('informationEvent'),informationRoutes:sum('informationRoute'),finished:sum('finished'),failed:sum('failed')},pendingInitialCallbacks:this.initialContinuations.size,lastRequests:rows.slice(-8).map(copy),lastInformationRequests:rows.filter(r=>r.first.informationEvent!==undefined||r.first.informationRoute!==undefined).slice(-8).map(copy)};
+  }
   private finishPromise:Promise<void>|null = null;
   private ownedTerminationPlanned=false;
   private ownedTerminationVerified=false;
@@ -60,27 +91,30 @@ export class BookingUiBlockGuard {
   // Information is read from the already loaded DOM. There is no accepted
   // allowlist or extra network budget, including for GET/HEAD and analytics.
   private readonly informationRequestSeen = (request:Request):void => {
-    if(this.routingPreparedOrPreparing&&!this.informationSwitched)return;
+    if(this.routingPreparedOrPreparing&&!this.informationSwitched){this.causalMark(request,'initialEvent');return;}
     this.informationRequestRefused=true;
     if(this.seen.size>=1000&&!this.seen.has(request)){this.diagnosticOverflow=true;this.informationFailure('REQUEST_BUDGET_EXCEEDED');return;}
     this.seen.add(request);
     const d=this.diagnostic(request);if(d){d.seen??=this.order();d.seenPhase??=this.informationPhase;d.lifecycleAtSeen??=this.lifecycle;}
+    this.causalMark(request,'informationEvent',d?.id??null);
     if(!this.evidencePolicyV2)this.stateVerified=false;
   };
   private readonly informationRoute = async (route:Route):Promise<void> => {
     // INITIAL retains the existing request and earlier routing handlers. Routing
     // disables HTTP cache, so this is not a claim of identical initial traffic.
-    if(this.routingPreparedOrPreparing&&!this.informationSwitched&&!this.hardStop&&this.initialContinuations.size>=1000){this.informationSwitched=true;this.informationFailure('REQUEST_BUDGET_EXCEEDED');}
+    if(this.routingPreparedOrPreparing&&!this.informationSwitched&&!this.hardStop&&this.initialContinuations.size>=1000){this.recordCausalDeny('INITIAL_ROUTE_BUDGET');this.informationSwitched=true;this.informationFailure('REQUEST_BUDGET_EXCEEDED');}
     if(this.routingPreparedOrPreparing&&!this.informationSwitched&&!this.hardStop){
-      let pending:Promise<void>;try{pending=route.fallback();}catch{this.informationFailure('GUARD_ARM_FAILED');return;}
+      let request:Request|null=null;try{request=route.request();this.causalMark(request,'initialRoute');this.causalMark(request,'fallbackStarted');}catch{this.causalUnreadable=true;}
+      let pending:Promise<void>;try{pending=route.fallback();}catch{if(request)this.causalMark(request,'fallbackFailed');this.informationFailure('GUARD_ARM_FAILED');return;}
       this.initialContinuations.add(pending);
-      try{await pending;}catch{if(!this.ownedTerminationPlanned)this.informationFailure('GUARD_ARM_FAILED');}
+      try{await pending;if(request)this.causalMark(request,'fallbackSettled');}catch{if(request)this.causalMark(request,'fallbackFailed');if(!this.ownedTerminationPlanned)this.informationFailure('GUARD_ARM_FAILED');}
       finally{this.initialContinuations.delete(pending);}return;
     }
     this.informationRequestRefused=true;if(!this.evidencePolicyV2)this.stateVerified=false;
     const phase=this.informationPhase;
     const request=route.request();let outcome:'SUCCEEDED'|'FAILED'='FAILED';
     const d=this.diagnostic(request);if(d){d.routeStarted??=this.order();d.routePhase??=phase;d.lifecycleAtRoute??=this.lifecycle;}
+    this.causalMark(request,'informationRoute',d?.id??null);
     let pending:Promise<void>;try{pending=route.abort('blockedbyclient');}catch{pending=Promise.reject(new Error('ABORT_FAILED'));}
     const abort=pending.then(()=>{outcome='SUCCEEDED';if(d)d.abortSucceeded=this.order();if(this.safelyAborted.size<1000)this.safelyAborted.add(request);else{this.informationFailure('REQUEST_BUDGET_EXCEEDED');}},()=>{if(d)d.abortFailed=this.order();this.informationFailure('ABORT_FAILED');});
     if(this.aborts.size<1000)this.aborts.add(abort);else{this.informationFailure('REQUEST_BUDGET_EXCEEDED');}
@@ -102,12 +136,14 @@ export class BookingUiBlockGuard {
     if(this.routePreparation)return this.routePreparation;
     if(!this.evidencePolicyV2||!this.initialLoad||!isOwnedBookingBrowser(this.page.context().browser())||this.page.url()!=='about:blank'||this.informationArmed||this.hardStop){this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_PREPARE_REFUSED');}
     this.routingPreparedOrPreparing=true;
+    this.causalBoundaries.prepareStarted=this.causalOrder();
     const context=this.page.context(),deadline=performance.now()+1000;
     const bounded=async(pending:Promise<unknown>)=>{let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([pending,new Promise<void>((_,reject)=>{timer=setTimeout(()=>reject(Error('GUARD_PREPARE_TIMEOUT')),Math.max(0,deadline-performance.now()));})]);if(performance.now()>deadline)throw Error('GUARD_PREPARE_TIMEOUT');}finally{if(timer!==undefined)clearTimeout(timer);}};
     this.routePreparation=(async()=>{
       context.on('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_ON=this.order();
-      try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await bounded(context.route('**/*',this.informationRoute));this.registration.CONTEXT_ROUTE_READY=this.order();this.registration.PAGE_ROUTE_BEGIN=this.order();await bounded(this.page.route('**/*',this.informationRoute));this.registration.PAGE_ROUTE_READY=this.order();this.routingPrepared=true;}
-      catch{this.informationSwitched=true;this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_PREPARE_FAILED');}
+      context.on('requestfinished',this.causalFinished);context.on('requestfailed',this.causalFailed);
+      try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await bounded(context.route('**/*',this.informationRoute));this.registration.CONTEXT_ROUTE_READY=this.order();this.causalBoundaries.contextReady=this.causalOrder();this.registration.PAGE_ROUTE_BEGIN=this.order();await bounded(this.page.route('**/*',this.informationRoute));this.registration.PAGE_ROUTE_READY=this.order();this.causalBoundaries.pageReady=this.causalOrder();this.routingPrepared=true;}
+      catch{this.recordCausalDeny('PREPARE_FAILED');this.informationSwitched=true;this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_PREPARE_FAILED');}
     })();return this.routePreparation;
   }
   async armReadOnlyInformation():Promise<void>{
@@ -120,7 +156,7 @@ export class BookingUiBlockGuard {
       if(this.initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')throw Error('INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION');
     }
     const context=this.page.context();
-    if(this.routingPreparedOrPreparing&&!this.routingPrepared){this.informationSwitched=true;this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_NOT_PREPARED');}
+    if(this.routingPreparedOrPreparing&&!this.routingPrepared){this.recordCausalDeny('PREPARE_INCOMPLETE');this.informationSwitched=true;this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_NOT_PREPARED');}
     if(!this.routingPrepared){
       context.on('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_ON=this.order();
       try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await context.route('**/*',this.informationRoute);this.registration.CONTEXT_ROUTE_READY=this.order();this.registration.PAGE_ROUTE_BEGIN=this.order();await this.page.route('**/*',this.informationRoute);this.registration.PAGE_ROUTE_READY=this.order();}
@@ -128,7 +164,7 @@ export class BookingUiBlockGuard {
     }
     // Both handlers already exist on the owned path. There is no await from
     // switching every HTTP request to DENY through the quiet handoff check.
-    this.informationSwitched=true;this.informationArmed=true;context.on('page',this.unexpectedPage);
+    this.recordCausalDeny('INFORMATION_ARM');this.informationSwitched=true;this.informationArmed=true;context.on('page',this.unexpectedPage);
     this.page.once('close',()=>{if(isOwnedBookingBrowser(this.page.context().browser())){if(!this.ownedTerminationPlanned)this.informationFailure('PAGE_CLOSE_FAILED');return;}void this.finishReadOnlyInformation().catch(()=>{this.stateVerified=false;});});
     if(this.initialLoad){const continuationPending=this.initialContinuations.size>0;this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff()&&!continuationPending;if(continuationPending)this.informationFailure('GUARD_ARM_FAILED');if(!this.initialLoadHandoffVerified){
       // A request already seen during installation without any route callback
@@ -149,9 +185,10 @@ export class BookingUiBlockGuard {
   }
   /** Settle already observed guarded requests before normal close. This is not an initial-load quiet wait. */
   async closeReadOnlyInformationPage():Promise<void>{
+    this.causalBoundaries.closeCalled??=this.causalOrder();
     // No-information exits also keep every new HTTP callback in DENY while the
     // owned process is terminating. This does not manufacture a quiet handoff.
-    if(this.routingPreparedOrPreparing)this.informationSwitched=true;
+    if(this.routingPreparedOrPreparing){this.recordCausalDeny('NO_INFO_CLOSE');this.informationSwitched=true;}
     this.boundary('PRECLOSE');
     const browser=this.page.context().browser();
     if(isOwnedBookingBrowser(browser)){
@@ -163,7 +200,8 @@ export class BookingUiBlockGuard {
         await new Promise<void>(resolve=>setTimeout(resolve,10));
       }
       this.boundary('CLOSING');
-      try{await terminateOwnedBookingBrowser(browser!,deadline);this.ownedTerminationVerified=true;}
+      this.causalBoundaries.killCalled??=this.causalOrder();
+      try{await terminateOwnedBookingBrowser(browser!,deadline);this.ownedTerminationVerified=true;this.causalBoundaries.ownedTerminationVerified=this.causalOrder();}
       catch{this.informationFailure('OWNED_BROWSER_TERMINATION_FAILED');throw Error('OWNED_BROWSER_TERMINATION_FAILED');}
       this.boundaries.CLOSED??=this.order();return;
     }
@@ -195,7 +233,7 @@ export class BookingUiBlockGuard {
         if([...this.seen].some(r=>!this.safelyAborted.has(r)))this.informationFailure('UNABORTED_OBSERVED_REQUEST');
         // The whole owned process is gone. No unroute command is sent to a
         // disconnected browser; routes remain installed until that verified exit.
-        this.page.context().off('page',this.unexpectedPage);this.page.context().off('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_OFF=this.order();this.boundary('FINAL');
+        this.page.context().off('page',this.unexpectedPage);this.page.context().off('request',this.informationRequestSeen);this.page.context().off('requestfinished',this.causalFinished);this.page.context().off('requestfailed',this.causalFailed);this.registration.REQUEST_LISTENER_OFF=this.order();this.boundary('FINAL');this.causalBoundaries.final=this.causalOrder();
       })();return this.finishPromise;
     }
     if(!this.informationArmed)return;
