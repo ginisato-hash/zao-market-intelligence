@@ -18,6 +18,11 @@ export class BookingUiBlockGuard {
   initialLoadHandoffVerified:boolean|null=null;
   private informationPhase:InformationPhase='ARMING';
   private informationArmed = false;
+  private routingPreparedOrPreparing=false;
+  private routingPrepared=false;
+  private routePreparation:Promise<void>|null=null;
+  private informationSwitched=false;
+  private readonly initialContinuations=new Set<Promise<void>>();
   private finishPromise:Promise<void>|null = null;
   private ownedTerminationPlanned=false;
   private ownedTerminationVerified=false;
@@ -55,6 +60,7 @@ export class BookingUiBlockGuard {
   // Information is read from the already loaded DOM. There is no accepted
   // allowlist or extra network budget, including for GET/HEAD and analytics.
   private readonly informationRequestSeen = (request:Request):void => {
+    if(this.routingPreparedOrPreparing&&!this.informationSwitched)return;
     this.informationRequestRefused=true;
     if(this.seen.size>=1000&&!this.seen.has(request)){this.diagnosticOverflow=true;this.informationFailure('REQUEST_BUDGET_EXCEEDED');return;}
     this.seen.add(request);
@@ -62,6 +68,15 @@ export class BookingUiBlockGuard {
     if(!this.evidencePolicyV2)this.stateVerified=false;
   };
   private readonly informationRoute = async (route:Route):Promise<void> => {
+    // INITIAL retains the existing request and earlier routing handlers. Routing
+    // disables HTTP cache, so this is not a claim of identical initial traffic.
+    if(this.routingPreparedOrPreparing&&!this.informationSwitched&&!this.hardStop&&this.initialContinuations.size>=1000){this.informationSwitched=true;this.informationFailure('REQUEST_BUDGET_EXCEEDED');}
+    if(this.routingPreparedOrPreparing&&!this.informationSwitched&&!this.hardStop){
+      let pending:Promise<void>;try{pending=route.fallback();}catch{this.informationFailure('GUARD_ARM_FAILED');return;}
+      this.initialContinuations.add(pending);
+      try{await pending;}catch{if(!this.ownedTerminationPlanned)this.informationFailure('GUARD_ARM_FAILED');}
+      finally{this.initialContinuations.delete(pending);}return;
+    }
     this.informationRequestRefused=true;if(!this.evidencePolicyV2)this.stateVerified=false;
     const phase=this.informationPhase;
     const request=route.request();let outcome:'SUCCEEDED'|'FAILED'='FAILED';
@@ -81,6 +96,20 @@ export class BookingUiBlockGuard {
   private readonly unexpectedPage = (other:Page):void => {
     if(other!==this.page){this.informationRequestRefused=true;this.informationFailure('UNEXPECTED_PAGE');const browser=this.page.context().browser();if(isOwnedBookingBrowser(browser))void terminateOwnedBookingBrowser(browser!).catch(()=>{});else void other.close().catch(()=>{this.hardStop=true;});}
   };
+  /** Owned V2 normal collector only: prepare both routes before the sole goto.
+   * No navigation/request is issued here; failure never falls back to late setup. */
+  async prepareInformationRoutesBeforeNavigation():Promise<void>{
+    if(this.routePreparation)return this.routePreparation;
+    if(!this.evidencePolicyV2||!this.initialLoad||!isOwnedBookingBrowser(this.page.context().browser())||this.page.url()!=='about:blank'||this.informationArmed||this.hardStop){this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_PREPARE_REFUSED');}
+    this.routingPreparedOrPreparing=true;
+    const context=this.page.context(),deadline=performance.now()+1000;
+    const bounded=async(pending:Promise<unknown>)=>{let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([pending,new Promise<void>((_,reject)=>{timer=setTimeout(()=>reject(Error('GUARD_PREPARE_TIMEOUT')),Math.max(0,deadline-performance.now()));})]);if(performance.now()>deadline)throw Error('GUARD_PREPARE_TIMEOUT');}finally{if(timer!==undefined)clearTimeout(timer);}};
+    this.routePreparation=(async()=>{
+      context.on('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_ON=this.order();
+      try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await bounded(context.route('**/*',this.informationRoute));this.registration.CONTEXT_ROUTE_READY=this.order();this.registration.PAGE_ROUTE_BEGIN=this.order();await bounded(this.page.route('**/*',this.informationRoute));this.registration.PAGE_ROUTE_READY=this.order();this.routingPrepared=true;}
+      catch{this.informationSwitched=true;this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_PREPARE_FAILED');}
+    })();return this.routePreparation;
+  }
   async armReadOnlyInformation():Promise<void>{
     if(this.informationArmed)return;
     this.boundary('INSTALLING');
@@ -90,12 +119,18 @@ export class BookingUiBlockGuard {
       this.initialLoadReadiness=await this.initialLoad.waitForFreshQuiet();
       if(this.initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')throw Error('INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION');
     }
-    const context=this.page.context();context.on('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_ON=this.order();
-    try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await context.route('**/*',this.informationRoute);this.registration.CONTEXT_ROUTE_READY=this.order();this.registration.PAGE_ROUTE_BEGIN=this.order();await this.page.route('**/*',this.informationRoute);this.registration.PAGE_ROUTE_READY=this.order();}
-    catch{this.informationFailure('GUARD_ARM_FAILED');context.off('request',this.informationRequestSeen);await context.unroute('**/*',this.informationRoute).catch(()=>{});throw Error('INFORMATION_GUARD_ARM_FAILED');}
-    this.informationArmed=true;context.on('page',this.unexpectedPage);
+    const context=this.page.context();
+    if(this.routingPreparedOrPreparing&&!this.routingPrepared){this.informationSwitched=true;this.informationFailure('GUARD_ARM_FAILED');throw Error('INFORMATION_GUARD_NOT_PREPARED');}
+    if(!this.routingPrepared){
+      context.on('request',this.informationRequestSeen);this.registration.REQUEST_LISTENER_ON=this.order();
+      try{this.registration.CONTEXT_ROUTE_BEGIN=this.order();await context.route('**/*',this.informationRoute);this.registration.CONTEXT_ROUTE_READY=this.order();this.registration.PAGE_ROUTE_BEGIN=this.order();await this.page.route('**/*',this.informationRoute);this.registration.PAGE_ROUTE_READY=this.order();}
+      catch{this.informationFailure('GUARD_ARM_FAILED');context.off('request',this.informationRequestSeen);await context.unroute('**/*',this.informationRoute).catch(()=>{});throw Error('INFORMATION_GUARD_ARM_FAILED');}
+    }
+    // Both handlers already exist on the owned path. There is no await from
+    // switching every HTTP request to DENY through the quiet handoff check.
+    this.informationSwitched=true;this.informationArmed=true;context.on('page',this.unexpectedPage);
     this.page.once('close',()=>{if(isOwnedBookingBrowser(this.page.context().browser())){if(!this.ownedTerminationPlanned)this.informationFailure('PAGE_CLOSE_FAILED');return;}void this.finishReadOnlyInformation().catch(()=>{this.stateVerified=false;});});
-    if(this.initialLoad){this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff();if(!this.initialLoadHandoffVerified){
+    if(this.initialLoad){const continuationPending=this.initialContinuations.size>0;this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff()&&!continuationPending;if(continuationPending)this.informationFailure('GUARD_ARM_FAILED');if(!this.initialLoadHandoffVerified){
       // A request already seen during installation without any route callback
       // has no abort receipt to drain. Keep it unmatched and stop immediately,
       // preserving the existing owned-termination budget instead of using it up.
@@ -114,6 +149,9 @@ export class BookingUiBlockGuard {
   }
   /** Settle already observed guarded requests before normal close. This is not an initial-load quiet wait. */
   async closeReadOnlyInformationPage():Promise<void>{
+    // No-information exits also keep every new HTTP callback in DENY while the
+    // owned process is terminating. This does not manufacture a quiet handoff.
+    if(this.routingPreparedOrPreparing)this.informationSwitched=true;
     this.boundary('PRECLOSE');
     const browser=this.page.context().browser();
     if(isOwnedBookingBrowser(browser)){
