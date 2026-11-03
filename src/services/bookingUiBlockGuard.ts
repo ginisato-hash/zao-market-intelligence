@@ -95,7 +95,13 @@ export class BookingUiBlockGuard {
     catch{this.informationFailure('GUARD_ARM_FAILED');context.off('request',this.informationRequestSeen);await context.unroute('**/*',this.informationRoute).catch(()=>{});throw Error('INFORMATION_GUARD_ARM_FAILED');}
     this.informationArmed=true;context.on('page',this.unexpectedPage);
     this.page.once('close',()=>{if(isOwnedBookingBrowser(this.page.context().browser())){if(!this.ownedTerminationPlanned)this.informationFailure('PAGE_CLOSE_FAILED');return;}void this.finishReadOnlyInformation().catch(()=>{this.stateVerified=false;});});
-    if(this.initialLoad){this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff();if(!this.initialLoadHandoffVerified){this.stateVerified=false;throw Error('INITIAL_LOAD_CHANGED_DURING_INFORMATION_ARM');}}
+    if(this.initialLoad){this.initialLoadHandoffVerified=this.initialLoad.finishQuietHandoff();if(!this.initialLoadHandoffVerified){
+      // A request already seen during installation without any route callback
+      // has no abort receipt to drain. Keep it unmatched and stop immediately,
+      // preserving the existing owned-termination budget instead of using it up.
+      if([...this.seen].some(request=>this.requestDiagnostics.get(request)?.routeStarted===null))this.informationFailure('UNABORTED_OBSERVED_REQUEST');
+      this.stateVerified=false;throw Error('INITIAL_LOAD_CHANGED_DURING_INFORMATION_ARM');
+    }}
     this.informationPhase='ARMED_IDLE';
     this.boundary('ACTIVE');
   }
@@ -186,6 +192,7 @@ export class BookingUiBlockGuard {
   constructor(private readonly page: Page,private readonly initialLoad?:BookingInitialLoadObserver,readonly evidencePolicyV2=false) { page.on('response', this.onResponse); }
 
   async checkpoint(): Promise<boolean> {
+    if(this.hardStop)return false;
     if(this.aborts.size&&!await this.boundedInformationWait(Promise.all([...this.aborts]),'ABORT_DRAIN_TIMEOUT',Date.now()+3000))return false;
     if (this.reason !== null || !this.stateVerified) return false;
     try {

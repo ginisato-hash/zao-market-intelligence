@@ -1,3 +1,4 @@
+import {loadCurrentCollectorQuoteReference} from '../services/currentCollectorQuoteReference';
 import {createAnonymousBookingCaptureContext} from '../services/bookingProductObservability';
 // Phase AUTO-RUNNER16X — rotating 2-hourly market refresh runner.
 //
@@ -45,6 +46,7 @@ import {
   appendHistoryRowsAtomic,
   buildAppendPlan,
   buildBookingSourceLevelCheck,
+  buildBookingPreviewRowPolicyDiagnostics,
   buildJalanSourceLevelCheck,
   buildJalanMatrixFromPlannerTargets,
   buildSourceBlockReport,
@@ -290,9 +292,12 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         record['currentDocumentHttpProof']={schema:'BOOKING_CURRENT_DOCUMENT_HTTP_PROOF_V1',status:documentProofState,responseStatus:documentProofState==='BOUND_200'?200:null};
         if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
         rateCellSink.push(record);
+        rateCellRecord=record;
       }
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
-      rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
+      const previewRow=toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst });
+      rows.push(previewRow);
+      if(rateCellRecord)rateCellRecord['previewRowPolicyDiagnostics']=buildBookingPreviewRowPolicyDiagnostics(previewRow);
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
       // Evidence sidecar (ZMI_EVIDENCE_SIDECAR_ENABLED=1 only): keep what this extractor already parsed -- no new request.
       if (evidenceSink !== undefined) captureBookingEvidence(evidenceSink, artifactDir, { slug: t.property_slug, checkin: t.checkin, checkout, collectedAtJst, probeUrl, signals });
@@ -348,7 +353,8 @@ async function run(): Promise<void> {
   const debugPath = resolve(DEBUG_ROOT, ts);
   mkdirSync(debugPath, { recursive: true });
 
-  const env = process.env;
+  const quoteReference=loadCurrentCollectorQuoteReference(process.env);
+  const env=quoteReference.current()?quoteReference.env:quoteReference.heldEnv;
   const multiplier = resolveCrawlVolumeMultiplier(env);
   const caps = scaledRotatingCaps(multiplier);
   const nearTermDenseDays = resolveNearTermDenseDays(env);
@@ -440,7 +446,7 @@ async function run(): Promise<void> {
     liveExecuted = selectedTargets.length>0;
     const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
     const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readCaptureTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined,bookingCollectionDiagnostics);
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve?(target,at)=>quoteReference.current()&&quoteLane.reserve!(target,at):undefined,readCaptureTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined,bookingCollectionDiagnostics);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
     const optionalJalan=await optionalSecondaryCollection(async()=>{
@@ -482,7 +488,7 @@ async function run(): Promise<void> {
     appendPlan = buildAppendPlan({ bookingRows, jalanRows, existingKeys: readExistingKeys(), bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, bookingReportPath: "", bookingCsvPath: "" });
     sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
-    if (appendPlan.append_allowed && appendPlan.new_row_count > 0) {
+    if (quoteReference.current() && appendPlan.append_allowed && appendPlan.new_row_count > 0) {
       // Append and DB mirror in this process under the shared history-writer
       // lock; only the rows this append wrote can reach the DB (P0-G2).
       trustedAppend = trustedAppendAndMirror({
@@ -504,15 +510,15 @@ async function run(): Promise<void> {
     }
 
     // Record denial watermarks even when no canonical row was appended. Reservation refusal is not an observation.
-    twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
-      rows:trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
-    if(publication.session)curvePublication=finishNormalCurvePublication(publication.session,twoPersonAdmission);
+    twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced&&quoteReference.current(),
+      rows:quoteReference.current()&&trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
+    if(publication.session&&quoteReference.current())curvePublication=finishNormalCurvePublication(publication.session,twoPersonAdmission);
     const post = readState();
     const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";
 
     // Publish only when gated AND aligned AND gh available.
-    if (env["PUBLISH_CHATGPT_DB"] === "1" && aligned) {
+    if (quoteReference.current() && env["PUBLISH_CHATGPT_DB"] === "1" && aligned) {
       const pub = runCmd("npm", ["run", "publish:chatgpt-db"]);
       chatgptPublished = pub.status === 0 && String(pub.parsed["decision"] ?? "").includes("ready");
       releaseUrl = String(pub.parsed["release_url"] ?? "");
@@ -521,6 +527,7 @@ async function run(): Promise<void> {
   }
 
   const post = readState();
+  if(!quoteReference.current()){decision='rotating_market_refresh_reference_config_unverified';process.exitCode=1;}
   const out = {
     run_id: runId, generated_at_jst: jst.iso, decision, dry_run: dryRun || !liveMode,
     ...(producerStarted?{producer_observation:bindCollectorProducerEvidence(runId,producerStarted,observeCollectorSource())}:{}),
@@ -591,6 +598,7 @@ async function run(): Promise<void> {
       excluded_by_cap:quoteLane.diagnostics?quoteLane.diagnostics.candidates-selectedTargets.length:null,excluded_by_property_diversity_cap:null,
       winter_lane_budget_per_run:0,winter_lane_required_pages_per_day:0,winter_lane_active_dates:0,winter_lane_warm_dates:0,
       winter_lane:{status:'REPLACED_BY_ACTUAL_PRICING_SCOPE',selected_count:0}}:{}),
+    quote_reference_configuration:quoteReference.diagnostic(),
     selected_targets: selectedTargets,
     report_path: resolve(REPORT_DIR, `${runId}.md`), json_path: resolve(REPORT_DIR, `${runId}.json`), csv_path: resolve(REPORT_DIR, `${runId}.csv`), debug_artifact_path: debugPath
   };
@@ -600,9 +608,17 @@ async function run(): Promise<void> {
   writeFileSync(out.report_path, renderReport(out), "utf8");
   writeJson(resolve(debugPath, "rotating_plan.json"), quoteLane.enabled?{legacyPlan:plan,actualTargets:selectedTargets,usefulQuoteLane:quoteLane.diagnostics,status:quoteLane.status}:plan);
 
-  // Separate listing estimand; never turn strict QUALITY off/on or repurpose fixed-product admissions.
-  // Its own immutable receipt is written after the normal final report; that report is not rewritten.
-  if(liveMode){const listing=recordNormalObservedListingDiagnostic(env,{root:process.cwd(),runId,reportPath:out.json_path,dbPath:resolve(DB_PATH),mirrorExact:dbSynced},value=>writeFileSync(resolve(debugPath,'observed_listing_publication.json'),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}));
+  // A reference change during report I/O must become a failed final report before
+  // any listing publication can bind it. No previously published report is edited.
+  const referenceFinalCurrent=quoteReference.current();
+  if(!referenceFinalCurrent){
+    out.decision='rotating_market_refresh_reference_config_unverified';
+    out.quote_reference_configuration=quoteReference.diagnostic();process.exitCode=1;
+    writeJson(out.json_path,out);
+    writeFileSync(out.report_path,renderReport(out),'utf8');
+  }
+  // Separate listing estimand; its immutable receipt binds the now-final report.
+  if(liveMode&&referenceFinalCurrent){const listing=recordNormalObservedListingDiagnostic(env,{root:process.cwd(),runId,reportPath:out.json_path,dbPath:resolve(DB_PATH),mirrorExact:dbSynced},value=>writeFileSync(resolve(debugPath,'observed_listing_publication.json'),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}));
     if(listing.status!=='DISABLED')console.log('observed_listing_publication_status='+listing.status);}
 
   for (const [k, v] of Object.entries(out)) {

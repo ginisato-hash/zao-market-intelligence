@@ -58,7 +58,7 @@ it('baseline screenshot resources cannot poison the strict information phase or 
  }finally{for(const b of browsers)await terminateOwnedBookingBrowser(b);rmSync(debug,{recursive:true,force:true});}
 },30000);
 
-async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout'|'without-barrier'|'precheck-baseline'|'during-arm'|'quantity-change'|'header-change'|'unmatched-final'){
+async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout'|'without-barrier'|'precheck-baseline'|'during-arm'|'before-route-ready'|'quantity-change'|'header-change'|'unmatched-final'){
  const browsers:Browser[]=[],launch=async()=>{const b=await launchOwnedBookingBrowser();browsers.push(b);return b;},debug=mkdtempSync(join(tmpdir(),'booking-fresh-load-'));
  let documents=0,baselinePosts=0,reservations=0,barrierEntries=0,armed=0,informationClicks=0;
  let fixturePage:any;
@@ -71,6 +71,7 @@ async function runFreshLoadFixture(mode:'delayed-baseline'|'click-post'|'timeout
    await context.route('**/*',route=>{if(route.request().isNavigationRequest())documents++;else if(route.request().method()==='POST')baselinePosts++;
     return route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:(mode==='header-change'?productFactsFixtureHtml():guardedCalendarFixture('normal')).replace("<div class='prco-wrapper'>￥20,000</div>","<div class='prco-wrapper'>1泊 大人2名 ￥20,000</div>")});});
    if(mode==='during-arm'){const route=context.route.bind(context);context.route=(async(...args:Parameters<typeof context.route>)=>{const installed=await route(...args);await fixturePage.evaluate(()=>fetch('/during-arm',{method:'POST'}).catch(()=>{}));return installed;}) as typeof context.route;}
+   if(mode==='before-route-ready'){const route=context.route.bind(context);context.route=(async(...args:Parameters<typeof context.route>)=>{await fixturePage.evaluate(()=>fetch('/before-route-ready',{method:'POST'}).catch(()=>{}));return route(...args);}) as typeof context.route;}
    const newPage=context.newPage.bind(context);context.newPage=async()=>{const page=await newPage(),wait=page.waitForTimeout.bind(page);
     fixturePage=page;
     if(mode==='click-post')await page.addInitScript(()=>{document.addEventListener('click',e=>{if(e.target instanceof Element&&e.target.closest('button[aria-controls^=policyModal_]'))void fetch('/policy-post',{method:'POST'}).catch(()=>{});},true);});
@@ -96,6 +97,11 @@ it('a never-quiet page receives no information interaction or retry',async()=>{c
 it('v2 keeps a safely aborted late request separate from row verification',async()=>{const r=await runFreshLoadFixture('without-barrier');expect(r.rows).toHaveLength(2);expect(r.baselinePosts).toBe(0);expect(r.captures.every(c=>c.informationRequestRefused===true&&c.pageFinalBlockStateVerified===true)).toBe(true);},30000);
 it('checks quiet at the arm boundary after passive prechecks, before any information click',async()=>{const r=await runFreshLoadFixture('precheck-baseline');expect(r.rows).toHaveLength(2);expect(r.baselinePosts).toBe(2);expect(r.barrierEntries).toBe(2);expect(r.captures.every(c=>c.cells===1&&c.initialLoadHandoffVerified===true&&c.informationRequestRefused===false&&c.initialLoadReadinessPhase==='IMMEDIATELY_BEFORE_INFORMATION_ARM')).toBe(true);},30000);
 it('traffic during guard installation stays denied and cannot inherit the earlier quiet snapshot',async()=>{const r=await runFreshLoadFixture('during-arm');expect(r.rows).toHaveLength(2);expect(r.baselinePosts).toBe(0);expect(r.captures[0]).toMatchObject({cells:0,initialLoadHandoffVerified:false,informationRequestRefused:true,pageFinalBlockStateVerified:false,observedDeniedRequestPhase:'ARMING'});},30000);
+it('a request seen before the information route is ready stops and verifies owned termination without converting it to an abort receipt',async()=>{
+ const r=await runFreshLoadFixture('before-route-ready');expect(r.rows).toHaveLength(1);expect(r.reservations).toBe(1);expect(r.documents).toBe(1);expect(r.baselinePosts).toBe(1);expect(r.informationClicks).toBe(0);
+ expect(r.captures[0]).toMatchObject({cells:0,initialLoadHandoffVerified:false,pageFinalBlockStateVerified:false,informationFailureCode:'UNABORTED_OBSERVED_REQUEST',informationDiagnostics:{lifecycle:'FINAL',termination:{verified:true,processExited:true,serverClosed:true,clientDisconnected:true},counts:{seen:1,abortSucceeded:0,unmatched:1},lastUnmatched:[{method:'POST',resourceType:'fetch',routeStarted:null,abortSucceeded:null}]}});
+ expect(r.loop).toMatchObject({status:'STOPPED',visited:1,stoppedAfterTargetOrdinal:1,unvisitedTargets:1,informationFailureCode:'UNABORTED_OBSERVED_REQUEST'});
+},30000);
 it('quantity changes during the fresh wait prevent the first calendar click',async()=>{const r=await runFreshLoadFixture('quantity-change');expect(r.rows).toHaveLength(2);expect(r.informationClicks).toBe(0);expect(r.captures.every(c=>c.cells===0&&c.initialLoadHandoffVerified===true)).toBe(true);},30000);
 it('passive-year header changes during the fresh wait prevent all room, tax and policy clicks',async()=>{const r=await runFreshLoadFixture('header-change');expect(r.rows).toHaveLength(2);expect(r.informationClicks).toBe(0);expect(r.captures.every(c=>c.cells===0&&c.initialLoadHandoffVerified===true)).toBe(true);},30000);
 it('normal collector saves the final unmatched request and actual loop stop ordinal without attempting the next target',async()=>{
