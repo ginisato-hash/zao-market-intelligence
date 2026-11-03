@@ -226,6 +226,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       page.on('response',mainDocumentResponse);
       try {
         if(loopDiagnostics)loopDiagnostics['pagesStarted']=Number(loopDiagnostics['pagesStarted'])+1;
+        phase='CAPTURE_GATE';if(pageGuard)await pageGuard.prepareInformationRoutesBeforeNavigation();phase='GOTO';
         const resp = await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 35_000 });
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
         phase='BASELINE_WAIT';
