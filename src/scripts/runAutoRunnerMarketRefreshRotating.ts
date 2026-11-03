@@ -292,6 +292,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         record['captureEntryDiagnostics']={schema:'BOOKING_CAPTURE_ENTRY_DIAGNOSTICS_V1',loaded,initialHttpStatus:Number.isInteger(httpStatus)&&httpStatus>=0&&httpStatus<=599?httpStatus:null,phase,reason:entryReason,preCaptureBlock:entryBlock,failurePhase,navigationErrorClass,captureCalled,mainDocumentStatuses,responseOverflow,responseUnverified};
         record['currentDocumentHttpProof']={schema:'BOOKING_CURRENT_DOCUMENT_HTTP_PROOF_V1',status:documentProofState,responseStatus:documentProofState==='BOUND_200'?200:null};
         if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
+        if(pageGuard)record['initialRouteCausalDiagnostics']=pageGuard.initialRouteCausalDiagnostics;
         rateCellSink.push(record);
         rateCellRecord=record;
       }
