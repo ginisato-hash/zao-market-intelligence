@@ -8,6 +8,7 @@ import {validatePrimaryPriceNumeric} from './pricePlausibilityGuard';
 import {digest,instant} from './marketRowPriceQuality';
 import {createHash} from 'node:crypto';
 import {marketPropertyGroup,MARKET_PROPERTY_GROUP_VERSION} from './marketPropertyGroups';
+import {consumeListingReportBytes} from './observedListingReportBudget';
 
 export const OBSERVED_LISTING_RELATIVE_V1='OBSERVED_LISTING_RELATIVE_V1' as const;
 export interface ListingCanonicalRow {rowId:string;rowHash:string;mirrorRowHash:string;raw:Record<string,string>;quarantineReason:string|null}
@@ -85,7 +86,7 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
  if(digest(snapshot.propertyAliases)!==digest(listingPropertyAliases(input.rows)))throw Error('LISTING_ALIAS_BINDING');
  if(!snapshot.producerCodeSha256s.length||snapshot.producerCodeSha256s.length>30||snapshot.producerCodeSha256s.some(x=>!/^[0-9a-f]{64}$/u.test(x))||snapshot.producerSetSha256!==digest([...new Set(snapshot.producerCodeSha256s)].sort()))throw Error('LISTING_PRODUCER_BINDING');
  const reports=new Map<string,Record<string,any>>();let reportBytes=0;
- for(const r of input.reports??[]){reportBytes+=Buffer.byteLength(r.rawJson);if(reports.has(r.runId)||reportBytes>16*1024*1024||Buffer.byteLength(r.rawJson)>2*1024*1024||createHash('sha256').update(r.rawJson).digest('hex')!==r.rawSha256||!snapshot.sourceFiles.some(f=>f.path.endsWith('/'+r.runId+'.json')&&f.sha256===r.rawSha256))throw Error('LISTING_REPORT_RECEIPT_BINDING');const d=JSON.parse(r.rawJson);if(d.run_id!==r.runId||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision))throw Error('LISTING_REPORT_NOT_FINAL');reports.set(r.runId,d);}
+ for(const r of input.reports??[]){reportBytes=consumeListingReportBytes(reportBytes,Buffer.byteLength(r.rawJson));if(reports.has(r.runId)||createHash('sha256').update(r.rawJson).digest('hex')!==r.rawSha256||!snapshot.sourceFiles.some(f=>f.path.endsWith('/'+r.runId+'.json')&&f.sha256===r.rawSha256))throw Error('LISTING_REPORT_RECEIPT_BINDING');const d=JSON.parse(r.rawJson);if(d.run_id!==r.runId||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision))throw Error('LISTING_REPORT_NOT_FINAL');reports.set(r.runId,d);}
  for(const a of input.attempts){
   if(!a.propertyId||!targets.has(a.stayDate)||!Number.isFinite(instant(a.attemptedAt))||instant(a.attemptedAt)>at)throw Error('LISTING_ATTEMPT_SCOPE_OR_TIME');
   if(a.completedObservationRowId!==null){const r=input.rows.find(x=>x.rowId===a.completedObservationRowId);if(!r||(r.raw.source_slug_or_code||r.raw.source_property_id)!==a.propertyId||r.raw.checkin!==a.stayDate)throw Error('LISTING_ATTEMPT_ROW_TUPLE');
