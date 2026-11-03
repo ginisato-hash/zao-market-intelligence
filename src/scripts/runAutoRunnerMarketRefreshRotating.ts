@@ -45,6 +45,7 @@ import {
   appendHistoryRowsAtomic,
   buildAppendPlan,
   buildBookingSourceLevelCheck,
+  buildBookingPreviewRowPolicyDiagnostics,
   buildJalanSourceLevelCheck,
   buildJalanMatrixFromPlannerTargets,
   buildSourceBlockReport,
@@ -290,9 +291,12 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         record['currentDocumentHttpProof']={schema:'BOOKING_CURRENT_DOCUMENT_HTTP_PROOF_V1',status:documentProofState,responseStatus:documentProofState==='BOUND_200'?200:null};
         if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
         rateCellSink.push(record);
+        rateCellRecord=record;
       }
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
-      rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
+      const previewRow=toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst });
+      rows.push(previewRow);
+      if(rateCellRecord)rateCellRecord['previewRowPolicyDiagnostics']=buildBookingPreviewRowPolicyDiagnostics(previewRow);
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
       // Evidence sidecar (ZMI_EVIDENCE_SIDECAR_ENABLED=1 only): keep what this extractor already parsed -- no new request.
       if (evidenceSink !== undefined) captureBookingEvidence(evidenceSink, artifactDir, { slug: t.property_slug, checkin: t.checkin, checkout, collectedAtJst, probeUrl, signals });
