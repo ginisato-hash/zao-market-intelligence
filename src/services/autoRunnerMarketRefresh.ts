@@ -335,7 +335,8 @@ export interface SourceLevelCheck {
 export function buildBookingSourceLevelCheck(rows: readonly BookingPreviewRow[], maxPages = MAX_BOOKING_PAGES): SourceLevelCheck {
   const screenshots = rows.filter((row) => row.screenshot_path !== "").length;
   const blocked = rows.some((row) => row.warning_flags.some((flag) => /captcha|security|login|blocked/iu.test(flag)));
-  const degraded = rows.some((row) => row.availability_status === "degraded_empty");
+  // An individual empty page is rejected by row policy; an all-empty batch remains source-wide refusal.
+  const degraded = rows.length > 0 && rows.every((row) => row.availability_status === "degraded_empty");
   return sourceLevel({
     source: "booking",
     executed_pages: rows.length,
@@ -727,6 +728,7 @@ export function buildBookingPreviewRowPolicyDiagnostics(row: BookingPreviewRow) 
 
 function bookingRowPolicyRejection(row: BookingPreviewRow): string {
   if (row.source !== "booking") return "source_not_booking";
+  if (row.availability_status === "degraded_empty") return "source_degraded_page_detected";
   if (row.classification !== "directional" && row.classification !== "excluded") return "classification_not_allowed";
   if (row.classification === "directional") {
     if (row.primary_price_numeric === null) return "directional_missing_price";

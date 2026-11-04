@@ -649,6 +649,44 @@ describe("AUTO-RUNNER15X-B - planner-driven target builder", () => {
   });
 });
 
+describe('isolated degraded Booking rows',()=>{
+  const clean=()=>bookingRow({property_slug:'synthetic-clean',canonical_property_name:'Synthetic Clean',room_basis:'probable_two_person_standard_room'});
+  const degraded=()=>bookingRow({property_slug:'synthetic-empty',canonical_property_name:'Synthetic Empty',availability_status:'degraded_empty',classification:'excluded',primary_price_numeric:null,dp_usage:'audit_only',basis_confidence:'insufficient',room_basis:'unknown_room_basis'});
+  it('rejects only an isolated degraded row and evaluates each remaining price or audit row normally',()=>{
+    const rows=[degraded(),clean(),bookingRow({property_slug:'synthetic-sold',canonical_property_name:'Synthetic Sold',classification:'excluded',availability_status:'sold_out_or_unavailable',primary_price_numeric:null,dp_usage:'audit_only',basis_confidence:'insufficient',room_basis:'unknown_room_basis'}),bookingRow({property_slug:'synthetic-visible',canonical_property_name:'Synthetic Visible',classification:'excluded',availability_status:'visible_no_safe_price',primary_price_numeric:null,dp_usage:'audit_only',basis_confidence:'insufficient',room_basis:'unknown_room_basis'})];
+    const check=buildBookingSourceLevelCheck(rows),plan=buildAppendPlan(basePlan({bookingRows:rows,jalanRows:[]}));
+    expect(check.source_level_degraded_page).toBe(false);expect(check.append_allowed).toBe(true);expect(plan.rejected_rows).toEqual([{source:'booking',identity:'synthetic-empty:2026-07-18',reason:'source_degraded_page_detected'}]);
+    expect(plan.approved_rows).toHaveLength(3);expect(plan.approved_rows.filter(r=>r.isPriceUsableForDpDirectional)).toHaveLength(1);expect(plan.approved_rows.every(r=>!r.isPriceUsableForDpDirect)).toBe(true);
+  });
+  it('retains source-wide refusal for an all-degraded batch',()=>{
+    const rows=[degraded(),{...degraded(),property_slug:'synthetic-empty-two'}],check=buildBookingSourceLevelCheck(rows),plan=buildAppendPlan(basePlan({bookingRows:rows,jalanRows:[]}));
+    expect(check.source_level_degraded_page).toBe(true);expect(check.failure_reasons).toContain('source_degraded_page_detected');expect(plan.approved_rows).toHaveLength(0);expect(plan.rejected_rows).toHaveLength(2);
+  });
+  it.each(['captcha_detected','security_check','login_required','blocked'])('retains common challenge refusal for %s even in a mixed batch',flag=>{
+    const rows=[degraded(),clean(),bookingRow({property_slug:'synthetic-warning',warning_flags:[flag]})],check=buildBookingSourceLevelCheck(rows),plan=buildAppendPlan(basePlan({bookingRows:rows,jalanRows:[]}));
+    expect(check.source_level_captcha_or_block).toBe(true);expect(check.append_allowed).toBe(false);expect(plan.approved_rows).toHaveLength(0);expect(plan.rejected_rows.every(r=>r.reason.includes('captcha_or_block_detected'))).toBe(true);
+  });
+  it('never lets a degraded row with a numeric directional value bypass quarantine',()=>{
+    const rows=[{...degraded(),classification:'directional' as const,primary_price_numeric:10000,dp_usage:'directional_only' as const,basis_confidence:'directional_candidate_basis' as const},clean()],plan=buildAppendPlan(basePlan({bookingRows:rows,jalanRows:[]}));
+    expect(plan.approved_rows).toHaveLength(1);expect(plan.rejected_rows[0]?.reason).toBe('source_degraded_page_detected');
+  });
+  it('retains hash-conflict refusal for the nondegraded candidate',()=>{
+    const row=clean(),first=buildAppendPlan(basePlan({bookingRows:[row],jalanRows:[]})).approved_rows[0]!,existingKeys=[{row_id:first.rowId,row_hash:'synthetic-conflict',shard_month:first.shardMonth}];
+    const plan=buildAppendPlan(basePlan({bookingRows:[degraded(),row],jalanRows:[],existingKeys}));expect(plan.append_allowed).toBe(false);expect(plan.conflict_rows).toHaveLength(1);expect(plan.rejected_rows.some(r=>r.reason==='source_degraded_page_detected')).toBe(true);
+  });
+  it.each(['screenshot','debug'])('retains source artifact integrity refusal when %s is missing',which=>{
+    const bad={...degraded(),...(which==='screenshot'?{screenshot_path:''}:{debug_path:''})},rows=[bad,clean()],check=buildBookingSourceLevelCheck(rows),plan=buildAppendPlan(basePlan({bookingRows:rows,jalanRows:[]}));
+    expect(check.append_allowed).toBe(false);expect(plan.approved_rows).toHaveLength(0);expect(check.failure_reasons).toContain(which==='screenshot'?'screenshots_count_mismatch':'debug_artifact_missing');
+  });
+  it('retains the price floor and does not fill the degraded observation with zero or sold-out data',()=>{
+    const bad=degraded(),plan=buildAppendPlan(basePlan({bookingRows:[bad,{...clean(),primary_price_numeric:BOOKING_PRICE_SANITY_FLOOR_JPY-1}],jalanRows:[]}));
+    expect(plan.approved_rows).toHaveLength(0);expect(plan.price_sanity_excluded_records).toHaveLength(1);expect(plan.rejected_rows.map(r=>r.reason)).toEqual(['source_degraded_page_detected','excluded_price_sanity_floor']);expect(bad.availability_status).toBe('degraded_empty');expect(bad.primary_price_numeric).toBeNull();
+  });
+  it('leaves an empty batch empty without introducing source-wide failure or any observation',()=>{
+    expect(buildBookingSourceLevelCheck([]).source_level_degraded_page).toBe(false);expect(buildAppendPlan(basePlan({bookingRows:[],jalanRows:[]})).approved_rows).toHaveLength(0);
+  });
+});
+
 function basePlan(input: {
   bookingRows: PreviewRow[];
   jalanRows: JalanImprovedPreviewRow[];
