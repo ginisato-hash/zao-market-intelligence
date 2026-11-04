@@ -1,3 +1,5 @@
+import {loadCurrentCollectorQuoteReference} from '../services/currentCollectorQuoteReference';
+import {createAnonymousBookingCaptureContext} from '../services/bookingProductObservability';
 // Phase AUTO-RUNNER16X — rotating 2-hourly market refresh runner.
 //
 // Default mode is dry-run: builds the rotating per-slot plan and writes
@@ -11,14 +13,21 @@ import Database from "better-sqlite3";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {createHash} from 'node:crypto';
+import {observeCollectorSource,bindCollectorProducerEvidence} from '../services/collectorProducerEvidence';
 import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelection';
 import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
-import {readAcceptedTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
+import {observeBookingInitialLoad} from '../services/bookingInitialLoadBarrier';
+import {observeBookingCurrentDocument} from '../services/bookingCurrentDocument';
+import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollection} from '../services/bookingPrimaryCollection';
+import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
+import {recordNormalObservedListingDiagnostic} from '../services/observedListingPublicationLane';
+import {readCaptureTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
+import {launchOwnedBookingBrowser,ownedBookingBrowserStatus,terminateOwnedBookingBrowser} from '../services/bookingOwnedBrowser';
 import { join, resolve } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Response } from "playwright";
 import {
   analyzeBookingRenderedDomSignals,
   buildBookingRenderedDomRow,
@@ -37,6 +46,7 @@ import {
   appendHistoryRowsAtomic,
   buildAppendPlan,
   buildBookingSourceLevelCheck,
+  buildBookingPreviewRowPolicyDiagnostics,
   buildJalanSourceLevelCheck,
   buildJalanMatrixFromPlannerTargets,
   buildSourceBlockReport,
@@ -156,11 +166,10 @@ function runCmd(cmd: string, args: string[], env: Record<string, string | undefi
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", parsed };
 }
 
-async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null): Promise<BookingPreviewRow[]> {
+async function collectBookingLive(targets: readonly RotatingTarget[], debugPath: string, collectedAtJst: string, evidenceSink?: BookingCaptureRef[],rateCellSink?:Array<Record<string,unknown>>,reserveAttempt?:(target:RotatingTarget,at:string)=>boolean,panel:MarketPanel|null=null,publicationGuard?:(sourcePropertyId:string,stayDate:string)=>boolean,loopDiagnostics?:Record<string,unknown>): Promise<BookingPreviewRow[]> {
   const rows: BookingPreviewRow[] = [];
-  if(targets.length===0)return rows;
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ userAgent: USER_AGENT, locale: "ja-JP" });
+  if(loopDiagnostics)Object.assign(loopDiagnostics,{schema:'BOOKING_COLLECTION_LOOP_DIAGNOSTICS_V1',status:'RUNNING',planned:targets.length,visited:0,pagesStarted:0,reservationRefused:0,publicationRefused:0,stoppedAfterTargetOrdinal:null,unvisitedTargets:targets.length,stopReason:null,informationFailureCode:null});
+  if(targets.length===0){if(loopDiagnostics)loopDiagnostics['status']='COMPLETE';return rows;}
   let consecutiveBlocks = 0;
   let backoffAttempt = 0;
   let index = 0;
@@ -169,6 +178,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       // Polite jitter between sequential requests (skip before the very first).
       if (index > 0) await sleep(jitterDelayMs());
       index += 1;
+      if(loopDiagnostics){loopDiagnostics['visited']=index;loopDiagnostics['unvisitedTargets']=targets.length-index;}
       const target = { canonicalPropertyName: t.canonical_property_name, slug: t.property_slug };
       const checkout = nextDay(t.checkin);
       const probeUrl = buildBookingRenderedDomUrl({ ...target, checkin: t.checkin });
@@ -176,41 +186,101 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       mkdirSync(artifactDir, { recursive: true });
       const screenshotPath = join(artifactDir, "screenshot.png");
       if(reserveAttempt&& !reserveAttempt(t,new Date().toISOString())){
+        if(loopDiagnostics)loopDiagnostics['reservationRefused']=Number(loopDiagnostics['reservationRefused'])+1;
         rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;
       }
+      if(publicationGuard&&!publicationGuard(t.property_slug,t.checkin)){if(loopDiagnostics)loopDiagnostics['publicationRefused']=Number(loopDiagnostics['publicationRefused'])+1;rateCellSink?.push({propertySlug:t.property_slug,stayDate:t.checkin,status:'PUBLICATION_GUARD_REFUSED_NO_NETWORK',marketPriceEligible:false});continue;}
+      // A fresh owned process per target prevents Chromium's graceful teardown
+      // from dispatching unobservable keepalive requests after DOM capture.
+      const browser=await launchOwnedBookingBrowser();
+      try{
+      const context=await createAnonymousBookingCaptureContext(browser,USER_AGENT);
       const page = await context.newPage();
       page.setDefaultTimeout(35_000);
       // Retain asynchronous response detection through screenshot and normal page close.
-      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page):null;
+      const initialLoad=rateCellSink!==undefined?observeBookingInitialLoad(page):null;
+      const pageGuard=rateCellSink!==undefined?new BookingUiBlockGuard(page,initialLoad!,true):null;
       let rateCellRecord:Record<string,unknown>|null=null;
       let fixedCapture:Awaited<ReturnType<typeof captureBookingRateCells>>|null=null;
+      let initialLoadReadiness:Awaited<ReturnType<NonNullable<typeof initialLoad>['waitForFreshQuiet']>>|null=null;
       const fixedProducts=panel?.products.filter(p=>p.sourcePropertyId===t.property_slug&&p.source==='booking');
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
+      const documentObserver=rateCellSink!==undefined?await observeBookingCurrentDocument(page):null;
+      let documentProof:Awaited<ReturnType<NonNullable<typeof documentObserver>['bind']>>=null;
+      let documentProofState:'NOT_MEASURED'|'BOUND_200'|'UNVERIFIED'|'CHANGED'='NOT_MEASURED';
+      // Closed diagnostics only: do not retain request URLs, page text or errors.
+      // This observes the existing gate; it grants no additional capture or HTTP permission.
+      type CaptureEntryPhase='GOTO'|'BASELINE_WAIT'|'DOM_READ'|'SCREENSHOT'|'CAPTURE_GATE'|'CAPTURE';
+      let phase:CaptureEntryPhase='GOTO';
+      let entryReason:'NOT_REACHED'|'EVIDENCE_DISABLED'|'INITIAL_HTTP_NOT_200'|'CURRENT_DOCUMENT_UNVERIFIED'|'PAGE_BLOCKED'|'CAPTURE_CALLED'|'CAPTURE_FAILED'|'PRECAPTURE_EXCEPTION'='NOT_REACHED';
+      let entryBlock:ReturnType<typeof classifyBlock>|'NOT_EVALUATED'='NOT_EVALUATED';
+      let failurePhase:CaptureEntryPhase|null=null,navigationErrorClass:'NONE'|'TIMEOUT'|'NETWORK_ERROR'|'OTHER'|'NON_GOTO_FAILURE'='NONE',captureCalled=false;
+      const mainDocumentStatuses:number[]=[];let responseOverflow=false,responseUnverified=false;
+      const mainDocumentResponse=(response:Response)=>{
+        try{const request=response.request();if(!request.isNavigationRequest()||request.frame()!==page.mainFrame())return;
+          const status=response.status();if(!Number.isInteger(status)||status<100||status>599){responseUnverified=true;return;}
+          if(mainDocumentStatuses.length<16)mainDocumentStatuses.push(status);else responseOverflow=true;
+        }catch{responseUnverified=true;}
+      };
+      page.on('response',mainDocumentResponse);
       try {
+        if(loopDiagnostics)loopDiagnostics['pagesStarted']=Number(loopDiagnostics['pagesStarted'])+1;
+        phase='CAPTURE_GATE';if(pageGuard)await pageGuard.prepareInformationRoutesBeforeNavigation();phase='GOTO';
         const resp = await page.goto(probeUrl, { waitUntil: "domcontentloaded", timeout: 35_000 });
         loaded = resp !== null; httpStatus = resp?.status() ?? 0;
+        phase='BASELINE_WAIT';
         await page.waitForTimeout(5_000);
+        if(rateCellSink!==undefined&&(httpStatus===200||httpStatus===202)){
+          documentProof=await documentObserver!.bind({propertySlug:t.property_slug,checkin:t.checkin,checkout});
+          documentProofState=documentProof?'BOUND_200':'UNVERIFIED';
+        }
+        phase='DOM_READ';
         finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
-        if(rateCellSink!==undefined&&httpStatus===200&&classifyBlock(httpStatus,`${pageTitle}\n${bodyText}`)===null){
+        // Baseline screenshots may load ordinary page resources. Take them before
+        // the information guard, which must remain strict through page close.
+        phase='SCREENSHOT';
+        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
+        phase='CAPTURE_GATE';
+        if(documentProof)try{await documentProof.assertUnchanged();}catch{documentProofState='CHANGED';pageGuard?.failInformationCleanup();throw Error('CURRENT_DOCUMENT_CHANGED');}
+        entryBlock=rateCellSink!==undefined&&documentProof?classifyBlock(200,`${pageTitle}\n${bodyText}`):'NOT_EVALUATED';
+        entryReason=rateCellSink===undefined?'EVIDENCE_DISABLED':!documentProof?(httpStatus!==200?'INITIAL_HTTP_NOT_200':'CURRENT_DOCUMENT_UNVERIFIED'):entryBlock!==null?'PAGE_BLOCKED':'CAPTURE_CALLED';
+        if(rateCellSink!==undefined&&documentProof&&entryBlock===null){
+          await pageGuard!.requireClear();
+          // Passive DOM prechecks precede the single fresh wait at the actual
+          // information-arm boundary. The observer stays through route install.
           try{
-            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString()},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined);
+            phase='CAPTURE';captureCalled=true;
+            const fence=async()=>{try{await documentProof!.assertUnchanged();}catch{documentProofState='CHANGED';pageGuard?.failInformationCleanup();throw Error('CURRENT_DOCUMENT_CHANGED');}};
+            const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString(),adoptionPolicy:'BOOKING_2P_ADOPTION_V2'},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined,{assertUnchanged:fence});
+            await fence();
             fixedCapture=capture;
             uiBlock=capture.blockReason;uiStateUnverified=!capture.blockStateVerified;
             const capturePath=join(artifactDir,'selected_rate_cells_v1.json'),bytes=JSON.stringify(capture)+'\n';writeFileSync(capturePath,bytes,{encoding:'utf8',flag:'wx'});
             const derived=capture.cells.map(c=>deriveBookingRateCell(capture,c));
-            rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
+            rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,capturePath,rawSha256:createHash('sha256').update(bytes).digest('hex'),captureSha256:capture.captureSha256,httpStatus:200,parserVersion:capture.parserVersion,cells:capture.cells.length,boundProducts:derived.filter(c=>c.tupleAndProductBound).length,problems:capture.problems,blockReason:capture.blockReason,blockStateVerified:capture.blockStateVerified,marketPriceEligible:false};
+            if(pageGuard?.initialLoadReadiness&&pageGuard.initialLoadReadiness.status!=='QUIET_BEFORE_INFORMATION')rateCellRecord['status']='INITIAL_LOAD_NOT_QUIESCENT_NO_INFORMATION';
 
-          }catch{rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
+          }catch{entryReason='CAPTURE_FAILED';rateCellRecord={propertySlug:t.property_slug,stayDate:t.checkin,status:'CAPTURE_FAILED',marketPriceEligible:false};}
         }
-        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
-      } catch (caught) { error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl; }
+      } catch (caught) {
+        failurePhase=phase;entryReason='PRECAPTURE_EXCEPTION';
+        if(phase!=='GOTO')navigationErrorClass='NON_GOTO_FAILURE';
+        else{const message=caught instanceof Error?caught.message:'';navigationErrorClass=caught instanceof Error&&(caught.name==='TimeoutError'||/timeout/iu.test(message))?'TIMEOUT':/net::ERR_[A-Z_]+/u.test(message)?'NETWORK_ERROR':'OTHER';}
+        error = toSingleLine(caught instanceof Error ? caught.message : String(caught)); finalUrl = page.url() || probeUrl;
+      }
       finally {
+        page.off('response',mainDocumentResponse);
+        await documentProof?.dispose().catch(()=>undefined);
+        await documentObserver?.dispose().catch(()=>{pageGuard?.failInformationCleanup();});
+        initialLoad?.dispose();
         if(pageGuard)await pageGuard.checkpoint();
-        await page.close().catch(() => undefined);
+        if(pageGuard)await pageGuard.closeReadOnlyInformationPage().catch(()=>undefined);else await terminateOwnedBookingBrowser(browser);
         if(pageGuard){
+          await pageGuard.finishReadOnlyInformation().catch(()=>undefined);
           uiBlock=pageGuard.reason??uiBlock;uiStateUnverified||=!pageGuard.stateVerified;
-          if(rateCellRecord){rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;}
+          initialLoadReadiness=pageGuard.initialLoadReadiness;
+          if(rateCellRecord){rateCellRecord['initialLoadReadiness']=initialLoadReadiness;rateCellRecord['initialLoadReadinessPhase']=initialLoadReadiness?'IMMEDIATELY_BEFORE_INFORMATION_ARM':null;rateCellRecord['initialLoadHandoffVerified']=pageGuard.initialLoadHandoffVerified;rateCellRecord['pageFinalBlockReason']=uiBlock;rateCellRecord['pageFinalBlockStateVerified']=!uiStateUnverified;rateCellRecord['informationRequestRefused']=pageGuard.informationRequestRefused;rateCellRecord['informationDeniedRequest']=pageGuard.informationDeniedRequest;rateCellRecord['observedDeniedRequestPhase']=pageGuard.observedDeniedRequestPhase;rateCellRecord['informationFailureCode']=pageGuard.informationFailureCode;}
           pageGuard.dispose();
         }
       }
@@ -219,10 +289,17 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       if(rateCellSink){
         const record=rateCellRecord??{propertySlug:t.property_slug,stayDate:t.checkin,status:'NO_SELECTED_CAPTURE',marketPriceEligible:false};
         Object.assign(record,{attemptedNetwork:true,completedAt:new Date().toISOString(),pageFinalBlockReason:uiBlock,pageFinalBlockStateVerified:!uiStateUnverified});
+        record['captureEntryDiagnostics']={schema:'BOOKING_CAPTURE_ENTRY_DIAGNOSTICS_V1',loaded,initialHttpStatus:Number.isInteger(httpStatus)&&httpStatus>=0&&httpStatus<=599?httpStatus:null,phase,reason:entryReason,preCaptureBlock:entryBlock,failurePhase,navigationErrorClass,captureCalled,mainDocumentStatuses,responseOverflow,responseUnverified};
+        record['currentDocumentHttpProof']={schema:'BOOKING_CURRENT_DOCUMENT_HTTP_PROOF_V1',status:documentProofState,responseStatus:documentProofState==='BOUND_200'?200:null};
+        if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
+        if(pageGuard)record['initialRouteCausalDiagnostics']=pageGuard.initialRouteCausalDiagnostics;
         rateCellSink.push(record);
+        rateCellRecord=record;
       }
       const domRow: BookingRenderedDomRow = buildBookingRenderedDomRow({ target, checkin: t.checkin, checkout, probeUrl, signals, debugArtifactPath: artifactDir });
-      rows.push(toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst }));
+      const previewRow=toPreviewRow(domRow, { screenshotPath, debugPath: artifactDir, collectedAtJst });
+      rows.push(previewRow);
+      if(rateCellRecord)rateCellRecord['previewRowPolicyDiagnostics']=buildBookingPreviewRowPolicyDiagnostics(previewRow);
       writeFileSync(join(artifactDir, "probe_url_sanitized.txt"), sanitizeBookingUrl(probeUrl), "utf8");
       // Evidence sidecar (ZMI_EVIDENCE_SIDECAR_ENABLED=1 only): keep what this extractor already parsed -- no new request.
       if (evidenceSink !== undefined) captureBookingEvidence(evidenceSink, artifactDir, { slug: t.property_slug, checkin: t.checkin, checkout, collectedAtJst, probeUrl, signals });
@@ -230,7 +307,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       // Detect a rate-limit/block signal and back off (never bypass). Stop early
       // after repeated consecutive blocks so the higher volume stays polite.
       const block = uiBlock ?? classifyBlock(httpStatus, `${pageTitle}\n${bodyText}\n${error}`);
-      if(uiStateUnverified){await sleep(backoffDelayMs(backoffAttempt));break;}
+      if(pageGuard?.hardStop||block!==null){if(loopDiagnostics)Object.assign(loopDiagnostics,{status:'STOPPED',stoppedAfterTargetOrdinal:index,unvisitedTargets:targets.length-index,stopReason:block!==null?'HTTP_OR_UI_BLOCK':'INFORMATION_GUARD_FAILURE',informationFailureCode:pageGuard?.informationFailureCode??null});await sleep(backoffDelayMs(backoffAttempt));break;} // Actual restriction, abort/guard/cleanup failure stops; page-local insufficient evidence does not.
       if (block !== null) {
         consecutiveBlocks += 1;
         await sleep(backoffDelayMs(backoffAttempt));
@@ -240,8 +317,15 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         consecutiveBlocks = 0;
         backoffAttempt = 0;
       }
+      }finally{
+        // Setup/capture exceptions also end only this captured owned process.
+        // Termination is single-attempt; no graceful fallback or blind retry.
+        if(!ownedBookingBrowserStatus(browser).terminationStarted)await terminateOwnedBookingBrowser(browser);
+      }
     }
-  } finally { await context.close().catch(() => undefined); await browser.close().catch(() => undefined); }
+  } catch(error){if(loopDiagnostics)Object.assign(loopDiagnostics,{status:'ERROR',stoppedAfterTargetOrdinal:index,unvisitedTargets:targets.length-index,stopReason:'COLLECTOR_EXCEPTION'});throw error;
+  }
+  if(loopDiagnostics&&loopDiagnostics['status']==='RUNNING')loopDiagnostics['status']='COMPLETE';
   return rows;
 }
 
@@ -271,7 +355,8 @@ async function run(): Promise<void> {
   const debugPath = resolve(DEBUG_ROOT, ts);
   mkdirSync(debugPath, { recursive: true });
 
-  const env = process.env;
+  const quoteReference=loadCurrentCollectorQuoteReference(process.env);
+  const env=quoteReference.current()?quoteReference.env:quoteReference.heldEnv;
   const multiplier = resolveCrawlVolumeMultiplier(env);
   const caps = scaledRotatingCaps(multiplier);
   const nearTermDenseDays = resolveNearTermDenseDays(env);
@@ -280,10 +365,15 @@ async function run(): Promise<void> {
   const dryRun = env["ZMI_ROTATING_DRY_RUN"] === "1";
   const evidenceOn = isEvidenceSidecarEnabled(env);
   const rateCellsOn=env['ZMI_RATE_CELL_EVIDENCE_ENABLED']==='1'||env['ZMI_2P_QUALITY_ENABLED']==='1',rateCellCaptures:Array<Record<string,unknown>>=[];
+  // Record this run's source observations; never infer a past producer from a later checkout.
+  const producerStarted=rateCellsOn?observeCollectorSource():null;
   const bookingEvidence: BookingCaptureRef[] = [];
+  const bookingCollectionDiagnostics:Record<string,unknown>={schema:'BOOKING_COLLECTION_LOOP_DIAGNOSTICS_V1',status:'NOT_RUN'};
   let evidenceSidecar: Record<string, unknown> = { status: "NOT_RUN" };
+  let optionalJalanStatus='NOT_RUN';
+  let curvePublication:Record<string,unknown>={status:'NOT_RUN'};
   let twoPersonAdmission:ReturnType<typeof recordTwoPersonMarketAdmission>={status:"NOT_RUN",eligibleRows:0};
-  const liveGates = ["ZMI_AUTORUN_ENABLED", "COLLECT_BOOKING", "COLLECT_JALAN", "ALLOW_HISTORY_APPEND", "HISTORY_TO_DB_SYNC", "BUILD_AI_CONTEXT"].every((g) => env[g] === "1");
+  const liveGates = bookingPrimaryLiveGates(env);
   const rotationEnabled = env["PLANNER_ROTATION_ENABLED"] === "1";
   const liveMode = !dryRun && liveGates && rotationEnabled;
 
@@ -318,7 +408,7 @@ async function run(): Promise<void> {
   };
   const plan: RotatingPlan = buildRotatingPlan({ ...planInput, caps });
   const quoteLane=resolvePricingQuoteLane(env,{now:jst.iso,runDate:jst.date,legacyTargets:plan.selected,caps,config:demandConfig,properties:planInput.liveTargets,lastCollectedAt});
-  const selectedTargets=quoteLane.targets;
+  let selectedTargets=liveMode?enabledCollectionTargets(quoteLane.targets,env):quoteLane.targets;
   // Baseline (multiplier=1) plan for before/after reporting (no extra collection).
   const planBefore: RotatingPlan = buildRotatingPlan({ ...planInput, caps: scaledRotatingCaps(1) });
   // 6/25-style regression visibility: is the spot-check date in candidates/selected?
@@ -352,12 +442,16 @@ async function run(): Promise<void> {
   };
 
   if (liveMode) {
+    const publication=beginNormalCurvePublication(env,{runId,root:process.cwd()});curvePublication={status:publication.status};
+    if(publication.status==='HELD_SOURCE_OR_PUBLICATION_UNVERIFIED')selectedTargets=selectedTargets.filter(t=>t.source!=='booking');
+    try {
     liveExecuted = selectedTargets.length>0;
     const bookingTargets = selectedTargets.filter((t) => t.source === "booking");
     const jalanRotating = selectedTargets.filter((t) => t.source === "jalan");
-    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve,readAcceptedTwoPersonPanel(env));
+    const bookingRows = await collectBookingLive(bookingTargets, debugPath, jst.iso, evidenceOn ? bookingEvidence : undefined,rateCellsOn?rateCellCaptures:undefined,quoteLane.reserve?(target,at)=>quoteReference.current()&&quoteLane.reserve!(target,at):undefined,readCaptureTwoPersonPanel(env),publication.session?(property,date)=>normalCurveAttempt(publication.session,property,date):undefined,bookingCollectionDiagnostics);
     const jalanMatrix = buildJalanMatrixFromPlannerTargets(jalanRotating.map((t) => ({ source: "jalan" as const, property_slug: t.property_slug, canonical_property_name: t.canonical_property_name, stay_date: t.stay_date })));
     const jalanRows: JalanImprovedPreviewRow[] = [];
+    const optionalJalan=await optionalSecondaryCollection(async()=>{
     const browser = jalanMatrix.targets.length>0?await chromium.launch({ headless: true }):null;
     try {
       if(browser===null&&jalanMatrix.targets.length>0)throw Error("JALAN_BROWSER_UNAVAILABLE");
@@ -385,6 +479,8 @@ async function run(): Promise<void> {
         }
       }
     } finally { await browser?.close().catch(() => undefined); }
+    return true;
+    });optionalJalanStatus=jalanMatrix.targets.length>0?optionalJalan.status:'NOT_SELECTED';
 
     // Source-level page caps must match the rotating per-run caps (16X-F: 12/12),
     // not the legacy 09:00-runner defaults (Booking 9), or a full source would be
@@ -394,7 +490,7 @@ async function run(): Promise<void> {
     appendPlan = buildAppendPlan({ bookingRows, jalanRows, existingKeys: readExistingKeys(), bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, bookingReportPath: "", bookingCsvPath: "" });
     sourceBlockReport = buildSourceBlockReport({ bookingSourceCheck: bookingCheck, jalanSourceCheck: jalanCheck, rejectedRows: appendPlan.rejected_rows });
 
-    if (appendPlan.append_allowed && appendPlan.new_row_count > 0) {
+    if (quoteReference.current() && appendPlan.append_allowed && appendPlan.new_row_count > 0) {
       // Append and DB mirror in this process under the shared history-writer
       // lock; only the rows this append wrote can reach the DB (P0-G2).
       trustedAppend = trustedAppendAndMirror({
@@ -416,23 +512,27 @@ async function run(): Promise<void> {
     }
 
     // Record denial watermarks even when no canonical row was appended. Reservation refusal is not an observation.
-    twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced,
-      rows:trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
+    twoPersonAdmission=recordTwoPersonMarketAdmission(env,{runId,now:new Date().toISOString(),root:process.cwd(),captureDir:debugPath,dbPath:DB_PATH,mirrorExact:dbSynced&&quoteReference.current(),
+      rows:quoteReference.current()&&trustedAppend&&appendPlan?rowsActuallyAppended(appendPlan.approved_rows,trustedAppend):[],captures:rateCellCaptures});
+    if(publication.session&&quoteReference.current())curvePublication=finishNormalCurvePublication(publication.session,twoPersonAdmission);
     const post = readState();
     const aligned = dbSynced && aiContextRefreshed && post.history_rows === post.db_rows && post.db_rows === post.ai_context_rows && post.duplicate_row_id_count === 0;
     decision = aligned ? "rotating_market_refresh_success" : "rotating_market_refresh_partial_success";
 
     // Publish only when gated AND aligned AND gh available.
-    if (env["PUBLISH_CHATGPT_DB"] === "1" && aligned) {
+    if (quoteReference.current() && env["PUBLISH_CHATGPT_DB"] === "1" && aligned) {
       const pub = runCmd("npm", ["run", "publish:chatgpt-db"]);
       chatgptPublished = pub.status === 0 && String(pub.parsed["decision"] ?? "").includes("ready");
       releaseUrl = String(pub.parsed["release_url"] ?? "");
     }
+    } finally {closeNormalCurvePublication(publication.session);}
   }
 
   const post = readState();
+  if(!quoteReference.current()){decision='rotating_market_refresh_reference_config_unverified';process.exitCode=1;}
   const out = {
     run_id: runId, generated_at_jst: jst.iso, decision, dry_run: dryRun || !liveMode,
+    ...(producerStarted?{producer_observation:bindCollectorProducerEvidence(runId,producerStarted,observeCollectorSource())}:{}),
     crawl_volume_multiplier: multiplier,
     near_term_dense_days: nearTermDenseDays,
     forced_checkin_dates: forced.valid.join(","),
@@ -442,6 +542,7 @@ async function run(): Promise<void> {
     booking_pages: selectedTargets.filter((t) => t.source === "booking").length,
     jalan_pages: selectedTargets.filter((t) => t.source === "jalan").length,
     planned_requests: selectedTargets.length,
+    optional_jalan_collection_status:optionalJalanStatus,
     planned_requests_before: planBefore.selected.length,
     planned_requests_after: selectedTargets.length,
     near_term_dense_candidate_count: plan.near_term_dense_candidate_count,
@@ -479,8 +580,9 @@ async function run(): Promise<void> {
     pricing_output_generated: false, pms_output_generated: false,
     winter_sales_lane_enabled: winterLaneEnabled,
     ...(evidenceOn ? { evidence_sidecar: evidenceSidecar } : {}),
+    ...(env['ZMI_2P_CURVE_PUBLICATION_ENABLED']==='1'?{two_person_curve_publication:curvePublication}:{}),
     ...(env['ZMI_2P_QUALITY_ENABLED']==='1'?{two_person_admission:twoPersonAdmission}:{}),
-    ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false}}:{}),
+    ...(rateCellsOn?{rate_cell_evidence:{schema:'ZMI_BOOKING_RATE_CELLS_V1',captures:rateCellCaptures,marketPriceEligible:false},booking_collection_lifecycle:bookingCollectionDiagnostics}:{}),
     winter_sales_scope_status: winterScope?.status ?? "lane_disabled",
     winter_lane_budget_per_run: plan.winter_lane.lane_budget_per_run,
     winter_lane_selected: plan.winter_lane.selected_count,
@@ -498,6 +600,7 @@ async function run(): Promise<void> {
       excluded_by_cap:quoteLane.diagnostics?quoteLane.diagnostics.candidates-selectedTargets.length:null,excluded_by_property_diversity_cap:null,
       winter_lane_budget_per_run:0,winter_lane_required_pages_per_day:0,winter_lane_active_dates:0,winter_lane_warm_dates:0,
       winter_lane:{status:'REPLACED_BY_ACTUAL_PRICING_SCOPE',selected_count:0}}:{}),
+    quote_reference_configuration:quoteReference.diagnostic(),
     selected_targets: selectedTargets,
     report_path: resolve(REPORT_DIR, `${runId}.md`), json_path: resolve(REPORT_DIR, `${runId}.json`), csv_path: resolve(REPORT_DIR, `${runId}.csv`), debug_artifact_path: debugPath
   };
@@ -506,6 +609,19 @@ async function run(): Promise<void> {
   writeFileSync(out.csv_path, renderCsv(selectedTargets), "utf8");
   writeFileSync(out.report_path, renderReport(out), "utf8");
   writeJson(resolve(debugPath, "rotating_plan.json"), quoteLane.enabled?{legacyPlan:plan,actualTargets:selectedTargets,usefulQuoteLane:quoteLane.diagnostics,status:quoteLane.status}:plan);
+
+  // A reference change during report I/O must become a failed final report before
+  // any listing publication can bind it. No previously published report is edited.
+  const referenceFinalCurrent=quoteReference.current();
+  if(!referenceFinalCurrent){
+    out.decision='rotating_market_refresh_reference_config_unverified';
+    out.quote_reference_configuration=quoteReference.diagnostic();process.exitCode=1;
+    writeJson(out.json_path,out);
+    writeFileSync(out.report_path,renderReport(out),'utf8');
+  }
+  // Separate listing estimand; its immutable receipt binds the now-final report.
+  if(liveMode&&referenceFinalCurrent){const listing=recordNormalObservedListingDiagnostic(env,{root:process.cwd(),runId,reportPath:out.json_path,dbPath:resolve(DB_PATH),mirrorExact:dbSynced},value=>writeFileSync(resolve(debugPath,'observed_listing_publication.json'),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}));
+    if(listing.status!=='DISABLED')console.log('observed_listing_publication_status='+listing.status);}
 
   for (const [k, v] of Object.entries(out)) {
     if (typeof v === "object") continue;

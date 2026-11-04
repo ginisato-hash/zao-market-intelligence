@@ -14,7 +14,7 @@ import { MAX_TARGETS_PER_PROPERTY_PER_RUN, type RotatingCaps, type RotatingDeman
 const ROOT='.data/run-state/pricing-quote-attempts';
 interface Reservation { kind:'QUOTE_REQUEST_RESERVED_V1'; source:'booking'; propertySlug:string; stayDate:string; attemptAt:string }
 const jstDate=(ms:number)=>new Date(ms+9*3600000).toISOString().slice(0,10);
-const valid=(r:Reservation)=>r?.kind==='QUOTE_REQUEST_RESERVED_V1'&&r.source==='booking'&&/^[a-z0-9-]{1,120}$/u.test(r.propertySlug)
+export const isPricingQuoteReservation=(r:Reservation)=>r?.kind==='QUOTE_REQUEST_RESERVED_V1'&&r.source==='booking'&&/^[a-z0-9-]{1,120}$/u.test(r.propertySlug)
  &&/^\d{4}-\d{2}-\d{2}$/u.test(r.stayDate)&&new Date(r.stayDate+'T00:00:00Z').toISOString().slice(0,10)===r.stayDate
  &&typeof r.attemptAt==='string'&&/(Z|[+-]\d\d:\d\d)$/u.test(r.attemptAt)&&Number.isFinite(Date.parse(r.attemptAt))
  &&Object.keys(r).sort().join('|')==='attemptAt|kind|propertySlug|source|stayDate';
@@ -33,7 +33,7 @@ export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
    if(bytes.length>1024*1024||before.size!==after.size||before.mtimeNs!==after.mtimeNs)throw Error('CHANGED');
    for(const line of bytes.toString('utf8').split('\n')){
     if(!line)continue;if(line.length>1024||rows.length>=20000)throw Error('BUDGET');
-    const r=JSON.parse(line) as Reservation;if(!valid(r)||Date.parse(r.attemptAt)>current)throw Error('SCHEMA');
+    const r=JSON.parse(line) as Reservation;if(!isPricingQuoteReservation(r)||Date.parse(r.attemptAt)>current)throw Error('SCHEMA');
     if(current-Date.parse(r.attemptAt)<=48*3600000)rows.push(r);
    }
   }catch{throw Error('QUOTE_ATTEMPT_STATE_UNVERIFIED');}finally{if(fd!==undefined)closeSync(fd);}
@@ -43,7 +43,7 @@ export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
 
 export function reserveQuoteRequest(target:RotatingTarget,at:string,root=ROOT):boolean{
  const row:Reservation={kind:'QUOTE_REQUEST_RESERVED_V1',source:'booking',propertySlug:target.property_slug,stayDate:target.stay_date,attemptAt:at};
- if(target.source!=='booking'||!valid(row))throw Error('QUOTE_ATTEMPT_SCOPE');
+ if(target.source!=='booking'||!isPricingQuoteReservation(row))throw Error('QUOTE_ATTEMPT_SCOPE');
  const lockDir=join(root,'locks'),key='booking|'+row.propertySlug+'|'+row.stayDate,lockPath=join(lockDir,createHash('sha256').update(key).digest('hex')+'.lock');
  mkdirSync(lockDir,{recursive:true,mode:0o700});let lock:number;
  try{lock=openSync(lockPath,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}catch{return false;}
