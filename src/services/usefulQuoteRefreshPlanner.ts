@@ -16,6 +16,7 @@ export interface UsefulQuoteState {
     lastUsableAt: string | null;
     usableBasisVersion: string | null;
     retryAfter: string | null;
+    comparisonRequired?: boolean; // Valid listing anchor lacks a prior same-cohort comparison.
 }
 const instant = (s: string | null) => typeof s === 'string' && /(?:Z|[+-]\d\d:\d\d)$/u.test(s) ? Date.parse(s) : NaN;
 const validDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/u.test(s) && Number.isFinite(Date.parse(s+'T00:00:00Z')) && new Date(Date.parse(s + 'T00:00:00Z')).toISOString().slice(0, 10) === s;
@@ -45,6 +46,7 @@ export function planUsefulQuoteRefresh(input: {
         for (const value of [s.lastAttemptAt, s.lastUsableAt, s.retryAfter])
             if (value !== null && !Number.isFinite(instant(value))) throw new Error('USEFUL_QUOTE_STATE_TIME_INVALID');
         if (instant(s.lastAttemptAt) > now || instant(s.lastUsableAt) > now) throw new Error('USEFUL_QUOTE_FUTURE_OBSERVATION');
+        if(s.comparisonRequired!==undefined&&typeof s.comparisonRequired!=='boolean')throw Error('USEFUL_QUOTE_STATE_COMPARISON_INVALID');
         states.set(k, s);
     }
     for (const n of input.needs) {
@@ -74,13 +76,15 @@ export function planUsefulQuoteRefresh(input: {
             // A failed/condition-incomplete observation is still a request for cooldown purposes.
             if (state?.lastAttemptAt && now - instant(state.lastAttemptAt) < 24 * 3600000) { drop('EXISTING_24H_REQUEST_COOLDOWN'); continue; }
             const changed = n.changedAt !== null && (!Number.isFinite(usable) || instant(n.changedAt) > usable);
-            if (age !== null && age < input.freshHours && !changed) { drop('FRESH_COMPARABLE_CACHE'); continue; }
-            const deadlineAt = (Number.isFinite(usable) ? usable : instant(n.admittedAt)) + (far ? input.farDeadlineHours : input.freshHours) * 3600000;
+            const comparisonRequired=age!==null&&state?.comparisonRequired===true;
+            if (age !== null && age < input.freshHours && !changed&&!comparisonRequired) { drop('FRESH_COMPARABLE_CACHE'); continue; }
+            const lastAttempt=instant(state?.lastAttemptAt??null);
+            const deadlineAt = comparisonRequired?Math.max(usable,Number.isFinite(lastAttempt)?lastAttempt:usable)+24*3600000:(Number.isFinite(usable) ? usable : instant(n.admittedAt)) + (far ? input.farDeadlineHours : input.freshHours) * 3600000;
             const bucket = bucketForOffset(offset) ?? 'long'; // No 30/90/240/Q1 horizon cutoff.
             const score = scoreTarget(n.stayDate, bucket, p.tier, input.config, false, { offset });
             candidates.push({ key, deadlineAt, lastUsable: Number.isFinite(usable) ? usable : -Infinity,lastAttempt:state?.lastAttemptAt?instant(state.lastAttemptAt):-Infinity, impact: n.decisionImpact, changed, far,
                 target: { source, property_slug: p.property_slug, canonical_property_name: p.canonical_property_name, stay_date: n.stayDate, checkin: n.stayDate,
-                    bucket, tier: p.tier, priority_score: score.score, reason_codes: [...score.reasons, 'ACTUAL_ACCEPTANCE_SCOPE', age === null ? 'NO_USABLE_COMPARABLE_QUOTE' : 'COMPARABLE_QUOTE_STALE', ...(changed ? ['DECISION_EVIDENCE_CHANGED'] : []), ...(deadlineAt <= now ? ['QUOTE_DEADLINE_OVERDUE'] : [])],
+                    bucket, tier: p.tier, priority_score: score.score, reason_codes: [...score.reasons, 'ACTUAL_ACCEPTANCE_SCOPE', age === null ? 'NO_USABLE_COMPARABLE_QUOTE' : comparisonRequired?'LISTING_COMPARISON_REVISIT':'COMPARABLE_QUOTE_STALE', ...(changed ? ['DECISION_EVIDENCE_CHANGED'] : []), ...(deadlineAt <= now ? ['QUOTE_DEADLINE_OVERDUE'] : [])],
                     estimated_page_count: 1, rms_critical: true, service_state: age === null ? 'never_served' : deadlineAt <= now ? 'overdue' : 'due_soon', service_age_hours: age, band_rank: deadlineAt <= now ? 0 : 1 } });
         }
     }

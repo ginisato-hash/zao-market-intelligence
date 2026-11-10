@@ -53,7 +53,7 @@ function identityValid(x:ListingCanonicalRow){const r=x.raw;
  if(x.rowId!==r.row_id||x.rowHash!==r.row_hash||x.rowHash!==x.mirrorRowHash||!/^[a-f0-9]{64}$/u.test(x.rowHash))return false;
  return x.rowHash===buildRowHash({source:r.source??'',sourcePhase:r.source_phase??'',collectorStage:r.collector_stage??'',canonicalPropertyName:r.canonical_property_name??'',sourceSlugOrCode:r.source_slug_or_code??'',sourcePropertyId:r.source_property_id??'',checkin:r.checkin??'',checkout:r.checkout??'',stayScope:r.stay_scope??'',collectedDateJst:r.collected_date_jst??'',availabilityStatus:r.availability_status??'',soldOutStatus:r.sold_out_status??'',normalizedTotalPrice:finitePrice(r.normalized_total_price??''),basisConfidence:r.basis_confidence??'',sourceClassification:r.source_classification??'',isPriceUsableForDpDirect:r.is_price_usable_for_dp_direct==='true',isPriceUsableForDpDirectional:r.is_price_usable_for_dp_directional==='true',isPriceExcludedFromDp:r.is_price_excluded_from_dp==='true'});
 }
-function classify(x:ListingCanonicalRow,asOf:number){const r=x.raw,h=history(x),reasons:string[]=[];
+export function classifyListingCanonicalRow(x:ListingCanonicalRow,asOf:number){const r=x.raw,h=history(x),reasons:string[]=[];
  if(!identityValid(x))reasons.push('CANONICAL_MIRROR_IDENTITY_UNVERIFIED');
  if(x.quarantineReason!==null)reasons.push('KNOWN_PRICE_QUARANTINE');
  if(r.source!=='booking'||r.property_identity_match!=='true'||!h.property_id||!h.property_name)reasons.push('SOURCE_PROPERTY_UNVERIFIED');
@@ -73,7 +73,27 @@ function classify(x:ListingCanonicalRow,asOf:number){const r=x.raw,h=history(x),
  const unknown=[...(meal==='assumed_room_only'?['MEAL_ASSUMED']:[]),...(member==='PUBLIC_STATUS_UNKNOWN'?['PUBLIC_STATUS_UNKNOWN']:[]),...(!h.room_type_key?['ROOM_PLAN_UNKNOWN']:[]),'CANCELLATION_PREPAYMENT_NOT_PRODUCT_VERIFIED',...(/unknown|unavailable|unconfirmed/iu.test(tax)?['TAX_TOTAL_UNCONFIRMED']:[])];
  return {x,h,at,amount,reasons,meal,member,room,tax,amountBasis,cohort,base,unknown};
 }
-type Classified=ReturnType<typeof classify>;
+type Classified=ReturnType<typeof classifyListingCanonicalRow>;
+/** Same selection boundary for publication diagnostics and collection feedback. */
+export function inspectListingPair(input:{rows:ListingCanonicalRow[];attempts:ListingAttempt[];aliases:string[];reports:ReadonlyMap<string,Record<string,any>>;asOf:string;policy:ListingAnalysisPolicy}){
+ const at=instant(input.asOf),p=input.policy;
+ if(!input.rows.length)throw Error('LISTING_PAIR_EMPTY');
+ const list=input.rows.map(r=>{const c=classifyListingCanonicalRow(r,at),f=listingRowFinalGuardFailure(r,input.reports,at);if(f)c.reasons.push(f);return c;}).sort((a,b)=>b.at-a.at||a.x.rowId.localeCompare(b.x.rowId));
+ const current=list[0]!,local=input.attempts.filter(a=>input.aliases.includes(a.propertyId)&&a.stayDate===current.h.checkin_date),newestAt=Math.max(-Infinity,...local.map(a=>instant(a.attemptedAt))),newest=local.filter(a=>instant(a.attemptedAt)===newestAt);
+ const reasons=[...current.reasons];
+ if(newestAt>=current.at&&newest.some(a=>a.completedObservationRowId!==current.x.rowId))reasons.push('NEWER_ATTEMPT_NOT_RECONCILED');
+ if(at-current.at>=p.maxCurrentAgeHours*3600000)reasons.push('CURRENT_STALE');
+ if(list.some(r=>r!==current&&r.at===current.at&&(r.amount!==current.amount||r.cohort!==current.cohort||r.reasons.length!==0)))reasons.push('SAME_TIME_CONFLICT');
+ const past=list.filter(r=>r.at<current.at),same=past.filter(r=>r.cohort===current.cohort),within=same.filter(r=>at-r.at<=p.maxComparisonAgeHours*3600000);
+ const previous=within.find(r=>r.reasons.length===0)??null;
+ const conflict=previous!==null&&list.some(r=>r!==previous&&r.at===previous.at&&(r.amount!==previous.amount||r.cohort!==previous.cohort||r.reasons.length!==0));
+ const pairReason=reasons[0]??(!current.base?'BASE_STRATUM_EXCLUDED':!past.length?'NO_PREVIOUS_OBSERVATION':!same.length?'PREVIOUS_COHORT_MISMATCH':!within.length?'PREVIOUS_OUTSIDE_COMPARISON_WINDOW':!previous?'PREVIOUS_OBSERVATION_UNVERIFIED':conflict?'PREVIOUS_SAME_TIME_CONFLICT':!previous.base?'BASE_STRATUM_EXCLUDED':null);
+ const normalTerminalVerified=/\/auto-runner-market-refresh-rotating\/\d{8}_\d{6}\//u.test(current.x.raw.debug_artifact_path??'')&&listingRowFinalGuardFailure(current.x,input.reports,at)===null;
+ return {current,previous,pairReason,currentReasons:reasons,previousConflict:conflict,
+  diagnostic:{propertyId:current.h.property_id,stayDate:current.h.checkin_date,currentRowId:current.x.rowId,currentRowHash:current.x.rowHash,currentRawRecordSha256:digest(current.x.raw),observedAt:current.h.observed_at,cohortSha256:current.cohort,
+   currentUsable:reasons.length===0&&current.base,normalTerminalVerified,latestAttemptAt:Number.isFinite(newestAt)?new Date(newestAt).toISOString():null,
+   firstExclusion:pairReason,currentReasons:reasons,previousRows:past.length,sameCohortPreviousRows:same.length,inWindowSameCohortPreviousRows:within.length,previousRowId:previous?.x.rowId??null,pairAdopted:pairReason===null}};
+}
 const ref=(r:Classified)=>({rowId:r.x.rowId,rowHash:r.x.rowHash,rawRecordSha256:digest(r.x.raw),propertyId:r.h.property_id,propertyName:r.h.property_name,source:r.h.source,sourcePropertyId:r.x.raw.source_property_id||r.h.property_id,physicalPropertyId:marketPropertyGroup(r.h.source,r.h.property_id).propertyKey??(r.x.raw.source_property_id||r.h.property_id),groupKey:marketPropertyGroup(r.h.source,r.h.property_id).groupKey,stayDate:r.h.checkin_date,observedAt:r.h.observed_at,amountJpy:r.amount,meal:r.meal,room:r.room,member:r.member,tax:r.tax,amountBasis:r.amountBasis,unknown:r.unknown,cohortSha256:r.cohort,sourceProvenance:'CANONICAL_NORMALIZED_HISTORY_RAW_PRODUCT_NOT_VERIFIED' as const});
 
 export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[];attempts:ListingAttempt[];reports?:Array<ListingRunReport|CapturedListingRunReport>;sourceSnapshot:ListingSourceSnapshot;targetDates:string[];asOf:string;policy:ListingAnalysisPolicy;sourceSnapshotSha256:string;baselineBundleSha256:string;groups?:Record<string,string>}){
@@ -96,18 +116,17 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
    if(!listingCaptureFinalGuardClear(c,d.run_id,d.generated_at_jst))throw Error('LISTING_ATTEMPT_COMPLETION_FINAL_GUARD');
   }
  }
- const rows=input.rows.map(r=>{const x=classify(r,at),failure=listingRowFinalGuardFailure(r,reports,at);if(failure)x.reasons.push(failure);return x;});
+ const rows=input.rows.map(r=>{const x=classifyListingCanonicalRow(r,at),failure=listingRowFinalGuardFailure(r,reports,at);if(failure)x.reasons.push(failure);return x;});
  const groups=new Map<string,Classified[]>();
  for(const r of rows){const key=r.h.source+'|'+(marketPropertyGroup(r.h.source,r.h.property_id).propertyKey??(r.x.raw.source_property_id||r.h.property_id))+'|'+r.h.checkin_date;const a=groups.get(key)??[];a.push(r);groups.set(key,a);}
- const latest=new Map<string,Classified>(),pairs:{previous:Classified;current:Classified;ratio:number}[]=[],failures:{stayDate:string;propertyId:string;reasons:string[]}[]=[];
+ const latest=new Map<string,Classified>(),pairs:{previous:Classified;current:Classified;ratio:number}[]=[],failures:{stayDate:string;propertyId:string;reasons:string[]}[]=[],pairDiagnostics:ReturnType<typeof inspectListingPair>['diagnostic'][]=[];
  for(const [key,list] of groups){list.sort((a,b)=>b.at-a.at||a.x.rowId.localeCompare(b.x.rowId));const current=list[0]!;latest.set(key,current);
-  const physical=marketPropertyGroup(current.h.source,current.h.property_id).propertyKey??(current.x.raw.source_property_id||current.h.property_id),requestAliases=new Set(snapshot.propertyAliases.find(g=>g.source===current.h.source&&g.physicalPropertyId===physical)!.propertyIds),localAttempts=input.attempts.filter(a=>requestAliases.has(a.propertyId)&&a.stayDate===current.h.checkin_date),newestAt=Math.max(-Infinity,...localAttempts.map(a=>instant(a.attemptedAt))),newest=localAttempts.filter(a=>instant(a.attemptedAt)===newestAt);
-  const reasons=[...current.reasons];if(newestAt>=current.at&&newest.some(a=>a.completedObservationRowId!==current.x.rowId))reasons.push('NEWER_ATTEMPT_NOT_RECONCILED');
-  if(at-current.at>=p.maxCurrentAgeHours*3600000)reasons.push('CURRENT_STALE');
-  if(list.some(r=>r!==current&&r.at===current.at&&(r.amount!==current.amount||r.cohort!==current.cohort||r.reasons.length!==0)))reasons.push('SAME_TIME_CONFLICT');
+  const physical=marketPropertyGroup(current.h.source,current.h.property_id).propertyKey??(current.x.raw.source_property_id||current.h.property_id),aliases=snapshot.propertyAliases.find(g=>g.source===current.h.source&&g.physicalPropertyId===physical)!.propertyIds;
+  const inspected=inspectListingPair({rows:list.map(r=>r.x),attempts:input.attempts,aliases,reports,asOf:input.asOf,policy:p}),reasons=inspected.currentReasons;
+  pairDiagnostics.push(inspected.diagnostic);
   if(reasons.length){failures.push({stayDate:current.h.checkin_date,propertyId:current.h.property_id,reasons});continue;}
-  const previous=list.find(r=>r.at<current.at&&r.cohort===current.cohort&&r.reasons.length===0&&at-r.at<=p.maxComparisonAgeHours*3600000);
-  if(previous&&list.some(r=>r!==previous&&r.at===previous.at&&(r.amount!==previous.amount||r.cohort!==previous.cohort||r.reasons.length!==0))){failures.push({stayDate:current.h.checkin_date,propertyId:current.h.property_id,reasons:['PREVIOUS_SAME_TIME_CONFLICT']});continue;}
+  const previous=inspected.previous;
+  if(inspected.previousConflict){failures.push({stayDate:current.h.checkin_date,propertyId:current.h.property_id,reasons:['PREVIOUS_SAME_TIME_CONFLICT']});continue;}
   if(previous&&current.base&&previous.base&&previous.amount!==null&&current.amount!==null)pairs.push({previous,current,ratio:current.amount/previous.amount});
  }
  const days=input.targetDates.map(stayDate=>{
@@ -128,7 +147,7 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
   return {stayDate,asOf:input.asOf,status,eligible:status!=='INSUFFICIENT_Y_ONLY',reasonCodes,validUntil,relativeIndex:index,influenceAttenuation:attenuation,attenuationSemantics:'UNCERTAINTY_ATTENUATION_NOT_PROBABILITY' as const,
    observedProperties:points.length,commonProperties:matched.length,levelMedianJpy:median(points.filter(r=>r.base).map(r=>r.amount!)),cohortLevels:[...new Set(points.map(r=>r.cohort))].map(key=>{const a=points.filter(r=>r.cohort===key);return {cohortSha256:key,properties:a.length,medianJpy:median(a.map(r=>r.amount!)),meal:a[0]!.meal,room:a[0]!.room,member:a[0]!.member,tax:a[0]!.tax};}),
    unknownShare,fullyKnownSubset:{properties:known.length,relativeIndex:median(known.map(x=>x.ratio))},confirmedRoomSubset:{properties:confirmed.length,relativeIndex:median(confirmed.map(x=>x.ratio))},leaveOneOut:{min:loo.length?Math.min(...loo):null,max:loo.length?Math.max(...loo):null},groupCounts,groupVersion:MARKET_PROPERTY_GROUP_VERSION,knownGroupMaxShare,groupUnknownShare,
-   comparisons,inputRowSetDigest:digest(comparisons),failures:failures.filter(f=>f.stayDate===stayDate)};
+   comparisons,inputRowSetDigest:digest(comparisons),failures:failures.filter(f=>f.stayDate===stayDate),pairDiagnostics:pairDiagnostics.filter(f=>f.stayDate===stayDate)};
  });
  const body={schema:OBSERVED_LISTING_RELATIVE_V1,evidenceKind:OBSERVED_LISTING_RELATIVE_V1,axis:'OBSERVED_TWO_PERSON_LISTING_SAME_STAY_RELATIVE' as const,asOf:input.asOf,expiresAt:new Date(at+p.validForMinutes*60000).toISOString(),baselineBundleSha256:input.baselineBundleSha256,
   canonicalRoute:'NORMAL_TRUSTED_APPEND_AND_EXACT_MIRROR' as const,sourceSnapshotSha256:input.sourceSnapshotSha256,canonicalRowSetSha256:canonicalListingRowSetSha256(input.rows),attemptSetSha256:digest(input.attempts),producerCodeSha256s:snapshot.producerCodeSha256s,producerSetSha256:snapshot.producerSetSha256,policy:p,policySha256:digest(p),targetDates:input.targetDates,days,

@@ -9,6 +9,7 @@ import {bindCollectorProducerEvidence} from '../src/services/collectorProducerEv
 import {recordNormalObservedListing,recordNormalObservedListingDiagnostic} from '../src/services/observedListingPublicationLane';
 import type {RmsQuoteRequest} from '../src/services/rmsQuoteRequest';
 import type {ListingCanonicalRow} from '../src/services/observedListingRelative';
+import {readObservedListingPlannerFeedback} from '../src/services/observedListingPlannerFeedback';
 vi.mock('../src/services/twoPersonMarketAdmissionLane',()=>({assertAcceptedTwoPersonProducer:(env:Record<string,string>)=>{if(env.ZMI_2P_ACCEPTED_PRODUCER_DIGEST!==digest(fixturePins))throw Error('SYNTHETIC_SOURCE_REFUSED');return {tree:'a'.repeat(40),codeSha256:digest(fixturePins)};}}));
 const fixturePins={src:'a'.repeat(40),scripts:'b'.repeat(40),'package.json':'c'.repeat(40),'package-lock.json':'d'.repeat(40),'tsconfig.json':'e'.repeat(40)};
 const dirs:string[]=[],asOf='2026-11-01T03:00:00.000Z',date='2027-01-06';
@@ -47,3 +48,21 @@ it('failed previous outside48h attempt window never becomes an anchor while good
 it('a safely aborted request with final guard true remains an observed listing without a fixed-product gate',()=>{const f=fixture(),rid=guardReport(f,'p0','2026-10-30T04:00:00Z',{informationRequestRefused:true,informationDeniedRequest:{method:'GET',resourceType:'image',abortOutcome:'SUCCEEDED'}}),x=captureObservedListingCanonicalInput({...f,asOf,policy,producerCodeSha256s:[digest('producer')],quarantine:[]});expect(x.manifest.attempts[0]!.completedObservationRowId).toBe(rid);expect(x.artifact.days[0]!.status).toBe('SUPPORTED_NEUTRAL');expect(x.artifact.days[0]!.commonProperties).toBe(3);});
 
 it('partial runs retain individually verified previous quotes without admitting their failed pages',()=>{for(const clear of [true,false]){const f=fixture();guardReport(f,'p0','2026-10-29T04:00:00Z',{pageFinalBlockStateVerified:clear,informationFailureCode:clear?null:'ABORT_DRAIN_TIMEOUT'},'rotating_market_refresh_partial_success');const x=captureObservedListingCanonicalInput({...f,asOf,policy,producerCodeSha256s:[digest('producer')],quarantine:[]});expect(x.artifact.days[0]!.commonProperties).toBe(clear?3:2);expect(x.artifact.days[0]!.observedProperties).toBe(3);}});
+
+it('planner feedback uses the real canonical projection and terminal watermark without publishing or rewriting observation time',()=>{
+ const {f,env,sha}=publisherFixture(),originalAt='2026-10-30T04:00:00Z';
+ guardReport(f,'p0',originalAt,{});
+ const db=new Database(f.dbPath);db.prepare('DELETE FROM market_signal_history WHERE collected_at_jst=? AND json_extract(raw_json,\'$.source_slug_or_code\')=?').run('2026-10-29T04:00:00Z','p0');db.close();
+ const before=readFileSync(f.dbPath),cwd=vi.spyOn(process,'cwd').mockReturnValue(f.root);
+ try{
+  const x=readObservedListingPlannerFeedback(env,{now:asOf,request:f.request});
+  expect(x.diagnostics.status).toBe('CANONICAL_OBSERVATIONS_BOUND');expect(x.minProperties).toBe(3);
+  const p=x.states.find(s=>s.propertySlug==='p0')!;expect(p.lastUsableAt).toBe(originalAt);expect(p.usableBasisVersion).toBe('OBSERVED_LISTING_RELATIVE_V1');expect(p.comparisonRequired).toBe(true);
+  expect(x.states.filter(s=>s.lastUsableAt!==null)).toHaveLength(1); // Bare fixture rows lack a normal terminal.
+  expect(readFileSync(f.dbPath).equals(before)).toBe(true);expect(existsSync(join(f.root,'.data/market-listing',sha,'current.json'))).toBe(false);
+  const attempts=join(f.root,'.data/run-state/pricing-quote-attempts','2026-10-30.jsonl');
+  writeFileSync(attempts,readFileSync(attempts,'utf8')+JSON.stringify({kind:'QUOTE_REQUEST_RESERVED_V1',source:'booking',propertySlug:'p0',stayDate:date,attemptAt:'2026-10-30T05:00:00Z'})+'\n');
+  expect(readObservedListingPlannerFeedback(env,{now:asOf,request:f.request}).states.find(s=>s.propertySlug==='p0')!.lastUsableAt).toBeNull();
+  expect(readObservedListingPlannerFeedback({...env,ZMI_OBSERVED_LISTING_CONFIG_SHA256:'0'.repeat(64)},{now:asOf,request:f.request}).states).toEqual([]);
+ }finally{cwd.mockRestore();}
+});

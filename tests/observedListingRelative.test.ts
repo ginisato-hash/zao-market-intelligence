@@ -3,6 +3,7 @@ import {analyzeObservedListingRelative,canonicalListingRowSetSha256,listingPrope
 import {buildRowHash} from '../src/services/localHistorySchemaDesign';
 import {digest} from '../src/services/marketRowPriceQuality';
 import {createHash} from 'node:crypto';
+import {listingPlannerStates} from '../src/services/observedListingPlannerFeedback';
 const asOf='2026-11-01T03:30:00Z',date='2027-01-06';
 function row(id:string,at:string,price:number,change:Record<string,string>={}):ListingCanonicalRow{
  const r:Record<string,string>={source:'booking',source_phase:'synthetic',collector_stage:'fixture',canonical_property_name:'Synthetic '+id,source_slug_or_code:id,source_property_id:id,checkin:date,checkout:'2027-01-07',stay_scope:'2_adults_1_room_1_night',collected_date_jst:at.slice(0,10),collected_at_jst:at,availability_status:'available_price_basis',sold_out_status:'not_sold_out',source_primary_price:String(price),normalized_total_price:String(price),basis_confidence:'B',source_classification:'booking_assumed_room_only_two_person_standard',is_price_usable_for_dp_direct:'false',is_price_usable_for_dp_directional:'true',is_price_excluded_from_dp:'false',property_identity_match:'true',group_adults:'2',group_children:'0',no_rooms:'1',stay_nights:'1',currency:'JPY',warning_flags:'room_basis=confirmed_two_person_standard_room',normalized_total_price_basis:'visible_booking_price_directional_only',source_tax_or_fee_classification:'official_visible_adder_not_available',...change};
@@ -11,6 +12,19 @@ function row(id:string,at:string,price:number,change:Record<string,string>={}):L
 }
 function input(rows:ListingCanonicalRow[],attempts:ListingAttempt[]=[],reports:ListingRunReport[]=[]){const sourceSnapshot={schema:'OBSERVED_LISTING_CANONICAL_INPUT_MANIFEST_V1' as const,asOf,canonicalRowSetSha256:canonicalListingRowSetSha256(rows),attemptSetSha256:digest(attempts),canonicalRows:rows.length,targetDates:[date],attempts,propertyAliases:listingPropertyAliases(rows),producerCodeSha256s:[digest('synthetic-producer')],producerSetSha256:digest([digest('synthetic-producer')]),sourceFiles:reports.map(r=>({path:'/synthetic/'+r.runId+'.json',sha256:r.rawSha256}))};return {rows,attempts,reports,sourceSnapshot,targetDates:[date],asOf,sourceSnapshotSha256:digest(sourceSnapshot),baselineBundleSha256:'b'.repeat(64),policy:{version:'synthetic_listing',maxCurrentAgeHours:48,maxComparisonAgeHours:168,minProperties:3,validForMinutes:120,productionAccepted:false as const}};}
 const paired=(ratios=[1,1,1])=>ratios.flatMap((ratio,i)=>[row('p'+i,'2026-10-30T03:00:00Z',10000),row('p'+i,'2026-11-01T03:00:00Z',10000*ratio)]);
+it('reports missing previous/cohort/base boundaries without reducing observed-property counts',()=>{
+ const x=input([row('only','2026-11-01T03:00:00Z',10000),row('cohort','2026-10-30T03:00:00Z',10000),row('cohort','2026-11-01T03:00:00Z',11000,{source_tax_or_fee_classification:'other'}),row('member','2026-11-01T03:00:00Z',10000,{source_classification:'booking_member_conditional'})]);
+ const d=analyzeObservedListingRelative(x).days[0]!;expect(d.observedProperties).toBe(3);expect(d.commonProperties).toBe(0);expect(Object.fromEntries(d.pairDiagnostics.map(p=>[p.propertyId,p.firstExclusion]))).toEqual({only:'NO_PREVIOUS_OBSERVATION',cohort:'PREVIOUS_COHORT_MISMATCH',member:'BASE_STRATUM_EXCLUDED'});
+});
+it('feeds original observedAt and listing basis only from a bound normal terminal',()=>{
+ const r=row('p0','2026-11-01T03:00:00Z',10000),run='auto_runner_market_refresh_rotating_20261101_120000';
+ expect(listingPlannerStates(analyzeObservedListingRelative(input([r])))[0]?.lastUsableAt).toBeNull();
+ r.raw.debug_artifact_path='/synthetic/auto-runner-market-refresh-rotating/20261101_120000/booking/p0_'+date;
+ const rawJson=JSON.stringify({run_id:run,dry_run:false,decision:'rotating_market_refresh_success',generated_at_jst:r.raw.collected_at_jst,rate_cell_evidence:{captures:[{propertySlug:'p0',stayDate:date,attemptedNetwork:true,completedAt:'2026-11-01T03:06:00Z',pageFinalBlockStateVerified:true,informationFailureCode:null}]}}),reports=[{runId:run,rawSha256:createHash('sha256').update(rawJson).digest('hex'),rawJson}];
+ expect(listingPlannerStates(analyzeObservedListingRelative(input([r],[],reports)))[0]).toMatchObject({lastUsableAt:r.raw.collected_at_jst,usableBasisVersion:'OBSERVED_LISTING_RELATIVE_V1',comparisonRequired:true});
+ const failed=analyzeObservedListingRelative(input([r],[{propertyId:'p0',stayDate:date,attemptedAt:'2026-11-01T03:10:00Z',completedObservationRowId:null}],reports));expect(listingPlannerStates(failed)[0]).toMatchObject({lastUsableAt:null,usableBasisVersion:null,comparisonRequired:false});
+ const tampered=input([r],[],reports);r.raw.source_primary_price='20000';expect(()=>analyzeObservedListingRelative(tampered)).toThrow('LISTING_INDEPENDENT_PROJECTION_BINDING');
+});
 it('adopts observed listing neutrality without claiming public fixed-product admission or probability',()=>{
  const d=analyzeObservedListingRelative(input(paired())),a=d.days[0]!;expect(a.status).toBe('SUPPORTED_NEUTRAL');expect(a.commonProperties).toBe(3);expect(a.relativeIndex).toBe(1);expect(a.influenceAttenuation).toBeGreaterThan(0);expect(a.unknownShare).toBe(1);expect(a.comparisons[0]!.productIdentity).toBe('ROOM_PLAN_NOT_PROVED_LISTING_COMPARISON');expect(d.schema).toBe('OBSERVED_LISTING_RELATIVE_V1');expect(d.fixedProductIndex).toBe(false);expect(d.priceAuthority).toBe(false);
 });

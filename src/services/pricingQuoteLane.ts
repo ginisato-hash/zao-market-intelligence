@@ -8,16 +8,14 @@ import {REGIONAL_OFFICIAL_DISCOVERY} from './regionalOfficialDiscovery';
 import {planRegionalQuoteRotation} from './regionalQuoteRotation';
 import {isOwnPropertyName} from './ownPropertyTargets';
 import { readRmsQuoteRequest, RmsQuoteRequestReadError } from './rmsQuoteRequest';
-import { planUsefulQuoteRefresh, type UsefulQuoteState } from './usefulQuoteRefreshPlanner';
+import { type UsefulQuoteState } from './usefulQuoteRefreshPlanner';
+import {isPricingQuoteReservation,type PricingQuoteReservation as Reservation} from './pricingQuoteReservation';
+import {readObservedListingPlannerFeedback} from './observedListingPlannerFeedback';
+export {isPricingQuoteReservation} from './pricingQuoteReservation';
 import type { MarketRefreshPropertyTarget } from './marketRefreshTargetUniverse';
 import { MAX_TARGETS_PER_PROPERTY_PER_RUN, type RotatingCaps, type RotatingDemandConfig, type RotatingTarget } from './rotatingCollectionScopePlanner';
 const ROOT='.data/run-state/pricing-quote-attempts';
-interface Reservation { kind:'QUOTE_REQUEST_RESERVED_V1'; source:'booking'; propertySlug:string; stayDate:string; attemptAt:string }
 const jstDate=(ms:number)=>new Date(ms+9*3600000).toISOString().slice(0,10);
-export const isPricingQuoteReservation=(r:Reservation)=>r?.kind==='QUOTE_REQUEST_RESERVED_V1'&&r.source==='booking'&&/^[a-z0-9-]{1,120}$/u.test(r.propertySlug)
- &&/^\d{4}-\d{2}-\d{2}$/u.test(r.stayDate)&&new Date(r.stayDate+'T00:00:00Z').toISOString().slice(0,10)===r.stayDate
- &&typeof r.attemptAt==='string'&&/(Z|[+-]\d\d:\d\d)$/u.test(r.attemptAt)&&Number.isFinite(Date.parse(r.attemptAt))
- &&Object.keys(r).sort().join('|')==='attemptAt|kind|propertySlug|source|stayDate';
 
 /** Includes failed/crashed request reservations, not just successful history appends. No quote outcome is inferred. */
 export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
@@ -84,12 +82,20 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
   };
   for(const [key,at]of input.lastCollectedAt){const [source,slug,date]=key.split('|');if(source==='booking'&&slug&&date)set(slug,date,at);}
   stage='ATTEMPT_READ'; for(const r of readQuoteReservations(input.now,input.reservationRoot))set(r.propertySlug,r.stayDate,r.attemptAt);
+  const feedback=readObservedListingPlannerFeedback(env,{now:input.now,request});
+  for(const s of feedback.states){
+   if(!slugs.has(s.propertySlug)||!needs.has(s.stayDate))continue;
+   const key=s.source+'|'+s.propertySlug+'|'+s.stayDate,old=states.get(key),oldAt=Date.parse(old?.lastAttemptAt??''),knownAt=Date.parse(s.lastAttemptAt??'');
+   // A newer reservation absent from the sealed read invalidates its older usable state.
+   if(Number.isFinite(oldAt)&&(!Number.isFinite(knownAt)||oldAt>knownAt))continue;
+   states.set(key,{...s,lastAttemptAt:s.lastAttemptAt??old?.lastAttemptAt??null});
+  }
   const ownKeys=new Set<string>();
   const protectedTargets=input.legacyTargets.filter(t=>{if(!isOwnPropertyName(t.canonical_property_name)||t.source!=='booking')return false;
    if(ownKeys.has(t.property_slug))return false;ownKeys.add(t.property_slug);return true;});
   const urgent=input.legacyTargets.find(t=>t.source==='booking'&&!isOwnPropertyName(t.canonical_property_name)&&t.reason_codes.includes('near_term_dense'));
   if(urgent)protectedTargets.push(urgent);
-  stage='SELECTION'; const plan=planRegionalQuoteRotation({now:input.now,runDate:input.runDate,registry:registry.properties,needs:request.needs,states:[...states.values()],caps:input.caps,config:input.config,legacyProtected:protectedTargets,coverageFraction:0.5,freshHours:36,farDeadlineHours:168});
+  stage='SELECTION'; const plan=planRegionalQuoteRotation({now:input.now,runDate:input.runDate,registry:registry.properties,needs:request.needs,states:[...states.values()],caps:input.caps,config:input.config,legacyProtected:protectedTargets,coverageFraction:0.5,freshHours:36,farDeadlineHours:168,...(feedback.minProperties===null?{}:{minComparisonProperties:feedback.minProperties})});
   // Preserve the existing ordinary per-property cap; this lane does not inherit the separate winter quota exception.
   const targets=plan.selected;
   const allowed=new Set(targets.map(t=>t.source+'|'+t.property_slug+'|'+t.stay_date));
@@ -98,7 +104,7 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
    if(!allowed.has(key)||!Number.isFinite(Date.parse(at))||Date.parse(at)<Date.parse(input.now)||Date.parse(at)>=Date.parse(request.expiresAt))throw Error('QUOTE_ATTEMPT_NOT_SELECTED_OR_EXPIRED');
    if(reserved.has(key))return false;
    const ok=reserveQuoteRequest(target,at,input.reservationRoot);if(ok)reserved.add(key);return ok;};
-  return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,registryVersion:registry.regionVersion,registrySha256:registry.registrySha256,registryCounts:registry.counts,usableQuoteAssertions:0,priceAuthority:false}};
+  return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,registryVersion:registry.regionVersion,registrySha256:registry.registrySha256,registryCounts:registry.counts,listingFeedback:feedback.diagnostics,usableQuoteAssertions:[...states.values()].filter(s=>s.lastUsableAt!==null).length,priceAuthority:false}};
  }catch(error){return {enabled:true,status:'HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE',targets:[] as RotatingTarget[],reserve:undefined,
   diagnostics:{schema:'PRICING_QUOTE_LANE_FIRST_FAILURE_V1',stage:error instanceof RmsQuoteRequestReadError?error.stage:stage,
    reason:error instanceof RmsQuoteRequestReadError?error.reason:stage==='CONFIGURATION'?'QUOTE_CONFIGURATION_UNVERIFIED':stage==='ATTEMPT_READ'?'QUOTE_ATTEMPT_STATE_UNVERIFIED':'QUOTE_STAGE_CAUSE_NOT_RECORDED',
