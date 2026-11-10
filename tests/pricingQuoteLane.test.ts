@@ -73,10 +73,18 @@ it('an existing unresolved lock is preserved and causes no network reservation',
  expect(plan.reserve!(target,at)).toBe(false);expect(existsSync(lock)).toBe(true);expect(readQuoteReservations(at,f.root)).toEqual([]);
 });
 it('invalid exact-source input or corrupt request state holds only this collection lane with zero targets',()=>{
- const f=setup();expect(resolvePricingQuoteLane({...f.env,ZMI_RMS_QUOTE_SOURCE_RELEASE:'f'.repeat(40)},f.input).targets).toEqual([]);
+ const f=setup(),wrong=resolvePricingQuoteLane({...f.env,ZMI_RMS_QUOTE_SOURCE_RELEASE:'f'.repeat(40)},f.input);expect(wrong.targets).toEqual([]);
+ expect(wrong.diagnostics).toMatchObject({stage:'REQUEST_VALIDATION',reason:'RMS_QUOTE_SCHEMA_OR_SOURCE',priceAuthority:false});
  const p=resolvePricingQuoteLane(f.env,f.input);p.reserve!(p.targets[0]!,at);
  writeFileSync(join(f.root,'2026-10-25.jsonl'),'PARTIAL_UNVERIFIED\n');
  const held=resolvePricingQuoteLane(f.env,f.input);expect(held.status).toBe('HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE');expect(held.targets).toEqual([]);
+ expect(held.diagnostics).toMatchObject({stage:'ATTEMPT_READ',reason:'QUOTE_ATTEMPT_STATE_UNVERIFIED'});
+});
+it('distinguishes an expired request from missing attempt history without exporting paths or raw errors',()=>{
+ const f=setup(),held=resolvePricingQuoteLane(f.env,{...f.input,now:'2026-10-26T12:00:00Z'});
+ expect(held.status).toBe('HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE');expect(held.targets).toEqual([]);
+ expect(held.diagnostics).toMatchObject({stage:'REQUEST_VALIDATION',reason:'RMS_QUOTE_EXPIRED_OR_TIME_INVALID'});
+ expect(JSON.stringify(held.diagnostics)).not.toContain(f.dir);expect(existsSync(f.root)).toBe(false);
 });
 it('does not reserve an unselected or expired request and distinguishes selection counts from legacy diagnostics',()=>{
  const f=setup(),p=resolvePricingQuoteLane(f.env,f.input);

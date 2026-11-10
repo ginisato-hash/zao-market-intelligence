@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {mkdtempSync,symlinkSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {validateRmsQuoteRequest,readRmsQuoteRequest,type RmsQuoteRequest} from '../src/services/rmsQuoteRequest';
+import {validateRmsQuoteRequest,readRmsQuoteRequest,RmsQuoteRequestReadError,type RmsQuoteRequest} from '../src/services/rmsQuoteRequest';
 import {canonicalJson} from '../src/services/marketEvidenceSidecar';
 const accepted={releaseGitSha:'a'.repeat(40),bundleSha256:'b'.repeat(64),graphSha256:'c'.repeat(64)},at='2026-10-25T00:00:00Z';
 function seal(r:Omit<RmsQuoteRequest,'requestSha256'>):RmsQuoteRequest{return {...r,requestSha256:createHash('sha256').update(canonicalJson(r)).digest('hex')};}
@@ -29,4 +29,15 @@ it('reads a stable bounded local file but refuses symlinks and oversized input w
  writeFileSync(path,JSON.stringify(request()));expect(readRmsQuoteRequest(path,at,accepted).needs).toHaveLength(1);
  symlinkSync(path,alias);expect(()=>readRmsQuoteRequest(alias,at,accepted)).toThrow('UNAVAILABLE_OR_INVALID');
  writeFileSync(path,'x'.repeat(1024*1024+1));expect(()=>readRmsQuoteRequest(path,at,accepted)).toThrow('UNAVAILABLE_OR_INVALID');
+});
+it('preserves a closed validation reason while suppressing file and JSON exception text',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'rms-quote-first-')),path=join(dir,'request.json');
+ writeFileSync(path,JSON.stringify(request()));
+ try{readRmsQuoteRequest(path,'2026-10-26T12:00:00Z',accepted);throw Error('EXPECTED_REFUSAL')}catch(e){
+  expect(e).toBeInstanceOf(RmsQuoteRequestReadError);expect(e).toMatchObject({stage:'REQUEST_VALIDATION',reason:'RMS_QUOTE_EXPIRED_OR_TIME_INVALID'});
+ }
+ writeFileSync(path,'PRIVATE_INVALID_JSON');
+ try{readRmsQuoteRequest(path,at,accepted);throw Error('EXPECTED_REFUSAL')}catch(e){
+  expect(e).toMatchObject({stage:'REQUEST_DECODE',reason:'RMS_QUOTE_JSON_INVALID'});expect(String(e)).not.toContain('PRIVATE_INVALID_JSON');
+ }
 });
