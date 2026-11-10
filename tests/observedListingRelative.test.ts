@@ -17,6 +17,14 @@ it('adopts observed listing neutrality without claiming public fixed-product adm
 it('reports common-property price movement and leave-one-out uncertainty separately from inventory',()=>{
  const a=analyzeObservedListingRelative(input(paired([.9,1,1.1]))).days[0]!;expect(a.relativeIndex).toBe(1);expect(a.leaveOneOut.min).toBeCloseTo(.95);expect(a.leaveOneOut.max).toBeCloseTo(1.05);expect(a.influenceAttenuation).toBeLessThan(.3);expect(a.comparisons.every(x=>x.observationIntervalHours===48)).toBe(true);
 });
+it.each([.9,1,1.1])('keeps same-facility same-stay-date direction for ratio %s distinct from missing market',ratio=>{
+ const day=analyzeObservedListingRelative(input(paired([ratio,ratio,ratio]))).days[0]!;
+ expect(day.commonProperties).toBe(3);expect(day.relativeIndex).toBeCloseTo(ratio);
+ expect(day.status).toBe(ratio===1?'SUPPORTED_NEUTRAL':'SUPPORTED_CHANGE');
+ expect(day.eligible).toBe(true);expect(day.influenceAttenuation).toBeGreaterThan(0);
+ expect(day.comparisons.every(c=>c.observationIntervalHours===48)).toBe(true);
+ expect(analyzeObservedListingRelative(input([])).days[0]!.status).toBe('INSUFFICIENT_Y_ONLY');
+});
 it('does not turn current failures or missing amounts into old success or a zero price',()=>{
  const rows=paired();rows.push(row('p0','2026-11-01T03:10:00Z',10000,{availability_status:'navigation_failed',source_primary_price:'',normalized_total_price:'',collected_date_jst:'2026-11-02'}));const a=analyzeObservedListingRelative(input(rows)).days[0]!;expect(a.commonProperties).toBe(2);expect(a.status).toBe('INSUFFICIENT_Y_ONLY');expect(a.failures.flatMap(x=>x.reasons)).toContain('LATEST_NOT_AVAILABLE_PRICE');
 });
