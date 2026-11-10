@@ -6171,7 +6171,7 @@ booking,名湯舎 創,2026-12-26,,2026-11-06T08:00:06+09:00,,unknown,sold_out,,,
 booking,松尾ハウス,2026-12-26,,2026-11-02T12:00:03+09:00,,unknown,unknown,,,,,not_comparable,none,assumed_room_only,probable_two_person_standard_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,深山荘 高見屋,2026-12-26,,2026-11-01T18:00:05+09:00,,unknown,available,,116600,,,unknown,none,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,116600,false,inventory_dp_pressure_proxy
 booking,源泉湯宿 蔵王プラザホテル,2026-12-26,,2026-11-04T08:00:06+09:00,,unknown,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-booking,蔵王・和歌（うた）の宿 わかまつや,2026-12-26,,2026-10-30T20:00:06+09:00,,unknown,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
+booking,蔵王・和歌（うた）の宿 わかまつや,2026-12-26,2026-10-30T20:00:06+09:00,2026-11-10T14:35:36+09:00,258.59,sold_out,unknown,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,蔵王四季のホテル,2026-12-26,,2026-10-31T06:00:06+09:00,,unknown,available,,,,,not_comparable,none,assumed_room_only,excluded_large_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,蔵王国際ホテル,2026-12-26,,2026-11-04T04:00:05+09:00,,unknown,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,蔵王温泉 高砂屋旅館,2026-12-26,,2026-11-06T22:00:06+09:00,,unknown,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -6517,7 +6517,7 @@ booking,たかみや瑠璃倶楽,2027-01-05,2026-11-02T06:00:06+09:00,2026-11-03
 booking,ペンションぷうたろう,2027-01-05,2026-11-02T06:00:06+09:00,2026-11-03T12:00:05+09:00,30,available,available,28215,28215,0,0,same_price_available,noise,assumed_room_only,probable_two_person_standard_room,medium,medium,0.36,0,28215,false,inventory_dp_pressure_proxy
 booking,ペンション木いちご,2027-01-05,,2026-11-02T06:00:06+09:00,,unknown,available,,18600,,,unknown,none,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,18600,false,inventory_dp_pressure_proxy
 booking,ホテル松金屋アネックス,2027-01-05,2026-11-02T06:00:06+09:00,2026-11-03T12:00:05+09:00,30,sold_out,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-booking,ル・ベール蔵王,2027-01-05,2026-11-02T06:00:06+09:00,2026-11-03T12:00:05+09:00,30,available,available,,,,,not_comparable,none,assumed_room_only,excluded_single_room,low,low,0,0,,false,inventory_dp_pressure_proxy
+booking,ル・ベール蔵王,2027-01-05,2026-11-03T12:00:05+09:00,2026-11-10T14:35:36+09:00,170.59,available,available,,38000,,,unknown,none,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,38000,false,inventory_dp_pressure_proxy
 booking,ロッジスガノ,2027-01-05,2026-11-02T06:00:06+09:00,2026-11-03T12:00:05+09:00,30,sold_out,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,ロッジまつぽっくり,2027-01-05,2026-11-02T06:00:06+09:00,2026-11-03T12:00:05+09:00,30,available,available,,,,,not_comparable,none,assumed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,吉田屋,2027-01-05,2026-11-02T08:00:06+09:00,2026-11-03T12:00:05+09:00,28,available,available,29700,29700,0,0,same_price_available,noise,assumed_room_only,probable_two_person_standard_room,medium,medium,0.36,0,29700,false,inventory_dp_pressure_proxy
@@ -6695,7 +6695,7 @@ booking,名湯舎 創,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+0
 booking,松尾ハウス,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,unknown,unknown,,,,,not_comparable,none,assumed_room_only,probable_two_person_standard_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,深山荘 高見屋,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,available,available,83160,83160,0,0,same_price_available,noise,assumed_room_only,probable_two_person_standard_room,medium,medium,0.36,0,83160,false,inventory_dp_pressure_proxy
 booking,源泉湯宿 蔵王プラザホテル,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,sold_out,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-booking,蔵王・和歌（うた）の宿 わかまつや,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,available,available,,,,,not_comparable,none,assumed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
+booking,蔵王・和歌（うた）の宿 わかまつや,2027-01-11,2026-11-07T06:00:06+09:00,2026-11-10T14:35:36+09:00,80.59,available,available,,,,,not_comparable,none,assumed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,蔵王四季のホテル,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,available,available,,,,,not_comparable,none,assumed_room_only,excluded_large_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,蔵王国際ホテル,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,sold_out,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,蔵王温泉 高砂屋旅館,2027-01-11,2026-11-06T04:00:05+09:00,2026-11-07T06:00:06+09:00,26,available,available,,,,,not_comparable,none,assumed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
@@ -7067,7 +7067,7 @@ booking,たかみや瑠璃倶楽,2027-02-06,,2026-11-01T16:00:06+09:00,,unknown,
 booking,ペンションぷうたろう,2027-02-06,,2026-11-01T16:00:06+09:00,,unknown,unknown,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,ペンション木いちご,2027-02-06,,2026-11-02T08:00:06+09:00,,unknown,available,,24800,,,unknown,none,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,24800,false,inventory_dp_pressure_proxy
 booking,ホテル松金屋アネックス,2027-02-06,,2026-11-01T12:00:06+09:00,,unknown,unknown,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
-booking,ル・ベール蔵王,2027-02-06,,2026-11-01T12:00:06+09:00,,unknown,available,,,,,not_comparable,none,assumed_room_only,excluded_single_room,low,low,0,0,,false,inventory_dp_pressure_proxy
+booking,ル・ベール蔵王,2027-02-06,2026-11-01T12:00:06+09:00,2026-11-10T14:35:36+09:00,218.59,available,available,,43000,,,unknown,none,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,43000,false,inventory_dp_pressure_proxy
 booking,ロッジスガノ,2027-02-06,,2026-11-01T06:00:06+09:00,,unknown,sold_out,,,,,not_comparable,none,assumed_room_only,unknown_room_basis,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,ロッジまつぽっくり,2027-02-06,,2026-11-01T20:00:06+09:00,,unknown,available,,,,,not_comparable,none,assumed_room_only,excluded_family_or_suite_room,low,low,0,0,,false,inventory_dp_pressure_proxy
 booking,吉田屋,2027-02-06,2026-10-26T06:00:05+09:00,2026-10-28T14:00:05+09:00,56,available,available,39600,39600,0,0,same_price_available,noise,assumed_room_only,confirmed_two_person_standard_room,high,high,1,0,39600,false,inventory_dp_pressure_proxy
