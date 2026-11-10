@@ -7,8 +7,9 @@ import {createHash} from 'node:crypto';
 import {readBoundedStableFile as bounded} from './boundedStableFile';
 import {isPricingQuoteReservation} from './pricingQuoteLane';
 import {digest} from './marketRowPriceQuality';
-import {analyzeObservedListingRelative,listingPropertyAliases,listingCaptureFinalGuardClear,listingRowFinalGuardFailure,canonicalListingRowSetSha256,type ListingAnalysisPolicy,type ListingCanonicalRow,type ListingAttempt,type ListingRunReport} from './observedListingRelative';
+import {analyzeObservedListingRelative,listingPropertyAliases,listingCaptureFinalGuardClear,listingRowFinalGuardFailure,canonicalListingRowSetSha256,type ListingAnalysisPolicy,type ListingCanonicalRow,type ListingAttempt} from './observedListingRelative';
 import type {RmsQuoteRequest} from './rmsQuoteRequest';
+import {captureListingRunReport,readCapturedListingRunReport,type CapturedListingRunReport} from './observedListingReportReceipt';
 import {LISTING_REPORT_FILE_BYTES,LISTING_REPORT_COUNT,consumeListingReportBytes} from './observedListingReportBudget';
 export interface ListingQuarantineRef {path:string;rawSha256:string;entriesKey:'entries'|'unknownRows'}
 const rawSha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
@@ -46,14 +47,14 @@ export function captureObservedListingCanonicalInput(i:{root:string;dbPath:strin
  const targetDates=i.request.needs.filter(n=>n.priceDecisionEligible).map(n=>n.stayDate);if(!targetDates.length||targetDates.length>1000)throw Error('LISTING_TARGET_SCOPE');
  const doc=JSON.parse(execFileSync('python3',['-c',projection],{input:JSON.stringify({...i,dates:targetDates,lookbackHours:i.policy.maxComparisonAgeHours}),encoding:'utf8',maxBuffer:32*1024*1024,timeout:30000,stdio:['pipe','pipe','pipe']}));
  if(doc.kind!=='OBSERVED_LISTING_CANONICAL_RAM_PROJECTION_V1')throw Error('LISTING_PROJECTION_KIND');
- const sourceFiles:{path:string;sha256:string}[]=i.quarantine.map(q=>({path:q.path,sha256:q.rawSha256})),missingAttemptFiles:string[]=[],reports:ListingRunReport[]=[],cache=new Map<string,any>();let reportBytes=0;
+ const sourceFiles:{path:string;sha256:string}[]=i.quarantine.map(q=>({path:q.path,sha256:q.rawSha256})),missingAttemptFiles:string[]=[],reports:CapturedListingRunReport[]=[],cache=new Map<string,any>();let reportBytes=0;
  const read=(path:string,max:number)=>{if(realpathSync(path)!==path)throw Error('LISTING_SOURCE_ALIAS');const a=statSync(path,{bigint:true}),b=bounded(path,max),z=statSync(path,{bigint:true});if([a.dev,a.ino,a.size,a.mtimeNs,a.ctimeNs].some((x,n)=>x!==[z.dev,z.ino,z.size,z.mtimeNs,z.ctimeNs][n]))throw Error('LISTING_SOURCE_CHANGED');sourceFiles.push({path,sha256:rawSha(b)});return b;};
  if(i.normalRun){const path=join(i.root,'.data/reports/automation',i.normalRun.runId+'.json');if(rawSha(read(path,2*1024*1024))!==i.normalRun.reportRawSha256)throw Error('LISTING_NORMAL_REPORT_PIN');}
  const rows=doc.rows as ListingCanonicalRow[],targets=new Set(targetDates),attempts:ListingAttempt[]=[];
- const report=(slot:string)=>{if(cache.has(slot))return cache.get(slot);if(cache.size>=LISTING_REPORT_COUNT)throw Error('LISTING_REPORT_BUDGET');const path=join(i.root,'.data/reports/automation','auto_runner_market_refresh_rotating_'+slot+'.json');if(!existsSync(path)){cache.set(slot,null);return null;}const b=read(path,LISTING_REPORT_FILE_BYTES);reportBytes=consumeListingReportBytes(reportBytes,b.length);const d=JSON.parse(b.toString());if(d.run_id!=='auto_runner_market_refresh_rotating_'+slot||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision)){cache.set(slot,null);return null;}reports.push({runId:d.run_id,rawSha256:rawSha(b),rawJson:b.toString()});cache.set(slot,d);return d;};
+ const report=(slot:string)=>{if(cache.has(slot))return cache.get(slot);if(cache.size>=LISTING_REPORT_COUNT)throw Error('LISTING_REPORT_BUDGET');const path=join(i.root,'.data/reports/automation','auto_runner_market_refresh_rotating_'+slot+'.json');if(!existsSync(path)){cache.set(slot,null);return null;}const b=read(path,LISTING_REPORT_FILE_BYTES),d=JSON.parse(b.toString());if(d.run_id!=='auto_runner_market_refresh_rotating_'+slot||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision)){cache.set(slot,null);return null;}const receipt=captureListingRunReport({runId:d.run_id,rawSha256:rawSha(b),rawJson:b.toString()}),saved=readCapturedListingRunReport(receipt);reportBytes=consumeListingReportBytes(reportBytes,saved.retainedBytes);reports.push(receipt);cache.set(slot,saved.report);return saved.report;};
  // Bind every claimed normal-run row, including previous observations outside the 48h attempt window.
  for(const r of rows){const slot=/\/auto-runner-market-refresh-rotating\/(\d{8}_\d{6})\//u.exec(r.raw.debug_artifact_path??'')?.[1];if(slot)report(slot);}
- const outcomes=new Map(reports.map(r=>[r.runId,JSON.parse(r.rawJson)]));
+ const outcomes=new Map(reports.map(r=>[r.runId,readCapturedListingRunReport(r).report]));
  for(const r of rows){const reason=listingRowFinalGuardFailure(r,outcomes,Date.parse(i.asOf));if(reason&&r.quarantineReason===null)r.quarantineReason=reason;}
  const rowRefs=rows.map(r=>({rowId:r.rowId,rowHash:r.rowHash,rawRecordSha256:digest(r.raw),quarantineReason:r.quarantineReason})).sort((a,b)=>a.rowId<b.rowId?-1:a.rowId>b.rowId?1:0);
  const day=(at:number)=>new Date(at+9*3600000).toISOString().slice(0,10),first=day(Date.parse(i.asOf)-i.policy.maxCurrentAgeHours*3600000),last=day(Date.parse(i.asOf));

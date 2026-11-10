@@ -6,9 +6,9 @@ import {buildMarketPriceMovements} from './marketPriceMovementSignals';
 import {isOwnProperty,canonicalizeName} from './biWebDataExport';
 import {validatePrimaryPriceNumeric} from './pricePlausibilityGuard';
 import {digest,instant} from './marketRowPriceQuality';
-import {createHash} from 'node:crypto';
 import {marketPropertyGroup,MARKET_PROPERTY_GROUP_VERSION} from './marketPropertyGroups';
-import {consumeListingReportBytes} from './observedListingReportBudget';
+import {consumeListingReportBytes,LISTING_REPORT_COUNT} from './observedListingReportBudget';
+import {captureListingRunReport,readCapturedListingRunReport,type CapturedListingRunReport} from './observedListingReportReceipt';
 
 export const OBSERVED_LISTING_RELATIVE_V1='OBSERVED_LISTING_RELATIVE_V1' as const;
 export interface ListingCanonicalRow {rowId:string;rowHash:string;mirrorRowHash:string;raw:Record<string,string>;quarantineReason:string|null}
@@ -76,7 +76,7 @@ function classify(x:ListingCanonicalRow,asOf:number){const r=x.raw,h=history(x),
 type Classified=ReturnType<typeof classify>;
 const ref=(r:Classified)=>({rowId:r.x.rowId,rowHash:r.x.rowHash,rawRecordSha256:digest(r.x.raw),propertyId:r.h.property_id,propertyName:r.h.property_name,source:r.h.source,sourcePropertyId:r.x.raw.source_property_id||r.h.property_id,physicalPropertyId:marketPropertyGroup(r.h.source,r.h.property_id).propertyKey??(r.x.raw.source_property_id||r.h.property_id),groupKey:marketPropertyGroup(r.h.source,r.h.property_id).groupKey,stayDate:r.h.checkin_date,observedAt:r.h.observed_at,amountJpy:r.amount,meal:r.meal,room:r.room,member:r.member,tax:r.tax,amountBasis:r.amountBasis,unknown:r.unknown,cohortSha256:r.cohort,sourceProvenance:'CANONICAL_NORMALIZED_HISTORY_RAW_PRODUCT_NOT_VERIFIED' as const});
 
-export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[];attempts:ListingAttempt[];reports?:ListingRunReport[];sourceSnapshot:ListingSourceSnapshot;targetDates:string[];asOf:string;policy:ListingAnalysisPolicy;sourceSnapshotSha256:string;baselineBundleSha256:string;groups?:Record<string,string>}){
+export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[];attempts:ListingAttempt[];reports?:Array<ListingRunReport|CapturedListingRunReport>;sourceSnapshot:ListingSourceSnapshot;targetDates:string[];asOf:string;policy:ListingAnalysisPolicy;sourceSnapshotSha256:string;baselineBundleSha256:string;groups?:Record<string,string>}){
  const at=instant(input.asOf),p=input.policy;
  if(!Number.isFinite(at)||input.rows.length>15000||input.attempts.length>15000||input.targetDates.length>1000||new Set(input.targetDates).size!==input.targetDates.length||input.targetDates.some(d=>!/^\d{4}-\d{2}-\d{2}$/u.test(d)||new Date(d+'T00:00:00Z').toISOString().slice(0,10)!==d)||!Number.isSafeInteger(p.minProperties)||p.minProperties<2||p.minProperties>100||!Number.isFinite(p.maxCurrentAgeHours)||p.maxCurrentAgeHours<=0||p.maxCurrentAgeHours>72||!Number.isFinite(p.maxComparisonAgeHours)||p.maxComparisonAgeHours<=p.maxCurrentAgeHours||p.maxComparisonAgeHours>24*30||!Number.isSafeInteger(p.validForMinutes)||p.validForMinutes<=0||p.validForMinutes>120||p.productionAccepted!==false||![input.sourceSnapshotSha256,input.baselineBundleSha256].every(h=>/^[0-9a-f]{64}$/u.test(h)))throw Error('LISTING_ANALYSIS_SCOPE_OR_POLICY');
  const targets=new Set(input.targetDates),ids=new Set<string>();
@@ -86,7 +86,7 @@ export function analyzeObservedListingRelative(input:{rows:ListingCanonicalRow[]
  if(digest(snapshot.propertyAliases)!==digest(listingPropertyAliases(input.rows)))throw Error('LISTING_ALIAS_BINDING');
  if(!snapshot.producerCodeSha256s.length||snapshot.producerCodeSha256s.length>30||snapshot.producerCodeSha256s.some(x=>!/^[0-9a-f]{64}$/u.test(x))||snapshot.producerSetSha256!==digest([...new Set(snapshot.producerCodeSha256s)].sort()))throw Error('LISTING_PRODUCER_BINDING');
  const reports=new Map<string,Record<string,any>>();let reportBytes=0;
- for(const r of input.reports??[]){reportBytes=consumeListingReportBytes(reportBytes,Buffer.byteLength(r.rawJson));if(reports.has(r.runId)||createHash('sha256').update(r.rawJson).digest('hex')!==r.rawSha256||!snapshot.sourceFiles.some(f=>f.path.endsWith('/'+r.runId+'.json')&&f.sha256===r.rawSha256))throw Error('LISTING_REPORT_RECEIPT_BINDING');const d=JSON.parse(r.rawJson);if(d.run_id!==r.runId||d.dry_run!==false||!['rotating_market_refresh_success','rotating_market_refresh_partial_success'].includes(d.decision))throw Error('LISTING_REPORT_NOT_FINAL');reports.set(r.runId,d);}
+ for(const r of input.reports??[]){if(reports.size>=LISTING_REPORT_COUNT)throw Error('LISTING_REPORT_BUDGET');const receipt='rawJson'in r?captureListingRunReport(r):r,saved=readCapturedListingRunReport(receipt);reportBytes=consumeListingReportBytes(reportBytes,saved.retainedBytes);if(reports.has(receipt.runId)||!snapshot.sourceFiles.some(f=>f.path.endsWith('/'+receipt.runId+'.json')&&f.sha256===receipt.rawSha256))throw Error('LISTING_REPORT_RECEIPT_BINDING');reports.set(receipt.runId,saved.report);}
  for(const a of input.attempts){
   if(!a.propertyId||!targets.has(a.stayDate)||!Number.isFinite(instant(a.attemptedAt))||instant(a.attemptedAt)>at)throw Error('LISTING_ATTEMPT_SCOPE_OR_TIME');
   if(a.completedObservationRowId!==null){const r=input.rows.find(x=>x.rowId===a.completedObservationRowId);if(!r||(r.raw.source_slug_or_code||r.raw.source_property_id)!==a.propertyId||r.raw.checkin!==a.stayDate)throw Error('LISTING_ATTEMPT_ROW_TUPLE');
