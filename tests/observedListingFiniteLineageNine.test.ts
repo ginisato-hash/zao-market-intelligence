@@ -1,0 +1,8 @@
+import{it,expect,vi}from'vitest';
+vi.mock('better-sqlite3',()=>({default:class{constructor(){throw Error('NO_NATIVE_DB_IN_CONFIG_TEST');}}}));
+import{parseObservedListingPublicationConfig}from'../src/services/observedListingPublicationLane';
+const fixture=(n:number)=>({schema:'OBSERVED_LISTING_PUBLICATION_CONFIG_V1',evidenceKind:'OBSERVED_LISTING_RELATIVE_V1',acceptedProducerCodes:Array.from({length:n},(_,i)=>i.toString(16).padStart(64,'0')),policy:{version:'OWNED_FINITE_LINEAGE_V1',maxCurrentAgeHours:48,maxComparisonAgeHours:168,minProperties:3,validForMinutes:120,productionAccepted:false},quarantine:[]});
+it('retains nine previous producer codes and admits one explicit tenth source without changing analysis fields',()=>{const old=fixture(9),next=fixture(10),parsed=parseObservedListingPublicationConfig(next);expect(parsed.acceptedProducerCodes.slice(0,9)).toEqual(old.acceptedProducerCodes);expect(parsed.policy).toEqual(old.policy);expect(parsed.quarantine).toEqual(old.quarantine);});
+it('keeps a finite ten-source bound and rejects an eleventh source',()=>{expect(()=>parseObservedListingPublicationConfig(fixture(11))).toThrow();});
+it('rejects implicit production or transport authority',()=>{expect(()=>parseObservedListingPublicationConfig({...fixture(9),transportAuthority:true})).toThrow();expect(()=>parseObservedListingPublicationConfig({...fixture(9),policy:{...fixture(9).policy,productionAccepted:true}})).toThrow();});
+it('retains the original expiry and schema limits',()=>{expect(()=>parseObservedListingPublicationConfig({...fixture(9),policy:{...fixture(9).policy,validForMinutes:121}})).toThrow();expect(()=>parseObservedListingPublicationConfig({...fixture(9),evidenceKind:'PUBLIC_GROSS_DEMAND'})).toThrow();});

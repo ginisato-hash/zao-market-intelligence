@@ -7,17 +7,15 @@ import {buildRegionalRegistry} from './regionalMarketRegistry';
 import {REGIONAL_OFFICIAL_DISCOVERY} from './regionalOfficialDiscovery';
 import {planRegionalQuoteRotation} from './regionalQuoteRotation';
 import {isOwnPropertyName} from './ownPropertyTargets';
-import { readRmsQuoteRequest } from './rmsQuoteRequest';
-import { planUsefulQuoteRefresh, type UsefulQuoteState } from './usefulQuoteRefreshPlanner';
+import { readRmsQuoteRequest, RmsQuoteRequestReadError } from './rmsQuoteRequest';
+import { type UsefulQuoteState } from './usefulQuoteRefreshPlanner';
+import {isPricingQuoteReservation,type PricingQuoteReservation as Reservation} from './pricingQuoteReservation';
+import {readObservedListingPlannerFeedback} from './observedListingPlannerFeedback';
+export {isPricingQuoteReservation} from './pricingQuoteReservation';
 import type { MarketRefreshPropertyTarget } from './marketRefreshTargetUniverse';
 import { MAX_TARGETS_PER_PROPERTY_PER_RUN, type RotatingCaps, type RotatingDemandConfig, type RotatingTarget } from './rotatingCollectionScopePlanner';
 const ROOT='.data/run-state/pricing-quote-attempts';
-interface Reservation { kind:'QUOTE_REQUEST_RESERVED_V1'; source:'booking'; propertySlug:string; stayDate:string; attemptAt:string }
 const jstDate=(ms:number)=>new Date(ms+9*3600000).toISOString().slice(0,10);
-const valid=(r:Reservation)=>r?.kind==='QUOTE_REQUEST_RESERVED_V1'&&r.source==='booking'&&/^[a-z0-9-]{1,120}$/u.test(r.propertySlug)
- &&/^\d{4}-\d{2}-\d{2}$/u.test(r.stayDate)&&new Date(r.stayDate+'T00:00:00Z').toISOString().slice(0,10)===r.stayDate
- &&typeof r.attemptAt==='string'&&/(Z|[+-]\d\d:\d\d)$/u.test(r.attemptAt)&&Number.isFinite(Date.parse(r.attemptAt))
- &&Object.keys(r).sort().join('|')==='attemptAt|kind|propertySlug|source|stayDate';
 
 /** Includes failed/crashed request reservations, not just successful history appends. No quote outcome is inferred. */
 export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
@@ -33,7 +31,7 @@ export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
    if(bytes.length>1024*1024||before.size!==after.size||before.mtimeNs!==after.mtimeNs)throw Error('CHANGED');
    for(const line of bytes.toString('utf8').split('\n')){
     if(!line)continue;if(line.length>1024||rows.length>=20000)throw Error('BUDGET');
-    const r=JSON.parse(line) as Reservation;if(!valid(r)||Date.parse(r.attemptAt)>current)throw Error('SCHEMA');
+    const r=JSON.parse(line) as Reservation;if(!isPricingQuoteReservation(r)||Date.parse(r.attemptAt)>current)throw Error('SCHEMA');
     if(current-Date.parse(r.attemptAt)<=48*3600000)rows.push(r);
    }
   }catch{throw Error('QUOTE_ATTEMPT_STATE_UNVERIFIED');}finally{if(fd!==undefined)closeSync(fd);}
@@ -43,7 +41,7 @@ export function readQuoteReservations(now:string,root=ROOT):Reservation[]{
 
 export function reserveQuoteRequest(target:RotatingTarget,at:string,root=ROOT):boolean{
  const row:Reservation={kind:'QUOTE_REQUEST_RESERVED_V1',source:'booking',propertySlug:target.property_slug,stayDate:target.stay_date,attemptAt:at};
- if(target.source!=='booking'||!valid(row))throw Error('QUOTE_ATTEMPT_SCOPE');
+ if(target.source!=='booking'||!isPricingQuoteReservation(row))throw Error('QUOTE_ATTEMPT_SCOPE');
  const lockDir=join(root,'locks'),key='booking|'+row.propertySlug+'|'+row.stayDate,lockPath=join(lockDir,createHash('sha256').update(key).digest('hex')+'.lock');
  mkdirSync(lockDir,{recursive:true,mode:0o700});let lock:number;
  try{lock=openSync(lockPath,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}catch{return false;}
@@ -67,11 +65,13 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
 }){
  const disabled={enabled:false,status:'DISABLED',targets:input.legacyTargets,diagnostics:null,reserve:undefined};
  if(env['ZMI_USEFUL_QUOTES_ENABLED']!=='1')return disabled;
+ let stage: 'CONFIGURATION'|'REQUEST_READ'|'REGISTRY'|'ATTEMPT_READ'|'SELECTION' = 'CONFIGURATION';
  try{
   if(env['ZMI_RATE_CELL_EVIDENCE_ENABLED']!=='1'||!env['ZMI_RMS_QUOTE_REQUEST_PATH'])throw Error('INPUT');
+  stage='REQUEST_READ';
   const request=readRmsQuoteRequest(env['ZMI_RMS_QUOTE_REQUEST_PATH'],input.now,{releaseGitSha:env['ZMI_RMS_QUOTE_SOURCE_RELEASE']??'',bundleSha256:env['ZMI_RMS_QUOTE_BUNDLE_SHA256']??'',graphSha256:env['ZMI_RMS_QUOTE_GRAPH_SHA256']??''});
   // These are existing verified collection mappings, not assertions of room comparability or independent ownership.
-  const registry=buildRegionalRegistry([REGIONAL_OFFICIAL_DISCOVERY],input.properties);
+  stage='REGISTRY'; const registry=buildRegionalRegistry([REGIONAL_OFFICIAL_DISCOVERY],input.properties);
   const slugs=new Set(input.properties.filter(p=>p.source==='booking'&&p.enabled_for_live&&p.verified_mapping).map(p=>p.property_slug));
   const states=new Map<string,UsefulQuoteState>();
   const needs=new Set(request.needs.map(n=>n.stayDate));
@@ -81,13 +81,21 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
    if(!old||Date.parse(old.lastAttemptAt!)<Date.parse(at))states.set(key,{source:'booking',propertySlug:slug,stayDate:date,lastAttemptAt:at,lastUsableAt:null,usableBasisVersion:null,retryAfter:null});
   };
   for(const [key,at]of input.lastCollectedAt){const [source,slug,date]=key.split('|');if(source==='booking'&&slug&&date)set(slug,date,at);}
-  for(const r of readQuoteReservations(input.now,input.reservationRoot))set(r.propertySlug,r.stayDate,r.attemptAt);
+  stage='ATTEMPT_READ'; for(const r of readQuoteReservations(input.now,input.reservationRoot))set(r.propertySlug,r.stayDate,r.attemptAt);
+  const feedback=readObservedListingPlannerFeedback(env,{now:input.now,request});
+  for(const s of feedback.states){
+   if(!slugs.has(s.propertySlug)||!needs.has(s.stayDate))continue;
+   const key=s.source+'|'+s.propertySlug+'|'+s.stayDate,old=states.get(key),oldAt=Date.parse(old?.lastAttemptAt??''),knownAt=Date.parse(s.lastAttemptAt??'');
+   // A newer reservation absent from the sealed read invalidates its older usable state.
+   if(Number.isFinite(oldAt)&&(!Number.isFinite(knownAt)||oldAt>knownAt))continue;
+   states.set(key,{...s,lastAttemptAt:s.lastAttemptAt??old?.lastAttemptAt??null});
+  }
   const ownKeys=new Set<string>();
   const protectedTargets=input.legacyTargets.filter(t=>{if(!isOwnPropertyName(t.canonical_property_name)||t.source!=='booking')return false;
    if(ownKeys.has(t.property_slug))return false;ownKeys.add(t.property_slug);return true;});
   const urgent=input.legacyTargets.find(t=>t.source==='booking'&&!isOwnPropertyName(t.canonical_property_name)&&t.reason_codes.includes('near_term_dense'));
   if(urgent)protectedTargets.push(urgent);
-  const plan=planRegionalQuoteRotation({now:input.now,runDate:input.runDate,registry:registry.properties,needs:request.needs,states:[...states.values()],caps:input.caps,config:input.config,legacyProtected:protectedTargets,coverageFraction:0.5,freshHours:36,farDeadlineHours:168});
+  stage='SELECTION'; const plan=planRegionalQuoteRotation({now:input.now,runDate:input.runDate,registry:registry.properties,needs:request.needs,states:[...states.values()],caps:input.caps,config:input.config,legacyProtected:protectedTargets,coverageFraction:0.5,freshHours:36,farDeadlineHours:168,...(feedback.minProperties===null?{}:{minComparisonProperties:feedback.minProperties})});
   // Preserve the existing ordinary per-property cap; this lane does not inherit the separate winter quota exception.
   const targets=plan.selected;
   const allowed=new Set(targets.map(t=>t.source+'|'+t.property_slug+'|'+t.stay_date));
@@ -96,8 +104,11 @@ export function resolvePricingQuoteLane(env:Record<string,string|undefined>,inpu
    if(!allowed.has(key)||!Number.isFinite(Date.parse(at))||Date.parse(at)<Date.parse(input.now)||Date.parse(at)>=Date.parse(request.expiresAt))throw Error('QUOTE_ATTEMPT_NOT_SELECTED_OR_EXPIRED');
    if(reserved.has(key))return false;
    const ok=reserveQuoteRequest(target,at,input.reservationRoot);if(ok)reserved.add(key);return ok;};
-  return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,registryVersion:registry.regionVersion,registrySha256:registry.registrySha256,registryCounts:registry.counts,usableQuoteAssertions:0,priceAuthority:false}};
- }catch{return {enabled:true,status:'HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE',targets:[] as RotatingTarget[],diagnostics:null,reserve:undefined};}
+  return {enabled:true,status:'READY',targets,reserve,diagnostics:{...plan,selected:targets,selectedAfterPropertyCap:targets.length,requestSha256:request.requestSha256,source:request.source,eligibleDates:request.needs.filter(n=>n.priceDecisionEligible).length,registryVersion:registry.regionVersion,registrySha256:registry.registrySha256,registryCounts:registry.counts,listingFeedback:feedback.diagnostics,usableQuoteAssertions:[...states.values()].filter(s=>s.lastUsableAt!==null).length,priceAuthority:false}};
+ }catch(error){return {enabled:true,status:'HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE',targets:[] as RotatingTarget[],reserve:undefined,
+  diagnostics:{schema:'PRICING_QUOTE_LANE_FIRST_FAILURE_V1',stage:error instanceof RmsQuoteRequestReadError?error.stage:stage,
+   reason:error instanceof RmsQuoteRequestReadError?error.reason:stage==='CONFIGURATION'?'QUOTE_CONFIGURATION_UNVERIFIED':stage==='ATTEMPT_READ'?'QUOTE_ATTEMPT_STATE_UNVERIFIED':'QUOTE_STAGE_CAUSE_NOT_RECORDED',
+   usableQuoteAssertions:0,priceAuthority:false,selected:[],selectedAfterPropertyCap:0,excluded:{} as Record<string,number>,candidates:0}};}
 }
 
 export function quoteSelectionMetrics(targets:readonly RotatingTarget[]){

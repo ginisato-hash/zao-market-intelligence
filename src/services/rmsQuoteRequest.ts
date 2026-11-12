@@ -16,6 +16,13 @@ const instant = (s: unknown) => typeof s === 'string' && /(?:Z|[+-]\d\d:\d\d)$/u
 const hash = (s: unknown) => typeof s === 'string' && /^[0-9a-f]{64}$/u.test(s);
 const date = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(s) && Number.isFinite(Date.parse(s + 'T00:00:00Z')) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
 const keys = (v: object, expected: string[]) => Object.keys(v).sort().join('|') === expected.sort().join('|');
+const validationReasons = new Set(['RMS_QUOTE_ACCEPTED_SOURCE_REQUIRED','RMS_QUOTE_SCHEMA','RMS_QUOTE_SCHEMA_OR_SOURCE','RMS_QUOTE_EXPIRED_OR_TIME_INVALID','RMS_QUOTE_NEED_INVALID','RMS_QUOTE_SEAL']);
+/** Closed diagnostics only; neither a path nor exception text is exported. */
+export class RmsQuoteRequestReadError extends Error {
+    constructor(readonly stage: 'REQUEST_READ' | 'REQUEST_DECODE' | 'REQUEST_VALIDATION', readonly reason: string) {
+        super('RMS_QUOTE_REQUEST_UNAVAILABLE_OR_INVALID');
+    }
+}
 export function validateRmsQuoteRequest(raw: unknown, now: string, accepted: { releaseGitSha: string; bundleSha256: string; graphSha256: string }): RmsQuoteRequest {
     if (!/^[0-9a-f]{40}$/u.test(accepted.releaseGitSha) || !hash(accepted.bundleSha256) || !hash(accepted.graphSha256) || !Number.isFinite(instant(now))) throw Error('RMS_QUOTE_ACCEPTED_SOURCE_REQUIRED');
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('RMS_QUOTE_SCHEMA');
@@ -42,13 +49,19 @@ export function validateRmsQuoteRequest(raw: unknown, now: string, accepted: { r
 /** Fixed configured path, bounded stable read; raw content and absolute paths never enter diagnostics. */
 export function readRmsQuoteRequest(path: string, now: string, accepted: Parameters<typeof validateRmsQuoteRequest>[2]) {
     let fd: number | undefined;
+    let stage: RmsQuoteRequestReadError['stage'] = 'REQUEST_READ';
     try {
         fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         const before = fstatSync(fd, { bigint: true });
         if (!before.isFile() || before.size > 1024n * 1024n) throw Error('BUDGET');
         const bytes = readBoundedStableFd(fd,1024*1024), after = fstatSync(fd, { bigint: true });
         if (bytes.length > 1024 * 1024 || before.size !== after.size || before.mtimeNs !== after.mtimeNs) throw Error('CHANGED');
-        return validateRmsQuoteRequest(JSON.parse(bytes.toString('utf8')), now, accepted);
-    } catch { throw Error('RMS_QUOTE_REQUEST_UNAVAILABLE_OR_INVALID'); }
+        stage = 'REQUEST_DECODE'; const raw: unknown = JSON.parse(bytes.toString('utf8'));
+        stage = 'REQUEST_VALIDATION'; return validateRmsQuoteRequest(raw, now, accepted);
+    } catch (error) {
+        const reason = stage === 'REQUEST_VALIDATION' && error instanceof Error && validationReasons.has(error.message)
+            ? error.message : stage === 'REQUEST_DECODE' ? 'RMS_QUOTE_JSON_INVALID' : 'RMS_QUOTE_FILE_UNVERIFIED';
+        throw new RmsQuoteRequestReadError(stage, reason);
+    }
     finally { if (fd !== undefined) closeSync(fd); }
 }
