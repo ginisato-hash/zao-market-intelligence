@@ -18,6 +18,7 @@ import {selectFixedTwoPersonSignals} from '../services/bookingFixedProductSelect
 import type {MarketPanel} from '../services/marketTwoPersonCurve';
 import {captureBookingRateCells,deriveBookingRateCell} from '../services/bookingRateCellEvidence';
 import {observeBookingInitialLoad} from '../services/bookingInitialLoadBarrier';
+import { readComparisonBaseline } from '../services/bookingComparisonBaseline';
 import {observeBookingCurrentDocument} from '../services/bookingCurrentDocument';
 import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollection} from '../services/bookingPrimaryCollection';
 import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
@@ -205,6 +206,8 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
       let initialLoadReadiness:Awaited<ReturnType<NonNullable<typeof initialLoad>['waitForFreshQuiet']>>|null=null;
       const fixedProducts=panel?.products.filter(p=>p.sourcePropertyId===t.property_slug&&p.source==='booking');
       let uiBlock:ReturnType<typeof classifyBlock>=null,uiStateUnverified=false;
+      let comparisonBaselineSamples: number | null = null;
+      let firstComparisonText: { pageTitle: string; bodyText: string } | null = null;
       let loaded = false; let httpStatus = 0; let finalUrl = probeUrl; let pageTitle = ""; let bodyText = ""; let error = "";
       const documentObserver=rateCellSink!==undefined?await observeBookingCurrentDocument(page):null;
       let documentProof:Awaited<ReturnType<NonNullable<typeof documentObserver>['bind']>>=null;
@@ -236,14 +239,32 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
           documentProofState=documentProof?'BOUND_200':'UNVERIFIED';
         }
         phase='DOM_READ';
-        finalUrl = page.url(); pageTitle = await page.title().catch(() => ""); bodyText = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => "");
+        finalUrl = page.url();
+        const baselineTitle = await page.title().catch(() => null);
+        pageTitle = baselineTitle ?? "";
+        const bodyDeadline = performance.now() + 8_000;
+        const baselineBody = await page.locator("body").innerText({ timeout: 8_000 }).catch(() => null);
+        bodyText = baselineBody ?? "";
+        const fence = async () => {
+          try { await documentProof!.assertUnchanged(); }
+          catch { documentProofState = 'CHANGED'; pageGuard?.failInformationCleanup(); throw Error('CURRENT_DOCUMENT_CHANGED'); }
+        };
+        if (documentProof && pageGuard && baselineTitle !== null && baselineBody !== null && t.reason_codes.includes('LISTING_COMPARISON_REVISIT')) {
+          firstComparisonText = { pageTitle, bodyText };
+          const sample = await readComparisonBaseline({
+            page, target, checkin: t.checkin, checkout, finalUrl, assertSameDocument: fence,
+            guardClear: () => pageGuard.stateVerified && !pageGuard.hardStop && pageGuard.reason === null
+          }, firstComparisonText, bodyDeadline);
+          pageTitle = sample.pageTitle; bodyText = sample.bodyText;
+          uiBlock = sample.block; comparisonBaselineSamples = sample.samples;
+        }
         // Baseline screenshots may load ordinary page resources. Take them before
         // the information guard, which must remain strict through page close.
         phase='SCREENSHOT';
         await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
         phase='CAPTURE_GATE';
-        if(documentProof)try{await documentProof.assertUnchanged();}catch{documentProofState='CHANGED';pageGuard?.failInformationCleanup();throw Error('CURRENT_DOCUMENT_CHANGED');}
-        entryBlock=rateCellSink!==undefined&&documentProof?classifyBlock(200,`${pageTitle}\n${bodyText}`):'NOT_EVALUATED';
+        if(documentProof)await fence();
+        entryBlock=rateCellSink!==undefined&&documentProof?uiBlock??classifyBlock(200,`${pageTitle}\n${bodyText}`):'NOT_EVALUATED';
         entryReason=rateCellSink===undefined?'EVIDENCE_DISABLED':!documentProof?(httpStatus!==200?'INITIAL_HTTP_NOT_200':'CURRENT_DOCUMENT_UNVERIFIED'):entryBlock!==null?'PAGE_BLOCKED':'CAPTURE_CALLED';
         if(rateCellSink!==undefined&&documentProof&&entryBlock===null){
           await pageGuard!.requireClear();
@@ -251,7 +272,6 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
           // information-arm boundary. The observer stays through route install.
           try{
             phase='CAPTURE';captureCalled=true;
-            const fence=async()=>{try{await documentProof!.assertUnchanged();}catch{documentProofState='CHANGED';pageGuard?.failInformationCleanup();throw Error('CURRENT_DOCUMENT_CHANGED');}};
             const capture=await captureBookingRateCells(page,{propertySlug:t.property_slug,checkin:t.checkin,checkout,observedAt:new Date().toISOString(),adoptionPolicy:'BOOKING_2P_ADOPTION_V2'},3,pageGuard!,fixedProducts?.length?fixedProducts:undefined,{assertUnchanged:fence});
             await fence();
             fixedCapture=capture;
@@ -284,6 +304,11 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
           pageGuard.dispose();
         }
       }
+      // A later DOM sample cannot contribute a price if its final document or source guard failed.
+      if (firstComparisonText && (uiStateUnverified || uiBlock || pageGuard?.hardStop || documentProofState !== 'BOUND_200')) {
+        pageTitle = firstComparisonText.pageTitle;
+        bodyText = firstComparisonText.bodyText;
+      }
       let signals = analyzeBookingRenderedDomSignals({ target, checkin: t.checkin, checkout, loaded, httpStatus, finalUrl, pageTitle, bodyText, error });
       if(fixedProducts?.length===1){const selected=selectFixedTwoPersonSignals(signals,fixedCapture,fixedProducts[0]!,uiBlock,!uiStateUnverified);signals=selected.signals;if(rateCellRecord)rateCellRecord['fixedProductSelection']=selected.status;}
       if(rateCellSink){
@@ -291,6 +316,7 @@ async function collectBookingLive(targets: readonly RotatingTarget[], debugPath:
         Object.assign(record,{attemptedNetwork:true,completedAt:new Date().toISOString(),pageFinalBlockReason:uiBlock,pageFinalBlockStateVerified:!uiStateUnverified});
         record['captureEntryDiagnostics']={schema:'BOOKING_CAPTURE_ENTRY_DIAGNOSTICS_V1',loaded,initialHttpStatus:Number.isInteger(httpStatus)&&httpStatus>=0&&httpStatus<=599?httpStatus:null,phase,reason:entryReason,preCaptureBlock:entryBlock,failurePhase,navigationErrorClass,captureCalled,mainDocumentStatuses,responseOverflow,responseUnverified};
         record['currentDocumentHttpProof']={schema:'BOOKING_CURRENT_DOCUMENT_HTTP_PROOF_V1',status:documentProofState,responseStatus:documentProofState==='BOUND_200'?200:null};
+        if(comparisonBaselineSamples!==null)record['comparisonBaselineSamples']=comparisonBaselineSamples;
         if(pageGuard)record['informationDiagnostics']=pageGuard.informationDiagnostics;
         if(pageGuard)record['initialRouteCausalDiagnostics']=pageGuard.initialRouteCausalDiagnostics;
         rateCellSink.push(record);

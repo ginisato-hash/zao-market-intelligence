@@ -6,8 +6,21 @@ describe('closed RAM preview diagnostics without admission change',()=>{
  it('retains original amount/time and keeps tax and tuple evidence explicitly separate',()=>{
   const d=buildBookingPreviewRowPolicyDiagnostics(row());expect(d.primaryAmountJpy).toBe(33660);expect(d.originalCollectedAtJst).toBe('2026-11-03T08:00:06+09:00');expect(d.taxBasis).toBe('NOT_RECORDED_IN_PREVIEW');expect(d.officialTaxFeeAdderJpy).toBeNull();expect(d.priceAdmissionMeasured).toBe(false);expect(d.tupleEvidence).toBe('PREVIEW_DECLARED_SCOPE_NATIVE_DOCUMENT_PROOF_SEPARATE');expect(d.timestampRole).toBe('ORIGINAL_RUN_COLLECTED_AT_NOT_PER_PAGE_PRICE_TIME');
  });
- it('distinguishes one degraded target while mixed source-wide fail-closed remains unchanged',()=>{
-  const rows=[row(),row({property_slug:'degraded-fixture',availability_status:'degraded_empty',classification:'excluded',basis_confidence:'insufficient',dp_usage:'audit_only',primary_price_numeric:null})],check=buildBookingSourceLevelCheck(rows,2),d=rows.map(buildBookingPreviewRowPolicyDiagnostics);expect(d.filter(x=>x.availabilityStatus==='degraded_empty').map(x=>x.sourcePropertyId)).toEqual(['degraded-fixture']);expect(d[0]!.individualRowPolicyRejection).toBe('');expect(d[0]!.priceAdmissionMeasured).toBe(false);expect(check.append_allowed).toBe(false);const plan=buildAppendPlan({bookingRows:rows,jalanRows:[],existingKeys:[],bookingSourceCheck:check,jalanSourceCheck:buildJalanSourceLevelCheck([]),bookingReportPath:'',bookingCsvPath:''});expect(plan.new_row_count).toBe(0);expect(plan.rejected_rows.map(x=>x.reason)).toEqual(['source_degraded_page_detected','source_degraded_page_detected']);
+ it('isolates one empty listing while retaining the ordinary row and refusing an all-empty batch',()=>{
+  const empty=row({property_slug:'degraded-fixture',availability_status:'degraded_empty',classification:'excluded',basis_confidence:'insufficient',dp_usage:'audit_only',primary_price_numeric:null});
+  const rows=[row(),empty];
+  const check=buildBookingSourceLevelCheck(rows,2);
+  const diagnostics=rows.map(buildBookingPreviewRowPolicyDiagnostics);
+  expect(diagnostics[0]!.individualRowPolicyRejection).toBe('');
+  expect(diagnostics[0]!.priceAdmissionMeasured).toBe(false);
+  expect(diagnostics[1]!.sourcePropertyId).toBe('degraded-fixture');
+  expect(diagnostics[1]!.availabilityStatus).toBe('degraded_empty');
+  expect(check.append_allowed).toBe(true);
+  const plan=buildAppendPlan({bookingRows:rows,jalanRows:[],existingKeys:[],bookingSourceCheck:check,jalanSourceCheck:buildJalanSourceLevelCheck([]),bookingReportPath:'',bookingCsvPath:''});
+  expect(plan.new_row_count).toBe(1);
+  expect(plan.approved_rows.map(r=>r.sourceSlugOrCode)).toEqual(['fixture-only']);
+  expect(plan.rejected_rows.map(r=>r.reason)).toEqual(['source_degraded_page_detected']);
+  expect(buildBookingSourceLevelCheck([empty],1).append_allowed).toBe(false);
  });
  it('retains challenge and individual rejection without persisting raw warning or page data',()=>{
   const r=row({warning_flags:['captcha detected secret_cookie=PRIVATE https://fixture.invalid/path?q=secret'],primary_room_card_text:'PRIVATE_PAGE_TEXT'}),d=buildBookingPreviewRowPolicyDiagnostics(r),text=JSON.stringify(d);expect(d.blockedOrLoginWarning).toBe(true);expect(d.individualRowPolicyRejection).toBe('blocked_or_login_warning');expect(buildBookingSourceLevelCheck([r],1).append_allowed).toBe(false);for(const secret of ['secret_cookie','PRIVATE','fixture.invalid','PRIVATE_PAGE_TEXT'])expect(text).not.toContain(secret);
