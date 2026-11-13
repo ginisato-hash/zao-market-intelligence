@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-11-13T13:38:40+09:00",
-  "latest_collected_at_jst": "2026-11-13T13:35:06+09:00",
-  "history_rows_total": 83511,
-  "latest_observation_rows": 9130,
-  "unified_rows": 4625,
-  "unified_rows_before_retention": 6771,
+  "generated_at_jst": "2026-11-13T14:37:20+09:00",
+  "latest_collected_at_jst": "2026-11-13T14:35:36+09:00",
+  "history_rows_total": 83560,
+  "latest_observation_rows": 9150,
+  "unified_rows": 4643,
+  "unified_rows_before_retention": 6789,
   "distinct_properties": 28,
-  "distinct_checkins": 247,
+  "distinct_checkins": 248,
   "sources_included": [
     "booking",
     "jalan",
@@ -42,21 +42,21 @@
   "dropped_past_period_keys_count": 8,
   "dropped_past_rows_count": 2146,
   "availability_breakdown": {
-    "total": 4625,
-    "available": 2958,
+    "total": 4643,
+    "available": 2965,
     "sold_out": 452,
     "not_found": 0,
-    "excluded": 1215,
-    "ota_unavailable_rate": 0.1326,
-    "data_missing_rate": 0.2627,
-    "data_reliability_rate": 0.7373
+    "excluded": 1226,
+    "ota_unavailable_rate": 0.1323,
+    "data_missing_rate": 0.2641,
+    "data_reliability_rate": 0.7359
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 8297,
+  "price_movement_rows": 8317,
   "dp_pressure_rows": 286,
   "price_movement_own_property_rows": 10866,
-  "price_movement_latest_collected_at_jst": "2026-11-13T13:35:06+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-11-13T13:35:06+09:00",
+  "price_movement_latest_collected_at_jst": "2026-11-13T14:35:36+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-11-13T14:35:36+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 18000,
   "own_kiraku_price": 71774,
@@ -104,8 +104,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -30526,
-  "priority_competitor_vs_own_price_gap": -30526,
-  "priority_competitor_price_changes_count": 317,
+  "competitor_vs_own_price_gap": -23327,
+  "priority_competitor_vs_own_price_gap": -23327,
+  "priority_competitor_price_changes_count": 318,
   "own_property_price_changes_count": 182
 }
