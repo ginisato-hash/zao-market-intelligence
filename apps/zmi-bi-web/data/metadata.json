@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-11-13T19:10:05+09:00",
-  "latest_collected_at_jst": "2026-11-13T18:00:06+09:00",
-  "history_rows_total": 83626,
-  "latest_observation_rows": 9177,
-  "unified_rows": 4669,
-  "unified_rows_before_retention": 6815,
+  "generated_at_jst": "2026-11-13T21:10:06+09:00",
+  "latest_collected_at_jst": "2026-11-13T20:00:06+09:00",
+  "history_rows_total": 83649,
+  "latest_observation_rows": 9188,
+  "unified_rows": 4680,
+  "unified_rows_before_retention": 6826,
   "distinct_properties": 28,
-  "distinct_checkins": 249,
+  "distinct_checkins": 250,
   "sources_included": [
     "booking",
     "jalan",
@@ -42,21 +42,21 @@
   "dropped_past_period_keys_count": 8,
   "dropped_past_rows_count": 2146,
   "availability_breakdown": {
-    "total": 4669,
-    "available": 2973,
+    "total": 4680,
+    "available": 2977,
     "sold_out": 452,
     "not_found": 0,
-    "excluded": 1244,
-    "ota_unavailable_rate": 0.132,
-    "data_missing_rate": 0.2664,
-    "data_reliability_rate": 0.7336
+    "excluded": 1251,
+    "ota_unavailable_rate": 0.1318,
+    "data_missing_rate": 0.2673,
+    "data_reliability_rate": 0.7327
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 8344,
+  "price_movement_rows": 8355,
   "dp_pressure_rows": 286,
   "price_movement_own_property_rows": 10866,
-  "price_movement_latest_collected_at_jst": "2026-11-13T18:00:06+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-11-13T18:00:06+09:00",
+  "price_movement_latest_collected_at_jst": "2026-11-13T20:00:06+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-11-13T20:00:06+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
   "own_miuraya_price": 18000,
   "own_kiraku_price": 71774,
@@ -104,8 +104,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": 16713,
-  "priority_competitor_vs_own_price_gap": 16713,
-  "priority_competitor_price_changes_count": 319,
+  "competitor_vs_own_price_gap": -27947,
+  "priority_competitor_vs_own_price_gap": -27947,
+  "priority_competitor_price_changes_count": 318,
   "own_property_price_changes_count": 182
 }
