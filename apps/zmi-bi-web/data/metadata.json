@@ -1,10 +1,10 @@
 {
-  "generated_at_jst": "2026-11-15T09:10:03+09:00",
-  "latest_collected_at_jst": "2026-11-15T09:00:10+09:00",
-  "history_rows_total": 84382,
-  "latest_observation_rows": 9437,
-  "unified_rows": 4914,
-  "unified_rows_before_retention": 7060,
+  "generated_at_jst": "2026-11-15T11:10:05+09:00",
+  "latest_collected_at_jst": "2026-11-15T10:00:05+09:00",
+  "history_rows_total": 84416,
+  "latest_observation_rows": 9447,
+  "unified_rows": 4923,
+  "unified_rows_before_retention": 7069,
   "distinct_properties": 28,
   "distinct_checkins": 255,
   "sources_included": [
@@ -43,23 +43,23 @@
   "dropped_past_period_keys_count": 8,
   "dropped_past_rows_count": 2146,
   "availability_breakdown": {
-    "total": 4914,
+    "total": 4923,
     "available": 3054,
     "sold_out": 449,
     "not_found": 0,
-    "excluded": 1411,
+    "excluded": 1420,
     "ota_unavailable_rate": 0.1282,
-    "data_missing_rate": 0.2871,
-    "data_reliability_rate": 0.7129
+    "data_missing_rate": 0.2884,
+    "data_reliability_rate": 0.7116
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 8601,
+  "price_movement_rows": 8611,
   "dp_pressure_rows": 286,
-  "price_movement_own_property_rows": 10913,
-  "price_movement_latest_collected_at_jst": "2026-11-15T09:00:10+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-11-15T09:00:10+09:00",
+  "price_movement_own_property_rows": 10915,
+  "price_movement_latest_collected_at_jst": "2026-11-15T10:00:05+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-11-15T10:00:05+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 66188,
+  "own_miuraya_price": 76347,
   "own_kiraku_price": 71774,
   "own_property_price_status": [
     {
@@ -105,8 +105,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -42801,
-  "priority_competitor_vs_own_price_gap": -42801,
-  "priority_competitor_price_changes_count": 328,
+  "competitor_vs_own_price_gap": -45845,
+  "priority_competitor_vs_own_price_gap": -45845,
+  "priority_competitor_price_changes_count": 327,
   "own_property_price_changes_count": 186
 }
