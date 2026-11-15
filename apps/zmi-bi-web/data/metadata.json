@@ -1,12 +1,12 @@
 {
-  "generated_at_jst": "2026-11-15T13:38:35+09:00",
-  "latest_collected_at_jst": "2026-11-15T13:35:04+09:00",
-  "history_rows_total": 84478,
-  "latest_observation_rows": 9465,
-  "unified_rows": 4941,
-  "unified_rows_before_retention": 7087,
+  "generated_at_jst": "2026-11-15T15:10:05+09:00",
+  "latest_collected_at_jst": "2026-11-15T14:00:05+09:00",
+  "history_rows_total": 84524,
+  "latest_observation_rows": 9475,
+  "unified_rows": 4951,
+  "unified_rows_before_retention": 7097,
   "distinct_properties": 28,
-  "distinct_checkins": 255,
+  "distinct_checkins": 256,
   "sources_included": [
     "booking",
     "jalan",
@@ -43,23 +43,23 @@
   "dropped_past_period_keys_count": 8,
   "dropped_past_rows_count": 2146,
   "availability_breakdown": {
-    "total": 4941,
-    "available": 3064,
-    "sold_out": 449,
+    "total": 4951,
+    "available": 3066,
+    "sold_out": 450,
     "not_found": 0,
-    "excluded": 1428,
-    "ota_unavailable_rate": 0.1278,
-    "data_missing_rate": 0.289,
-    "data_reliability_rate": 0.711
+    "excluded": 1435,
+    "ota_unavailable_rate": 0.128,
+    "data_missing_rate": 0.2898,
+    "data_reliability_rate": 0.7102
   },
   "availability_rate_policy": "ota_unavailable_rate=sold_out/(available+sold_out); data_missing_rate=(not_found+failed+excluded)/total; not_found/failed/excluded never counted as sold_out",
-  "price_movement_rows": 8629,
+  "price_movement_rows": 8639,
   "dp_pressure_rows": 286,
-  "price_movement_own_property_rows": 10925,
-  "price_movement_latest_collected_at_jst": "2026-11-15T13:35:04+09:00",
-  "dp_pressure_latest_collected_at_jst": "2026-11-15T13:35:04+09:00",
+  "price_movement_own_property_rows": 10927,
+  "price_movement_latest_collected_at_jst": "2026-11-15T14:00:05+09:00",
+  "dp_pressure_latest_collected_at_jst": "2026-11-15T14:00:05+09:00",
   "price_movement_policy": "inventory/DP pressure proxy; latest-vs-previous comparable observations within one source; own properties excluded; room-only two-person standard high/medium confidence only",
-  "own_miuraya_price": 19080,
+  "own_miuraya_price": 18000,
   "own_kiraku_price": 71774,
   "own_property_price_status": [
     {
@@ -105,8 +105,8 @@
       "status": "warning"
     }
   ],
-  "competitor_vs_own_price_gap": -30027,
-  "priority_competitor_vs_own_price_gap": -30027,
-  "priority_competitor_price_changes_count": 327,
-  "own_property_price_changes_count": 184
+  "competitor_vs_own_price_gap": -20177,
+  "priority_competitor_vs_own_price_gap": -20177,
+  "priority_competitor_price_changes_count": 326,
+  "own_property_price_changes_count": 183
 }
