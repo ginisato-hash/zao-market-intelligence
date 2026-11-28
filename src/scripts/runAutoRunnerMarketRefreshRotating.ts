@@ -24,6 +24,7 @@ import {bookingPrimaryLiveGates,enabledCollectionTargets,optionalSecondaryCollec
 import {beginNormalCurvePublication,normalCurveAttempt,finishNormalCurvePublication,closeNormalCurvePublication} from '../services/twoPersonCurvePublicationLane';
 import {recordNormalObservedListingDiagnostic} from '../services/observedListingPublicationLane';
 import {readCaptureTwoPersonPanel,recordTwoPersonMarketAdmission} from '../services/twoPersonMarketAdmissionLane';
+import {rotatingCollectorClock} from '../services/rotatingCollectorClock';
 import {resolvePricingQuoteLane,quoteSelectionMetrics} from '../services/pricingQuoteLane';
 import {BookingUiBlockGuard} from '../services/bookingUiBlockGuard';
 import {launchOwnedBookingBrowser,ownedBookingBrowserStatus,terminateOwnedBookingBrowser} from '../services/bookingOwnedBrowser';
@@ -106,16 +107,6 @@ const DEMAND_CONFIG: RotatingDemandConfig = {
   ]
 };
 
-function timestamp(): string {
-  const d = new Date();
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}
-function jstParts(): { iso: string; date: string; hour: number } {
-  const fmt = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
-  const iso = `${fmt.replace(" ", "T")}+09:00`;
-  return { iso, date: iso.slice(0, 10), hour: Number(iso.slice(11, 13)) };
-}
 function writeJson(path: string, value: unknown): void { writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8"); }
 
 // Most-recent collected_at per (source|slug|checkin) for 24h cooldown.
@@ -374,9 +365,9 @@ function nextDay(iso: string): string {
 }
 
 async function run(): Promise<void> {
-  const ts = timestamp();
+  const jst = rotatingCollectorClock(new Date());
+  const ts = jst.runStamp;
   const runId = `auto_runner_market_refresh_rotating_${ts}`;
-  const jst = jstParts();
   mkdirSync(resolve(REPORT_DIR), { recursive: true });
   const debugPath = resolve(DEBUG_ROOT, ts);
   mkdirSync(debugPath, { recursive: true });
@@ -424,7 +415,7 @@ async function run(): Promise<void> {
     ...(winterScope !== undefined ? { winterScope } : {}),
     winterTransitionAttempted: winterLedger,
     runDateIso: jst.date,
-    nowIso: jst.iso,
+    nowIso: jst.exactIso,
     slotHourJst: jst.hour,
     liveTargets: liveTargets(),
     config: demandConfig,
@@ -433,7 +424,7 @@ async function run(): Promise<void> {
     forcedDates: forced.valid
   };
   const plan: RotatingPlan = buildRotatingPlan({ ...planInput, caps });
-  const quoteLane=resolvePricingQuoteLane(env,{now:jst.iso,runDate:jst.date,legacyTargets:plan.selected,caps,config:demandConfig,properties:planInput.liveTargets,lastCollectedAt});
+  const quoteLane=resolvePricingQuoteLane(env,{now:()=>new Date(),runDate:jst.date,legacyTargets:plan.selected,caps,config:demandConfig,properties:planInput.liveTargets,lastCollectedAt});
   let selectedTargets=liveMode?enabledCollectionTargets(quoteLane.targets,env):quoteLane.targets;
   // Baseline (multiplier=1) plan for before/after reporting (no extra collection).
   const planBefore: RotatingPlan = buildRotatingPlan({ ...planInput, caps: scaledRotatingCaps(1) });
@@ -468,7 +459,7 @@ async function run(): Promise<void> {
   };
 
   if (liveMode) {
-    const publication=beginNormalCurvePublication(env,{runId,root:process.cwd()});curvePublication={status:publication.status};
+    const publication=beginNormalCurvePublication(env,{runId,root:process.cwd()},quoteLane.requestSnapshot);curvePublication={status:publication.status};
     if(publication.status==='HELD_SOURCE_OR_PUBLICATION_UNVERIFIED')selectedTargets=selectedTargets.filter(t=>t.source!=='booking');
     try {
     liveExecuted = selectedTargets.length>0;
@@ -646,7 +637,7 @@ async function run(): Promise<void> {
     writeFileSync(out.report_path,renderReport(out),'utf8');
   }
   // Separate listing estimand; its immutable receipt binds the now-final report.
-  if(liveMode&&referenceFinalCurrent){const listing=recordNormalObservedListingDiagnostic(env,{root:process.cwd(),runId,reportPath:out.json_path,dbPath:resolve(DB_PATH),mirrorExact:dbSynced},value=>writeFileSync(resolve(debugPath,'observed_listing_publication.json'),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}));
+  if(liveMode&&referenceFinalCurrent){const listing=recordNormalObservedListingDiagnostic(env,{root:process.cwd(),runId,reportPath:out.json_path,dbPath:resolve(DB_PATH),mirrorExact:dbSynced,selectedRequestCurrent:()=>quoteReference.current()&&quoteLane.requestSnapshot?.isCurrent()===true},value=>writeFileSync(resolve(debugPath,'observed_listing_publication.json'),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}));
     if(listing.status!=='DISABLED')console.log('observed_listing_publication_status='+listing.status);}
 
   for (const [k, v] of Object.entries(out)) {

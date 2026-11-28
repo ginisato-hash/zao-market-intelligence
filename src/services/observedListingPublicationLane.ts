@@ -6,7 +6,7 @@ import {join,resolve} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {z} from 'zod';
 import {readBoundedStableFile as bounded} from './boundedStableFile';
-import {readRmsQuoteRequest} from './rmsQuoteRequest';
+import {readRmsQuoteRequestSnapshot} from './rmsQuoteRequest';
 import {assertAcceptedTwoPersonProducer} from './twoPersonMarketAdmissionLane';
 import {historyWriterLockPath} from './freshHistoryToDbSync';
 import {captureObservedListingCanonicalInput} from './observedListingCanonicalInput';
@@ -33,7 +33,7 @@ export function observedListingFailureCode(error:unknown):string{
 }
 
 /** No retries, repairs or fallback CSVs. Failure leaves previous expiry/attempt invalidations intact. */
-export function recordNormalObservedListing(env:Record<string,string|undefined>,i:{root:string;runId:string;reportPath:string;dbPath:string;mirrorExact:boolean}){
+export function recordNormalObservedListing(env:Record<string,string|undefined>,i:{root:string;runId:string;reportPath:string;dbPath:string;mirrorExact:boolean;selectedRequestCurrent?:()=>boolean}){
  if(env['ZMI_OBSERVED_LISTING_ENABLED']!=='1')return {status:'DISABLED' as const};
  let complete:(()=>void)|undefined;
  let stage='PRECONDITIONS';
@@ -46,14 +46,17 @@ export function recordNormalObservedListing(env:Record<string,string|undefined>,
   stage='NORMAL_REPORT';const reportBytes=bounded(i.reportPath,2*1024*1024),report=JSON.parse(reportBytes.toString());if(report.run_id!==i.runId||report.dry_run!==false||report.decision!=='rotating_market_refresh_success'||report.db_synced!==true||report.collection_planner!=='USEFUL_QUOTES_V1'||report.useful_quote_lane?.status!=='READY')throw Error('LISTING_FINAL_NORMAL_REPORT_REQUIRED');
   const observation=report.producer_observation,{observationSha256,...observationBody}=observation??{};
   if(!observation||observation.schema!=='ZMI_COLLECTOR_PRODUCER_OBSERVATION_V1'||observation.runId!==i.runId||observation.status!=='STABLE_CODE_PINS_OBSERVED'||observation.evidenceScope!=='GIT_SOURCE_OBSERVATION_NOT_INDEPENDENT_RUNTIME_ATTESTATION'||digest(observationBody)!==observationSha256||observation.started?.producerCodeSha256!==producer.codeSha256||observation.finished?.producerCodeSha256!==producer.codeSha256||digest(observation.started.codePins)!==producer.codeSha256||digest(observation.finished.codePins)!==producer.codeSha256||!Number.isFinite(Date.parse(observation.finished.observedAt))||Date.now()-Date.parse(observation.finished.observedAt)<0||Date.now()-Date.parse(observation.finished.observedAt)>60000)throw Error('LISTING_RUN_LOCAL_PRODUCER_REQUIRED');
-  stage='REQUEST';const asOf=new Date().toISOString(),requestPath=env['ZMI_RMS_QUOTE_REQUEST_PATH']??'',requestBytes=bounded(requestPath,1024*1024),request=readRmsQuoteRequest(requestPath,asOf,{releaseGitSha:env['ZMI_RMS_QUOTE_SOURCE_RELEASE']??'',bundleSha256:env['ZMI_RMS_QUOTE_BUNDLE_SHA256']??'',graphSha256:env['ZMI_RMS_QUOTE_GRAPH_SHA256']??''});
-  if(report.useful_quote_lane.diagnostics?.requestSha256!==request.requestSha256)throw Error('LISTING_NORMAL_REQUEST_CHANGED');
+  stage='REQUEST';
+  const snapshot=readRmsQuoteRequestSnapshot(env['ZMI_RMS_QUOTE_REQUEST_PATH']??'',{releaseGitSha:env['ZMI_RMS_QUOTE_SOURCE_RELEASE']??'',bundleSha256:env['ZMI_RMS_QUOTE_BUNDLE_SHA256']??'',graphSha256:env['ZMI_RMS_QUOTE_GRAPH_SHA256']??''});
+  const {request,validatedAt:asOf}=snapshot, selected=report.useful_quote_lane.diagnostics;
+  if(i.selectedRequestCurrent?.()===false||selected?.requestSha256!==request.requestSha256||
+     (selected.requestValidation!==undefined&&selected.requestValidation?.rawSha256!==snapshot.rawSha256))throw Error('LISTING_NORMAL_REQUEST_CHANGED');
   stage='LOCK';const lockPath=historyWriterLockPath(join(i.root,'.data/history'));if(realpathSync(lockPath)!==lockPath)throw Error('LISTING_HISTORY_LOCK_ALIAS');lock=new Database(lockPath,{fileMustExist:true,timeout:0});lock.exec('BEGIN IMMEDIATE');
   stage='CANONICAL_INPUT';const captured=captureObservedListingCanonicalInput({root:i.root,dbPath:i.dbPath,request,asOf,policy:cfg.policy,producerCodeSha256s:[producer.codeSha256],quarantine:cfg.quarantine,normalRun:{runId:i.runId,reportRawSha256:rawSha(reportBytes),producerObservationSha256:observationSha256,mirrorExactVerified:true}});
   stage='OUTPUT_DIRECTORY';const directory=join(i.root,'.data/market-listing',expected);for(const d of [join(i.root,'.data/market-listing'),directory]){mkdirSync(d,{recursive:true,mode:0o700});if(realpathSync(d)!==d)throw Error('LISTING_OUTPUT_ALIAS');}
   stage='PRIOR_POINTER';const current=join(directory,'current.json'),before=existsSync(current)?bounded(current,65536):null;
   if(before){const p=pointerSchema.parse(JSON.parse(before.toString())),{publicationSha256,...b}=p;if(p.configSha256!==expected||digest(b)!==publicationSha256||digest([...new Set(p.producerCodeSha256s)].sort())!==p.producerSetSha256||p.producerCodeSha256s.some(c=>!cfg.acceptedProducerCodes.includes(c))||Date.parse(p.generatedAt)>Date.parse(asOf))throw Error('LISTING_PRIOR_POINTER_UNVERIFIED');const completed=completionSchema.parse(JSON.parse(bounded(join(directory,'listing_completed_'+publicationSha256+'.json'),65536).toString())),{completionSha256,...c}=completed;if(completed.publicationSha256!==publicationSha256||completed.artifactSha256!==p.artifactSha256||Date.parse(completed.completedAt)<Date.parse(p.generatedAt)||Date.parse(completed.completedAt)>Date.parse(asOf)||digest(c)!==completionSha256)throw Error('LISTING_PRIOR_COMPLETION_UNVERIFIED');}
-  const guard=()=>{if(Date.now()<Date.parse(asOf)||Date.now()-Date.parse(asOf)>60000||Date.now()>=Date.parse(request.expiresAt))throw Error('LISTING_PUBLICATION_TIME_OR_REQUEST_EXPIRED');captured.assertUnchanged();if(assertAcceptedTwoPersonProducer(sourceEnv).codeSha256!==producer.codeSha256||!bounded(path,65536).equals(configBytes)||!bounded(requestPath,1024*1024).equals(requestBytes)||!bounded(i.reportPath,2*1024*1024).equals(reportBytes))throw Error('LISTING_SOURCE_CHANGED');};
+  const guard=()=>{if(Date.now()<Date.parse(asOf)||Date.now()-Date.parse(asOf)>60000||Date.now()>=Date.parse(request.expiresAt))throw Error('LISTING_PUBLICATION_TIME_OR_REQUEST_EXPIRED');captured.assertUnchanged();if(assertAcceptedTwoPersonProducer(sourceEnv).codeSha256!==producer.codeSha256||!bounded(path,65536).equals(configBytes)||i.selectedRequestCurrent?.()===false||!snapshot.isCurrent()||!bounded(i.reportPath,2*1024*1024).equals(reportBytes))throw Error('LISTING_SOURCE_CHANGED');};
   const dirSync=()=>{const fd=openSync(directory,constants.O_RDONLY);try{fsyncSync(fd);}finally{closeSync(fd);}};
   const immutable=(name:string,value:unknown,max:number,assert=guard)=>{assert();const bytes=Buffer.from(JSON.stringify(value)+'\n'),path=join(directory,name);if(bytes.length>max)throw Error('LISTING_OUTPUT_BUDGET');if(existsSync(path)){if(!bounded(path,max).equals(bytes))throw Error('LISTING_IMMUTABLE_CONFLICT');return bytes;}const fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o400);try{writeFileSync(fd,bytes);fsyncSync(fd);}finally{closeSync(fd);}dirSync();if(!bounded(path,max).equals(bytes))throw Error('LISTING_IMMUTABLE_READBACK');return bytes;};
   stage='ARTIFACT';const bytes=immutable('listing_'+captured.artifact.artifactSha256+'.json',captured.artifact,4*1024*1024);stage='MANIFEST';immutable('listing_inputs_'+captured.manifest.sourceSnapshotSha256+'.json',captured.manifest,4*1024*1024);

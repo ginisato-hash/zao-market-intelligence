@@ -1,6 +1,6 @@
 import {readBoundedStableFd} from './boundedStableFile';
 // Local, non-PII RMS -> collector request. It conveys collection priorities, never pricing authority.
-import { closeSync, constants, fstatSync, openSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, type BigIntStats } from 'node:fs';
 import { canonicalJson } from './marketEvidenceSidecar';
 import { createHash } from 'node:crypto';
 import type { PricingQuoteNeed } from './usefulQuoteRefreshPlanner';
@@ -17,9 +17,21 @@ const hash = (s: unknown) => typeof s === 'string' && /^[0-9a-f]{64}$/u.test(s);
 const date = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(s) && Number.isFinite(Date.parse(s + 'T00:00:00Z')) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
 const keys = (v: object, expected: string[]) => Object.keys(v).sort().join('|') === expected.sort().join('|');
 const validationReasons = new Set(['RMS_QUOTE_ACCEPTED_SOURCE_REQUIRED','RMS_QUOTE_SCHEMA','RMS_QUOTE_SCHEMA_OR_SOURCE','RMS_QUOTE_EXPIRED_OR_TIME_INVALID','RMS_QUOTE_NEED_INVALID','RMS_QUOTE_SEAL']);
+type RequestTimeFailure = 'INVALID_TIMESTAMP' | 'CREATED_IN_FUTURE' | 'EXPIRED'
+    | 'EXPIRY_NOT_AFTER_CREATION' | 'LIFETIME_EXCEEDS_36H';
+class RequestTimeError extends Error {
+    constructor(readonly timeFailure: RequestTimeFailure) {
+        super('RMS_QUOTE_EXPIRED_OR_TIME_INVALID');
+    }
+}
+type RequestReadEvidence = { validatedAt: string | null; rawSha256: string | null; timeFailure: RequestTimeFailure | null };
+const requestFileIdentity = (stat: BigIntStats) => [
+    stat.dev, stat.ino, stat.mode, stat.nlink, stat.uid, stat.gid, stat.size, stat.mtimeNs, stat.ctimeNs,
+].join('|');
 /** Closed diagnostics only; neither a path nor exception text is exported. */
 export class RmsQuoteRequestReadError extends Error {
-    constructor(readonly stage: 'REQUEST_READ' | 'REQUEST_DECODE' | 'REQUEST_VALIDATION', readonly reason: string) {
+    constructor(readonly stage: 'REQUEST_READ' | 'REQUEST_DECODE' | 'REQUEST_VALIDATION', readonly reason: string,
+        readonly evidence: RequestReadEvidence) {
         super('RMS_QUOTE_REQUEST_UNAVAILABLE_OR_INVALID');
     }
 }
@@ -32,7 +44,11 @@ export function validateRmsQuoteRequest(raw: unknown, now: string, accepted: { r
         || !/^k27run_\d{4}-\d{2}-\d{2}_[0-9a-f]{8}$/u.test(r.source.runId) || r.source.releaseGitSha !== accepted.releaseGitSha || r.source.bundleSha256 !== accepted.bundleSha256 || r.source.graphSha256 !== accepted.graphSha256
         || !hash(r.source.evidenceSha256) || r.source.observedAt !== r.createdAt || !Array.isArray(r.needs) || r.needs.length > 2000) throw Error('RMS_QUOTE_SCHEMA_OR_SOURCE');
     const at = instant(r.createdAt), expiry = instant(r.expiresAt), current = instant(now);
-    if (!Number.isFinite(at) || !Number.isFinite(expiry) || at > current || expiry <= current || expiry <= at || expiry - at > 36 * 3600000) throw Error('RMS_QUOTE_EXPIRED_OR_TIME_INVALID');
+    if (!Number.isFinite(at) || !Number.isFinite(expiry)) throw new RequestTimeError('INVALID_TIMESTAMP');
+    if (at > current) throw new RequestTimeError('CREATED_IN_FUTURE');
+    if (expiry <= at) throw new RequestTimeError('EXPIRY_NOT_AFTER_CREATION');
+    if (expiry <= current) throw new RequestTimeError('EXPIRED');
+    if (expiry - at > 36 * 3600000) throw new RequestTimeError('LIFETIME_EXCEEDS_36H');
     const seen = new Set<string>();
     for (const n of r.needs) {
         if (!n || typeof n !== 'object' || !keys(n, ['stayDate', 'admittedAt', 'priceDecisionEligible', 'decisionImpact', 'changedAt', 'dateEvidenceSha256'])
@@ -48,20 +64,47 @@ export function validateRmsQuoteRequest(raw: unknown, now: string, accepted: { r
 
 /** Fixed configured path, bounded stable read; raw content and absolute paths never enter diagnostics. */
 export function readRmsQuoteRequest(path: string, now: string, accepted: Parameters<typeof validateRmsQuoteRequest>[2]) {
+    return readRmsQuoteRequestSnapshot(path, accepted, () => now).request;
+}
+
+/** Sample the validation clock after reading the exact file generation. */
+export function readRmsQuoteRequestSnapshot(
+    path: string, accepted: Parameters<typeof validateRmsQuoteRequest>[2], clock: () => Date | string = () => new Date(),
+) {
     let fd: number | undefined;
     let stage: RmsQuoteRequestReadError['stage'] = 'REQUEST_READ';
+    let validatedAt: string | null = null;
+    let rawSha256: string | null = null;
     try {
         fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         const before = fstatSync(fd, { bigint: true });
         if (!before.isFile() || before.size > 1024n * 1024n) throw Error('BUDGET');
-        const bytes = readBoundedStableFd(fd,1024*1024), after = fstatSync(fd, { bigint: true });
-        if (bytes.length > 1024 * 1024 || before.size !== after.size || before.mtimeNs !== after.mtimeNs) throw Error('CHANGED');
-        stage = 'REQUEST_DECODE'; const raw: unknown = JSON.parse(bytes.toString('utf8'));
-        stage = 'REQUEST_VALIDATION'; return validateRmsQuoteRequest(raw, now, accepted);
+        const identity = requestFileIdentity(before);
+        const bytes = readBoundedStableFd(fd, 1024 * 1024);
+        const isCurrent = () => {
+            try { return requestFileIdentity(lstatSync(path, { bigint: true })) === identity; }
+            catch { return false; }
+        };
+        if (BigInt(bytes.length) !== before.size || requestFileIdentity(fstatSync(fd, { bigint: true })) !== identity || !isCurrent()) throw Error('CHANGED');
+        rawSha256 = createHash('sha256').update(bytes).digest('hex');
+        stage = 'REQUEST_DECODE';
+        const raw: unknown = JSON.parse(bytes.toString('utf8'));
+        stage = 'REQUEST_VALIDATION';
+        const sampled = clock();
+        const sampledMs = typeof sampled === 'string' ? instant(sampled) : sampled.getTime();
+        if (!Number.isFinite(sampledMs)) throw Error('RMS_QUOTE_ACCEPTED_SOURCE_REQUIRED');
+        validatedAt = new Date(sampledMs).toISOString();
+        const request = validateRmsQuoteRequest(raw, validatedAt, accepted);
+        stage = 'REQUEST_READ';
+        if (!isCurrent()) throw Error('CHANGED');
+        return { request, validatedAt, rawSha256, isCurrent };
     } catch (error) {
         const reason = stage === 'REQUEST_VALIDATION' && error instanceof Error && validationReasons.has(error.message)
             ? error.message : stage === 'REQUEST_DECODE' ? 'RMS_QUOTE_JSON_INVALID' : 'RMS_QUOTE_FILE_UNVERIFIED';
-        throw new RmsQuoteRequestReadError(stage, reason);
+        throw new RmsQuoteRequestReadError(stage, reason, {
+            validatedAt, rawSha256, timeFailure: error instanceof RequestTimeError ? error.timeFailure : null,
+        });
+    } finally {
+        if (fd !== undefined) closeSync(fd);
     }
-    finally { if (fd !== undefined) closeSync(fd); }
 }

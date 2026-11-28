@@ -1,9 +1,9 @@
 import {expect,it} from 'vitest';
 import {createHash} from 'node:crypto';
-import {mkdtempSync,symlinkSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,renameSync,symlinkSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {validateRmsQuoteRequest,readRmsQuoteRequest,RmsQuoteRequestReadError,type RmsQuoteRequest} from '../src/services/rmsQuoteRequest';
+import {validateRmsQuoteRequest,readRmsQuoteRequest,readRmsQuoteRequestSnapshot,RmsQuoteRequestReadError,type RmsQuoteRequest} from '../src/services/rmsQuoteRequest';
 import {canonicalJson} from '../src/services/marketEvidenceSidecar';
 const accepted={releaseGitSha:'a'.repeat(40),bundleSha256:'b'.repeat(64),graphSha256:'c'.repeat(64)},at='2026-10-25T00:00:00Z';
 function seal(r:Omit<RmsQuoteRequest,'requestSha256'>):RmsQuoteRequest{return {...r,requestSha256:createHash('sha256').update(canonicalJson(r)).digest('hex')};}
@@ -40,4 +40,45 @@ it('preserves a closed validation reason while suppressing file and JSON excepti
  try{readRmsQuoteRequest(path,at,accepted);throw Error('EXPECTED_REFUSAL')}catch(e){
   expect(e).toMatchObject({stage:'REQUEST_DECODE',reason:'RMS_QUOTE_JSON_INVALID'});expect(String(e)).not.toContain('PRIVATE_INVALID_JSON');
  }
+});
+
+
+it('validates the .882 request against the real .923 sample and distinguishes exact time failures', () => {
+ const path = join(mkdtempSync(join(tmpdir(), 'rms-quote-ms-')), 'request.json');
+ const createdAt = '2026-11-27T21:00:05.882Z', expiresAt = '2026-11-29T09:00:05.882Z';
+ const {requestSha256, ...base} = request();
+ const actual = seal({...base, createdAt, expiresAt,
+  source: {...base.source, runId: 'k27run_2026-11-28_e661b6b5', observedAt: createdAt}});
+ const bytes = JSON.stringify(actual);
+ writeFileSync(path, bytes);
+ const acceptedAt = '2026-11-27T21:00:05.923Z';
+ const result = readRmsQuoteRequestSnapshot(path, accepted, () => new Date(acceptedAt));
+ expect(result).toMatchObject({request: actual, validatedAt: acceptedAt, rawSha256: createHash('sha256').update(bytes).digest('hex')});
+ expect(result.isCurrent()).toBe(true);
+ for (const [time, timeFailure] of [
+  ['2026-11-27T21:00:05.000Z', 'CREATED_IN_FUTURE'],
+  ['2026-11-27T21:00:05.881Z', 'CREATED_IN_FUTURE'],
+  [expiresAt, 'EXPIRED'],
+ ]) {
+  expect(() => readRmsQuoteRequestSnapshot(path, accepted, () => new Date(time!))).toThrow(
+   expect.objectContaining({stage: 'REQUEST_VALIDATION', reason: 'RMS_QUOTE_EXPIRED_OR_TIME_INVALID',
+    evidence: {validatedAt: time, rawSha256: result.rawSha256, timeFailure}}));
+ }
+ writeFileSync(path, JSON.stringify(seal({...base, createdAt, expiresAt: '2026-11-29T09:00:05.883Z',
+  source: {...base.source, observedAt: createdAt}})));
+ expect(() => readRmsQuoteRequestSnapshot(path, accepted, () => new Date(acceptedAt))).toThrow(
+  expect.objectContaining({evidence: expect.objectContaining({timeFailure: 'LIFETIME_EXCEEDS_36H'})}));
+});
+
+it('refuses an atomic replacement inside validation and invalidates an admitted generation after replacement', () => {
+ const dir = mkdtempSync(join(tmpdir(), 'rms-quote-replacement-')), path = join(dir, 'request.json'), replacement = join(dir, 'new.json');
+ const bytes = JSON.stringify(request());
+ writeFileSync(path, bytes); writeFileSync(replacement, bytes);
+ const selected = readRmsQuoteRequestSnapshot(path, accepted, () => at);
+ expect(() => readRmsQuoteRequestSnapshot(path, accepted, () => {
+  renameSync(replacement, path);
+  return at;
+ })).toThrow(expect.objectContaining({stage: 'REQUEST_READ', reason: 'RMS_QUOTE_FILE_UNVERIFIED'}));
+ expect(selected.isCurrent()).toBe(false);
+ expect(readRmsQuoteRequestSnapshot(path, accepted, () => at).request.requestSha256).toBe(selected.request.requestSha256);
 });

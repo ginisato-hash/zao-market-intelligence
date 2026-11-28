@@ -1,17 +1,21 @@
 // Existing normal collector only. Default OFF means no filesystem/git/DB access.
 import {readBoundedStableFile} from './boundedStableFile';
-import {readRmsQuoteRequest} from './rmsQuoteRequest';
+import {readRmsQuoteRequestSnapshot} from './rmsQuoteRequest';
 import {assertAcceptedTwoPersonProducer} from './twoPersonMarketAdmissionLane';
 import {startCurvePublication,guardCurveAttempt,finishCurvePublication,closeCurvePublication,type CurvePublicationSession} from './twoPersonCurvePublication';
-export function beginNormalCurvePublication(env:Record<string,string|undefined>,input:{runId:string;root:string}){
+export function beginNormalCurvePublication(
+ env:Record<string,string|undefined>,input:{runId:string;root:string},
+ selected?:ReturnType<typeof readRmsQuoteRequestSnapshot>|null,
+){
  if(env['ZMI_2P_CURVE_PUBLICATION_ENABLED']!=='1')return {status:'DISABLED' as const,session:null};
  try{
   if(env['ZMI_2P_QUALITY_ENABLED']!=='1'||env['ZMI_USEFUL_QUOTES_ENABLED']!=='1')throw Error('NORMAL_QUALITY_AND_SCOPE_REQUIRED');
-  const {codeSha256}=assertAcceptedTwoPersonProducer(env),now=new Date().toISOString();
-  const request=readRmsQuoteRequest(env['ZMI_RMS_QUOTE_REQUEST_PATH']??'',now,{releaseGitSha:env['ZMI_RMS_QUOTE_SOURCE_RELEASE']??'',bundleSha256:env['ZMI_RMS_QUOTE_BUNDLE_SHA256']??'',graphSha256:env['ZMI_RMS_QUOTE_GRAPH_SHA256']??''});
-  const session=startCurvePublication({...input,producerCodeSha256:codeSha256,request,
+  const {codeSha256}=assertAcceptedTwoPersonProducer(env);
+  const snapshot=readRmsQuoteRequestSnapshot(env['ZMI_RMS_QUOTE_REQUEST_PATH']??'',{releaseGitSha:env['ZMI_RMS_QUOTE_SOURCE_RELEASE']??'',bundleSha256:env['ZMI_RMS_QUOTE_BUNDLE_SHA256']??'',graphSha256:env['ZMI_RMS_QUOTE_GRAPH_SHA256']??''});
+  if(selected===null||selected&&(!selected.isCurrent()||selected.rawSha256!==snapshot.rawSha256))throw Error('NORMAL_REQUEST_CHANGED');
+  const session=startCurvePublication({...input,producerCodeSha256:codeSha256,request:snapshot.request,
    configBytes:readBoundedStableFile(env['ZMI_2P_CURVE_CONFIG_PATH']??'',512*1024),expectedConfigSha256:env['ZMI_2P_CURVE_CONFIG_SHA256']??'',
-   assertSource:()=>{if(assertAcceptedTwoPersonProducer(env).codeSha256!==codeSha256)throw Error('PRODUCER_CHANGED');}});
+   assertSource:()=>{if(!snapshot.isCurrent()||assertAcceptedTwoPersonProducer(env).codeSha256!==codeSha256)throw Error('PRODUCER_CHANGED');}});
   return {status:'READY' as const,session};
  }catch{return {status:'HELD_SOURCE_OR_PUBLICATION_UNVERIFIED' as const,session:null};}
 }

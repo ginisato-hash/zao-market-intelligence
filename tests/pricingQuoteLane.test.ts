@@ -1,6 +1,6 @@
 import { expect,it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync,mkdtempSync,writeFileSync,mkdirSync } from 'node:fs';
+import { existsSync,mkdtempSync,writeFileSync,mkdirSync,readFileSync,renameSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -91,4 +91,22 @@ it('does not reserve an unselected or expired request and distinguishes selectio
  expect(()=>p.reserve!({...p.targets[0]!,stay_date:'2030-01-01'},at)).toThrow('NOT_SELECTED');
  expect(()=>p.reserve!(p.targets[0]!,'2026-10-26T12:00:00Z')).toThrow('EXPIRED');
  const m=quoteSelectionMetrics(p.targets);expect(m.planned_requests).toBe(p.targets.length);expect(m.winter_lane_selected).toBe(0);
+});
+
+
+it('uses the fresh request sample for planning and refuses attempt reservation after the pointer changes', () => {
+ const f = setup(), raw = JSON.parse(readFileSync(f.path, 'utf8'));
+ const {requestSha256, ...body} = raw;
+ const createdAt = '2026-10-25T00:00:00.882Z', validatedAt = '2026-10-25T00:00:00.923Z';
+ const updated = {...body, createdAt, source: {...body.source, observedAt: createdAt}};
+ const bytes = JSON.stringify({...updated, requestSha256: createHash('sha256').update(canonicalJson(updated)).digest('hex')});
+ writeFileSync(f.path, bytes);
+ expect(resolvePricingQuoteLane(f.env, f.input).status).toBe('HELD_UNVERIFIED_INPUT_OR_ATTEMPT_STATE');
+ const selection = resolvePricingQuoteLane(f.env, {...f.input, now: () => new Date(validatedAt)});
+ expect(selection.status).toBe('READY');
+ expect(selection.diagnostics).toMatchObject({requestValidation: {validatedAt}});
+ const next = join(f.dir, 'next.json');
+ writeFileSync(next, bytes); renameSync(next, f.path);
+ expect(selection.reserve!(selection.targets[0]!, validatedAt)).toBe(false);
+ expect(existsSync(f.root)).toBe(false);
 });
