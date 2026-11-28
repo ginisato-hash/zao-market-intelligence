@@ -23,11 +23,13 @@ it('actual failed/no-row normal request invalidates an older success through its
   facts:[],qualityLedger:sealQualityLedger([]),invalidations,admissionSha256:''};
  const {admissionSha256:ignored,...sealed}=r;r.admissionSha256=digest(sealed);
  x.admissions.push({receipt:r as any,independentlyPinnedSha256:r.admissionSha256});x.asOf=at;
- const curve=buildCurveFromCanonicalAdmissions(x);expect(curve.curves[0]!.nProperties).toBe(3);expect(curve.curves[0]!.eligible).toBe(false);
- expect(curve.curves[0]!.reasonCodes).toContain('ANCHOR_COHORT_INCOMPLETE');expect(curve.curves[0]!.productAvailability.invalidatedProducts).toBe(1);
+ const curve=buildCurveFromCanonicalAdmissions(x);expect(curve.curves[0]!.nProperties).toBe(3);expect(curve.curves[0]!.eligible).toBe(true);
+ expect(curve.curves[0]!.matchedCoverage).toBe(0.75);expect(curve.curves[0]!.productAvailability.invalidatedProducts).toBe(1);
 });
 it('no-network reservation refusal cannot invalidate an existing success',()=>{
  const x=setup();expect(normalAttemptInvalidations(x.panel,[{propertySlug:'source0',stayDate:day,status:'REQUEST_RESERVATION_REFUSED_NO_NETWORK'}],t1,[])).toEqual([]);
  expect(buildCurveFromCanonicalAdmissions(x).curves[0]!.eligible).toBe(true);
 });
 it('unaccepted producer code cannot self-seal a canonical receipt',()=>{const x=setup();x.acceptedProducerCodeSha256.clear();expect(()=>buildCurveFromCanonicalAdmissions(x)).toThrow('CANONICAL_ADMISSION');});
+
+it('a retained pending attempt keeps its original anchor knowledge cutoff across rebuilds',()=>{const x=setup(),p=x.panel.products[0]!,pending={sourceProductSha256:digest([p.propertyId,p.sourcePropertyId,p.source,p.productId,p.ratePlanId,p.conditionKey]),stayDate:day,attemptedAt:x.reference.asOf,runId:'auto_runner_market_refresh_rotating_20261028_000006',requestSha256:digest('synthetic-request')};const a=buildCurveFromCanonicalAdmissions({...x,asOf:x.reference.asOf,pendingExclusions:[pending]}),b=buildCurveFromCanonicalAdmissions({...x,pendingExclusions:[pending]});expect(a.curves[0]?.anchorProducts).toBe(3);expect(b.curves[0]?.anchorProducts).toBe(3);expect(a.curves[0]?.anchorWeight).toBe(b.curves[0]?.anchorWeight);});

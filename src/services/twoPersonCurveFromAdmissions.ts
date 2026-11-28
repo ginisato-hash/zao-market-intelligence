@@ -1,15 +1,17 @@
 // Downstream accepts only independently pinned receipts produced by the normal canonical/mirror admission hook.
 // This is not an alternate market CSV ingestion route, and UNKNOWN legacy usable flags never appear here.
 import {buildTwoPersonCurve,type TwoPersonObservation,type TwoPersonInvalidation} from './marketTwoPersonCurve';
-import {digest,qualityIndex,sealQualityLedger,type QualityEntry,type QualityLedger} from './marketRowPriceQuality';
+import {digest,instant,hashOk,qualityIndex,sealQualityLedger,type QualityEntry,type QualityLedger} from './marketRowPriceQuality';
 export interface CanonicalTwoPersonAdmission {
  schema:'ZMI_CANONICAL_2P_ADMISSION_V1';runId:string;ingestedAt:string;panelSha256:string;producerCodeSha256:string;mirrorExactVerified:boolean;invalidations:TwoPersonInvalidation[];
  source:'NORMAL_TRUSTED_APPEND_AND_EXACT_MIRROR';facts:TwoPersonObservation[];qualityLedger:QualityLedger;exclusions:Record<string,number>;
  marketPriceAuthority:false;admissionSha256:string;
 }
+export interface PendingProductExclusion {sourceProductSha256:string;stayDate:string;attemptedAt:string;runId:string;requestSha256:string}
+const productDigest=(p:{propertyId:string;sourcePropertyId:string;source:string;productId:string;ratePlanId:string;conditionKey:string})=>digest([p.propertyId,p.sourcePropertyId,p.source,p.productId,p.ratePlanId,p.conditionKey]);
 export function buildCurveFromCanonicalAdmissions(input:Omit<Parameters<typeof buildTwoPersonCurve>[0],'observations'|'qualityLedger'|'expectedQualitySha256'|'trustedReceiptSha256'> & {
  admissions:readonly {receipt:CanonicalTwoPersonAdmission;independentlyPinnedSha256:string}[];
- quarantined:readonly QualityEntry[];acceptedProducerCodeSha256:ReadonlySet<string>;
+ quarantined:readonly QualityEntry[];acceptedProducerCodeSha256:ReadonlySet<string>;pendingExclusions?:readonly PendingProductExclusion[];
 }){
  if(input.admissions.length>500)throw Error('CANONICAL_ADMISSION_BUDGET');
  const invalidations:TwoPersonInvalidation[]=[],producerCodes=new Set<string>();
@@ -27,9 +29,15 @@ export function buildCurveFromCanonicalAdmissions(input:Omit<Parameters<typeof b
   for(const v of r.invalidations){if(v.ingestedAt!==r.ingestedAt)throw Error('INVALIDATION_INGESTION_DRIFT');invalidations.push(v);}
   producerCodes.add(r.producerCodeSha256);pins.add(pin);
  }
+ const pendingExclusions=[...(input.pendingExclusions??[])].sort((a,b)=>digest(a).localeCompare(digest(b))),pendingKeys=new Set<string>();
+ if(pendingExclusions.length>1000)throw Error('PENDING_EXCLUSION_BUDGET');
+ for(const p of pendingExclusions){const product=input.panel.products.find(x=>productDigest(x)===p.sourceProductSha256),key=digest([p.sourceProductSha256,p.stayDate]);
+  if(!product||!hashOk(p.requestSha256)||!/^auto_runner_market_refresh_rotating_\d{8}_\d{6}$/u.test(p.runId)||!/^\d{4}-\d{2}-\d{2}$/u.test(p.stayDate)||!Number.isFinite(Date.parse(p.stayDate+'T00:00:00Z'))||new Date(p.stayDate+'T00:00:00Z').toISOString().slice(0,10)!==p.stayDate||!Number.isFinite(instant(p.attemptedAt))||instant(p.attemptedAt)>instant(input.asOf)||pendingKeys.has(key))throw Error('PENDING_EXCLUSION_BINDING');
+  pendingKeys.add(key);invalidations.push({...product,stayDate:p.stayDate,observedAt:p.attemptedAt,ingestedAt:p.attemptedAt,reason:'PENDING_ATTEMPT_NO_CURRENT_PROOF',sourceEvidenceSha256:digest(p)});
+ }
  const ledger=sealQualityLedger([...entries.values()]);
  const curve=buildTwoPersonCurve({...input,observations:[...facts.values()],invalidations,qualityLedger:ledger,expectedQualitySha256:ledger.ledgerSha256,trustedReceiptSha256:receipts});
  const {curveSha256,...body}=curve;
- const bound={...body,canonicalRoute:'NORMAL_TRUSTED_APPEND_AND_EXACT_MIRROR' as const,canonicalAdmissionSetSha256:digest([...pins].sort()),producerCodeSha256s:[...producerCodes].sort(),producerSetSha256:digest([...producerCodes].sort())};
+ const bound={...body,pendingExclusions,pendingExclusionSetSha256:digest(pendingExclusions),canonicalRoute:'NORMAL_TRUSTED_APPEND_AND_EXACT_MIRROR' as const,canonicalAdmissionSetSha256:digest([...pins].sort()),producerCodeSha256s:[...producerCodes].sort(),producerSetSha256:digest([...producerCodes].sort())};
  return {...bound,curveSha256:digest(bound)};
 }

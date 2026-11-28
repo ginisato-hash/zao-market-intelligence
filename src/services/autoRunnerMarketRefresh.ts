@@ -335,7 +335,8 @@ export interface SourceLevelCheck {
 export function buildBookingSourceLevelCheck(rows: readonly BookingPreviewRow[], maxPages = MAX_BOOKING_PAGES): SourceLevelCheck {
   const screenshots = rows.filter((row) => row.screenshot_path !== "").length;
   const blocked = rows.some((row) => row.warning_flags.some((flag) => /captcha|security|login|blocked/iu.test(flag)));
-  const degraded = rows.some((row) => row.availability_status === "degraded_empty");
+  // An individual empty page is rejected by row policy; an all-empty batch remains source-wide refusal.
+  const degraded = rows.length > 0 && rows.every((row) => row.availability_status === "degraded_empty");
   return sourceLevel({
     source: "booking",
     executed_pages: rows.length,
@@ -695,8 +696,39 @@ function appendIntradayNote(existingNote: string, detail: RowConflictDetail): st
   return existingNote.trim() === "" ? note : `${existingNote} | ${note}`;
 }
 
+// Closed diagnostics from the actual RAM preview, before source-wide rejection.
+// No URL, page text, warning text, new observation time or pricing admission.
+export function buildBookingPreviewRowPolicyDiagnostics(row: BookingPreviewRow) {
+  const availability = new Set(["available_price_basis", "sold_out_or_unavailable", "visible_no_safe_price", "degraded_empty", "blocked_captcha_or_security", "blocked_login_required", "not_found", "navigation_failed", "unexpected_error"]);
+  const date = (value: string) => /^\d{4}-\d{2}-\d{2}$/u.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value ? value : null;
+  const amount = (value: number | null) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000 ? value : null;
+  return {
+    schema: "BOOKING_PREVIEW_ROW_POLICY_DIAGNOSTICS_V1" as const,
+    source: row.source === "booking" ? "booking" : "UNKNOWN",
+    sourcePropertyId: /^[a-z0-9-]{1,96}$/u.test(row.property_slug) ? row.property_slug : null,
+    checkin: date(row.checkin), checkout: date(row.checkout),
+    availabilityStatus: availability.has(row.availability_status) ? row.availability_status : "UNKNOWN",
+    classification: row.classification === "directional" || row.classification === "excluded" ? row.classification : "UNKNOWN",
+    basisConfidence: row.basis_confidence === "directional_candidate_basis" || row.basis_confidence === "insufficient" ? row.basis_confidence : "UNKNOWN",
+    dpUsage: row.dp_usage === "directional_only" || row.dp_usage === "audit_only" ? row.dp_usage : "UNKNOWN",
+    previewDeclaredStayScope: row.stay_scope === "2_adults_1_room_1_night" ? row.stay_scope : "UNKNOWN",
+    tupleEvidence: "PREVIEW_DECLARED_SCOPE_NATIVE_DOCUMENT_PROOF_SEPARATE" as const,
+    primaryAmountJpy: amount(row.primary_price_numeric),
+    officialTaxFeeAdderJpy: amount(row.official_tax_fee_adder_numeric),
+    computedTotalWithTaxFeeJpy: amount(row.computed_total_with_tax_fee),
+    taxBasis: "NOT_RECORDED_IN_PREVIEW" as const,
+    originalCollectedAtJst: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?\+09:00$/u.test(row.collected_at_jst) && Number.isFinite(Date.parse(row.collected_at_jst)) ? row.collected_at_jst : null,
+    timestampRole: "ORIGINAL_RUN_COLLECTED_AT_NOT_PER_PAGE_PRICE_TIME" as const,
+    blockedOrLoginWarning: row.warning_flags.some(flag => /captcha|security|login|blocked/iu.test(flag)),
+    individualRowPolicyRejection: bookingRowPolicyRejection(row),
+    individualPolicyPassIsNotPriceAdmission: true,
+    priceAdmissionMeasured: false
+  };
+}
+
 function bookingRowPolicyRejection(row: BookingPreviewRow): string {
   if (row.source !== "booking") return "source_not_booking";
+  if (row.availability_status === "degraded_empty") return "source_degraded_page_detected";
   if (row.classification !== "directional" && row.classification !== "excluded") return "classification_not_allowed";
   if (row.classification === "directional") {
     if (row.primary_price_numeric === null) return "directional_missing_price";

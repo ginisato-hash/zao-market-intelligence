@@ -7,6 +7,8 @@ import {
   type PlannerStayDateTarget
 } from "../src/services/autoRunnerMarketRefresh";
 
+import { rotatingCollectorClock } from "../src/services/rotatingCollectorClock";
+
 const RUNNER_SOURCE = readFileSync(resolve(__dirname, "../src/scripts/runAutoRunnerMarketRefreshRotating.ts"), "utf8");
 const PLANNER_SOURCE = readFileSync(resolve(__dirname, "../src/services/rotatingCollectionScopePlanner.ts"), "utf8");
 const PACKAGE_JSON = readFileSync(resolve(__dirname, "../package.json"), "utf8");
@@ -145,4 +147,25 @@ describe("AUTO-RUNNER16X-F - daily capacity reporting", () => {
     expect(RUNNER_SOURCE).toContain("buildBookingSourceLevelCheck(bookingRows, caps.booking_pages_per_run)");
     expect(RUNNER_SOURCE).toContain("buildJalanSourceLevelCheck(jalanRows, caps.jalan_pages_per_run)");
   });
+});
+
+
+it("uses one instant for the JST run key and preserves milliseconds through the JST day boundary", () => {
+  expect(rotatingCollectorClock(new Date("2026-11-28T14:59:59.999Z"))).toEqual({
+    exactIso: "2026-11-28T23:59:59.999+09:00", iso: "2026-11-28T23:59:59+09:00",
+    date: "2026-11-28", hour: 23, runStamp: "20261128_235959"
+  });
+  expect(rotatingCollectorClock(new Date("2026-11-28T15:00:00.001Z"))).toEqual({
+    exactIso: "2026-11-29T00:00:00.001+09:00", iso: "2026-11-29T00:00:00+09:00",
+    date: "2026-11-29", hour: 0, runStamp: "20261129_000000"
+  });
+});
+
+it("keeps the legacy scope clock in the same JST wall hour while the request uses a fresh clock", () => {
+  const sample = new Date("2026-11-27T21:00:05.923Z");
+  const clock = rotatingCollectorClock(sample);
+  expect(clock.exactIso).toBe("2026-11-28T06:00:05.923+09:00");
+  expect(Date.parse(clock.exactIso)).toBe(sample.getTime());
+  expect(RUNNER_SOURCE).toContain("nowIso: jst.exactIso");
+  expect(RUNNER_SOURCE).toContain("resolvePricingQuoteLane(env,{now:()=>new Date()");
 });

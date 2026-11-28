@@ -56,8 +56,7 @@ it('rejects a same-name dialog opened in another container', async () => {
   const page = await fixture('other-container');
   try {
     const cap = await captureBookingRateCells(page, input, 1);
-    expect(cap.cells).toHaveLength(1); expect(cap.cells[0]?.policyText).toBeNull();
-    expect(deriveBookingRateCell(cap, cap.cells[0]!).tupleAndProductBound).toBe(false);
+    expect(cap.cells).toHaveLength(0);expect(cap.problems).toContain('CAPTURE_UNVERIFIED');
   } finally { await page.close(); }
 });
 
