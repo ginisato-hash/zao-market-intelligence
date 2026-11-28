@@ -152,11 +152,20 @@ describe("AUTO-RUNNER16X-F - daily capacity reporting", () => {
 
 it("uses one instant for the JST run key and preserves milliseconds through the JST day boundary", () => {
   expect(rotatingCollectorClock(new Date("2026-11-28T14:59:59.999Z"))).toEqual({
-    exactIso: "2026-11-28T14:59:59.999Z", iso: "2026-11-28T23:59:59+09:00",
+    exactIso: "2026-11-28T23:59:59.999+09:00", iso: "2026-11-28T23:59:59+09:00",
     date: "2026-11-28", hour: 23, runStamp: "20261128_235959"
   });
   expect(rotatingCollectorClock(new Date("2026-11-28T15:00:00.001Z"))).toEqual({
-    exactIso: "2026-11-28T15:00:00.001Z", iso: "2026-11-29T00:00:00+09:00",
+    exactIso: "2026-11-29T00:00:00.001+09:00", iso: "2026-11-29T00:00:00+09:00",
     date: "2026-11-29", hour: 0, runStamp: "20261129_000000"
   });
+});
+
+it("keeps the legacy scope clock in the same JST wall hour while the request uses a fresh clock", () => {
+  const sample = new Date("2026-11-27T21:00:05.923Z");
+  const clock = rotatingCollectorClock(sample);
+  expect(clock.exactIso).toBe("2026-11-28T06:00:05.923+09:00");
+  expect(Date.parse(clock.exactIso)).toBe(sample.getTime());
+  expect(RUNNER_SOURCE).toContain("nowIso: jst.exactIso");
+  expect(RUNNER_SOURCE).toContain("resolvePricingQuoteLane(env,{now:()=>new Date()");
 });
