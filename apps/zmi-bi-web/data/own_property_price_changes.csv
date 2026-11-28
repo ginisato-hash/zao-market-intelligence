@@ -163,7 +163,6 @@ own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-01,19080,17172,-1908,-0
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-02,19080,17172,-1908,-0.1,down,2026-11-21T13:35:06+09:00,2026-11-26T04:00:07+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-07,19843,19080,-763,-0.0385,down,2026-11-23T13:35:00+09:00,2026-11-27T04:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-08,19080,17172,-1908,-0.1,down,2026-11-24T13:35:06+09:00,2026-11-28T02:00:03+09:00
-own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-09,19843,19080,-763,-0.0385,down,2026-11-23T13:35:00+09:00,2026-11-24T13:35:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-11,30429,83375,52946,1.74,up,2026-11-04T06:00:06+09:00,2026-11-14T14:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-12,38036,41840,3804,0.1,up,2026-11-04T04:00:05+09:00,2026-11-14T16:00:04+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2026-12-13,31516,34667,3151,0.1,up,2026-11-04T18:00:06+09:00,2026-11-14T18:00:03+09:00
@@ -181,6 +180,7 @@ own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-06,54076,38
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-07,29330,55696,26366,0.8989,up,2026-11-05T13:35:05+09:00,2026-11-25T20:00:06+09:00
 own_property,miuraya,三浦屋 / Miuraya,booking,2027-01-08,34776,51507,16731,0.4811,up,2026-10-27T06:00:06+09:00,2026-11-06T13:35:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-09,57510,97200,39690,0.6901,up,2026-11-16T20:00:06+09:00,2026-11-28T08:00:07+09:00
+own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-10,53460,105989,52529,0.9826,up,2026-11-17T02:00:03+09:00,2026-11-28T12:00:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-11,35741,46805,11064,0.3096,up,2026-11-07T14:00:05+09:00,2026-11-17T04:00:06+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-18,46802,66031,19229,0.4109,up,2026-10-29T10:00:06+09:00,2026-11-19T00:00:01+09:00
 own_property,kiraku,喜らく / ZAO SPA HOTEL Kiraku,booking,2027-01-19,66031,64051,-1980,-0.03,down,2026-10-29T12:00:06+09:00,2026-11-25T10:00:06+09:00
